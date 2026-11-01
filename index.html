@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Notile</title>
+<meta name="description" content="Free browser-based tools for dental clinicians: clinical notes, charting, nurse set-up lists and lab card design.">
+<style>
+:root{--navy:#0B2E4A;--teal:#1C7293;--teal2:#3FA9A0;--bg:#F3F7F9;--card:#FFFFFF;--fg:#10273A;--muted:#566C7D;--line:#D5E0E7;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--navy:#CFE2EE;--teal:#4FB3C9;--teal2:#5CC3B7;--bg:#08141D;--card:#0F2130;--fg:#E3ECF2;--muted:#93A9B9;--line:#24394A;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+main{max-width:960px;margin:0 auto;padding:56px max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px))}
+h1{margin:0;font-family:Cambria,Georgia,serif;font-size:2.4rem;color:var(--navy);letter-spacing:-.01em}
+h1 span{color:var(--teal2)}
+.lead{margin:8px 0 36px;color:var(--muted);max-width:56ch}
+.apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+a.app{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}
+a.app:hover{border-color:var(--teal)}
+a.app:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+@media (prefers-reduced-motion:no-preference){a.app:hover{transform:translateY(-2px)}}
+.ico{width:56px;height:56px;border-radius:14px;background:var(--navy);display:grid;place-items:center}
+@media (prefers-color-scheme:dark){.ico{background:#163A55}}
+.ico svg{width:32px;height:32px}
+.app b{font-size:1.1rem;color:var(--navy)}
+.app small{color:var(--muted);font-size:.9rem}
+footer{margin-top:40px;font-size:.85rem;color:var(--muted);max-width:70ch}
+</style>
+</head>
+<body>
+<main>
+<h1>Noti<span>le</span></h1>
+<p class="lead">Browser-based tools for dental clinicians. Nothing is sent anywhere: everything runs and saves on your own device.</p>
+<nav class="apps" aria-label="Apps">
+<a class="app" href="/notile/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="18" height="24" rx="3"/><path d="M11 11h10M11 16h10M11 21h6"/></svg></span><b>Notile</b><small>Tap-through clinical note templates</small></a>
+<a class="app" href="/notile/chart/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16h24M16 5v22"/><rect x="7" y="8" width="5" height="5" rx="1"/><rect x="20" y="8" width="5" height="5" rx="1"/><rect x="7" y="19" width="5" height="5" rx="1"/><rect x="20" y="19" width="5" height="5" rx="1"/></svg></span><b>Notile Chart</b><small>Dental charting and 6PPC perio charting</small></a>
+<a class="app" href="/set-app/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l2 2 4-4M8 17l2 2 4-4M8 25l2 2 4-4M18 9h7M18 17h7M18 25h7"/></svg></span><b>Dental Set-App</b><small>Nurse surgery set-up lists, shared by QR code</small></a>
+<a class="app" href="/chrome-card/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12c0 8 4 14 10 14s10-6 10-14"/><path d="M10 12h12M9 18h14"/></svg></span><b>Chrome Card</b><small>Cobalt-chrome and acrylic denture design</small></a>
+<a class="app" href="/ortho-card/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18c3-6 19-6 22 0"/><path d="M8 18v-3M12 16v-3M16 15v-3M20 16v-3M24 18v-3"/><path d="M6 22c4 3 16 3 20 0"/></svg></span><b>Ortho Card</b><small>Orthodontic appliance lab card design</small></a>
+</nav>
+<footer>These tools are writing and recording aids, not clinical decision tools. Check every note, chart and design before it goes into the record or to the lab; the clinician remains responsible for its accuracy. Do not enter patient names, CHI or hospital numbers.</footer>
+</main>
+</body>
+</html>
