@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en-GB">
 <head>
-<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Notile</title>
@@ -28,6 +28,11 @@ a.app:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
 .signout{margin:28px 0 0}.signout a{color:var(--teal);font-weight:600}
 footer{margin-top:40px;font-size:.85rem;color:var(--muted);max-width:70ch}
 </style>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Notile">
 </head>
 <body>
 <main>
@@ -43,5 +48,6 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted);max-width:70ch}
 <p class="signout"><a href="/cdn-cgi/access/logout">Sign out</a></p>
 <footer>These tools are writing and recording aids, not clinical decision tools. Check every note, chart and design before it goes into the record or to the lab; the clinician remains responsible for its accuracy. Do not enter patient names, CHI or hospital numbers.</footer>
 </main>
+<script>if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
 </body>
 </html>
