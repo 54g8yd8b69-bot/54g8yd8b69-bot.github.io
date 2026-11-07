@@ -1,6 +1,6 @@
 /* Notile service worker: network first, so updates show straight away; the last good copy is used when offline. */
 const CACHE='notile-v1';
-const PRECACHE=['/','/notile/','/notile/chart/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/',
+const PRECACHE=['/','/notile/','/notile/chart/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/','/dentalaudit/',
   '/fonts/fonts.css','/set-app/vendor/qrcode-generator-1.4.4.js','/manifest.webmanifest','/icons/icon-192.png'];
 const ok=r=>r&&r.ok&&r.type==='basic'&&!r.redirected;
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>Promise.allSettled(PRECACHE.map(u=>fetch(u,{cache:'no-cache',credentials:'same-origin'}).then(r=>ok(r)?c.put(u,r):null)))))});

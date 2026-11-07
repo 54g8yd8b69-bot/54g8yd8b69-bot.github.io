@@ -1,0 +1,28 @@
+/* DentalAudit — print styles (Reports → Print / PDF) */
+@page { margin: 16mm; }
+
+body { background: #fff; }
+.sidebar, .topbar, .scrim, .toasts, .modal-root, .no-print, .page-head { display: none !important; }
+.shell { margin: 0 !important; height: auto !important; }
+.main { overflow: visible !important; }
+.view { padding: 0 !important; max-width: none !important; animation: none !important; }
+.card { box-shadow: none !important; }
+.report { border: 0 !important; box-shadow: none !important; padding: 0 !important; max-width: none !important; }
+.report__sec, .report__table tr { break-inside: avoid; }
+.pill, .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+a { color: inherit; }
+
+/* ---------- Report preview (Reports → Preview → Print) ---------- */
+@page { size: A4; margin: 18mm 18mm 20mm;
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 8pt Inter, Helvetica, Arial, sans-serif; color: #6b7489; }
+}
+@page:first { @bottom-right { content: none; } }
+.pv-bar, .re-head, .re-nav, .re-side, .re-toolbar, .re-banner, .alert { display: none !important; }
+.pv-paper { border: 0 !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }
+.pv-paper .doc-sec { border-top: 0 !important; padding-top: 0 !important; break-before: page; }
+.doc-title { min-height: 240mm !important; border-bottom: 0 !important; break-after: page; }
+.doc-toc { break-after: page; border-bottom: 0 !important; }
+.doc-table tr, .doc-figure, .doc-kpis, .doc-caption { break-inside: avoid; }
+.doc-caption, .doc h2, .doc h3, .doc h4 { break-after: avoid; }
+.doc-table thead { display: table-header-group; }
+.doc-table th, .doc-table tbody tr:nth-child(even) td, .doc-total td, .doc-kpi, .doc .ph, .doc-aiflag { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
