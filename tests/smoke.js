@@ -37,4 +37,7 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#exportTop');await pg.click('#expView button[data-v="report"]');
     const w=await pg.evaluate(()=>lastCanvas.width);expect(w===1240,'report not rendered');
     expect((await pg.request.get(BASE+'/smile-card/manifest.webmanifest')).ok(),'Smile Card manifest missing');await noErrors(pg)});
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card']])
+    await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
+      await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});
