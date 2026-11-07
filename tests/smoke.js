@@ -8,10 +8,12 @@ run({name:'Landing page',fn:async()=>{
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
     for(const i of m.icons)expect((await pg.request.get(BASE+i.src)).ok(),'icon missing '+i.src)});
   await test('service worker installs',async()=>{const pg=await page('/');const ok=await pg.evaluate(async()=>{await navigator.serviceWorker.ready;return !!(await navigator.serviceWorker.getRegistration())});expect(ok,'no service worker')});
-  await test('DentMat opens with its catalogue and no errors',async()=>{const pg=await page('/dentmat/');
+  await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');
-    expect((await pg.request.get(BASE+'/dentmat/manifest.webmanifest')).ok(),'DentMat manifest missing');await noErrors(pg)});
+    expect((await pg.request.get(BASE+'/dentmat/manifest.webmanifest')).ok(),'DentMat manifest missing');await noErrors(pg);
+    await pg.goto(BASE+'/dentmat/#/materials');await pg.waitForTimeout(400);
+    await Promise.all([pg.waitForURL(BASE+'/'),pg.click('header a.brand')]);expect(await pg.locator('a.app[href="/dentmat/"]').count()===1,'logo did not return to the launcher')});
   await test('DentalAudit opens with its dashboard and no errors',async()=>{const pg=await page('/dentalaudit/');
     await pg.waitForFunction(()=>window.DA&&DA.store&&document.querySelectorAll('.metric').length===4,null,{timeout:15000});
     const n=await pg.evaluate(()=>DA.store.getAudits().length);expect(n>=5,'only '+n+' audits');
