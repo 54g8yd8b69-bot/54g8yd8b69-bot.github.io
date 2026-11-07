@@ -1,0 +1,1516 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Smile Card</title>
+<meta name="description" content="Smile Card: 2D digital smile design on clinical photos. Runs and saves on your own device.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Smile Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+/* Layout: step bar on top, tool rail left, photo stage centre with a layer rail; stacks on phones. */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4;
+  --accent:var(--teal); --accent-fg:#FFFFFF;
+  --f-display:"Caladea", Cambria, Georgia, serif;
+  --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, sans-serif;
+  --f-mono:ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836;
+  --accent:#3FA9A0; --accent-fg:#06161A; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836;
+  --accent:#3FA9A0; --accent-fg:#06161A; color-scheme:dark }
+[hidden]{display:none!important}
+body{margin:0}img{max-width:100%}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px}
+.app{display:grid;grid-template-rows:auto 1fr;height:100%}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--navy);color:#fff}
+header .home{color:#A9C6D6;text-decoration:none;font-weight:600;font-size:13px}header .home:hover{color:#fff}
+header h1{font-family:var(--f-display);font-weight:600;font-size:20px;margin:0}
+.steps{display:flex;gap:2px;flex:1;justify-content:center;min-width:0}
+.steps button{font:500 13px var(--f-body);color:#A9C6D6;background:#123A5A;border:0;padding:8px 14px;cursor:pointer;display:flex;gap:8px;align-items:center;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,10px 50%)}
+.steps button:first-child{clip-path:polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%);border-radius:6px 0 0 6px}
+.steps button .n{font:500 11px var(--f-mono);width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:1px solid currentColor}
+.steps button[aria-current=step]{background:var(--mint);color:#06161A}
+.steps button.done .n{background:#A9C6D6;color:var(--navy);border-color:#A9C6D6}
+.btn{font:500 13px var(--f-body);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{border-color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+header .btn{background:var(--mint);border-color:var(--mint);color:#06161A}
+.btn:focus-visible,.seg button:focus-visible,select:focus-visible,input:focus-visible,.steps button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+main{display:grid;grid-template-columns:270px 1fr;min-height:0}
+aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;min-height:0}
+section{padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:16px;border-bottom:1px solid var(--line);display:grid;gap:10px}
+section h2{margin:0;font:600 18px var(--f-display)}
+section h3{margin:0;font:600 11px var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.sub{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0}
+.seg{display:flex;background:var(--chip);border-radius:8px;padding:3px;gap:3px}
+.seg button{flex:1;font:500 12.5px var(--f-body);border:0;background:transparent;color:var(--fg);padding:8px 4px;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+.seg button svg{width:20px;height:20px}
+.seg button[aria-pressed=true]{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.18);color:var(--accent)}
+.check{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:500}
+.check input{accent-color:var(--accent);width:17px;height:17px}
+select{width:100%;font:500 13px var(--f-body);padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.lbl{font-weight:500;font-size:13px}
+.act{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mmrow{display:flex;gap:8px;align-items:center}
+.mmrow input{width:90px;font:500 15px var(--f-mono);padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.anopts{display:grid;gap:9px}
+.sens{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center}
+.sens input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.txt{width:100%;box-sizing:border-box;font:500 13px var(--f-body);padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.drow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lmgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.lmgrid button{font:500 12px var(--f-body);text-align:left;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:7px 8px;cursor:pointer;display:flex;gap:6px;align-items:center}
+.lmgrid button .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+.lmgrid button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent)}
+.swatches{display:flex;gap:8px}
+.swatches button{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
+.swatches button[aria-pressed=true]{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+#logoPrev{max-height:48px;max-width:160px;object-fit:contain;justify-self:start;background:#fff;border-radius:6px;padding:4px}
+.pad{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.pad button,.adj button{font:600 15px var(--f-body);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:7px 0;cursor:pointer}
+.pad button:hover,.adj button:hover{border-color:var(--accent)}
+.adj{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px 8px;align-items:center}
+.adj span{font-size:12.5px;color:var(--muted)}
+.sl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center}
+.sl output{font:500 12px var(--f-mono);color:var(--muted)}
+.sl input{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sgrid button{border:1px solid var(--line);background:#2A1215;border-radius:8px;padding:0;cursor:pointer;overflow:hidden;display:grid}
+.sgrid button canvas{width:100%;height:auto;display:block}
+.sgrid button span{font:500 11px var(--f-body);color:var(--fg);background:var(--panel);padding:4px 2px}
+.sgrid button[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.chips{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.chips button{font:500 11.5px var(--f-mono);border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;padding:6px 0;cursor:pointer;text-decoration:line-through}
+.chips button[aria-pressed=true]{color:var(--fg);border-color:var(--accent);text-decoration:none}
+#mode button{font-size:11.5px;padding:7px 2px}
+.layers .gbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+.layers .gbtns button{font:500 11px var(--f-body);background:#16232F;color:#DDE6EC;border:1px solid #2A3946;border-radius:6px;padding:6px 4px;cursor:pointer}
+.plist{display:grid;gap:6px}
+.prow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px}
+.prow[aria-current=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.prow img{width:56px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;background:#000}
+.prow select{padding:6px;font-size:12px}
+.prow button{border:0;background:transparent;color:var(--muted);font-size:16px;cursor:pointer;padding:4px 6px}
+.visa{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.visa button{font:500 12px var(--f-body);text-align:left;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:7px 8px;cursor:pointer}
+.visa button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.sgrid button.sug{outline:2px dashed var(--accent);outline-offset:1px}
+.bl{position:absolute;bottom:10px;left:max(10px,env(safe-area-inset-left,0px));display:flex;gap:6px;align-items:center}
+.bl .badge{position:static}
+.bl select{font:500 12px var(--f-body);background:rgba(12,20,28,.85);color:#E9EEF2;border:1px solid #2A3946;border-radius:8px;padding:6px;width:auto}
+#vidModal video{width:100%;max-height:60vh;background:#000;border-radius:6px}
+.readout{font:500 12.5px var(--f-mono);font-variant-numeric:tabular-nums;display:grid;grid-template-columns:1fr auto;gap:4px 10px}
+.readout span:nth-child(odd){font-family:var(--f-body);color:var(--muted)}
+.stage{position:relative;background:#0A0F14;min-height:0;overflow:hidden}
+canvas#cv{display:block;width:100%;height:100%;touch-action:none;cursor:default}
+.prompt{position:absolute;top:12px;left:50%;transform:translateX(-50%);font:400 clamp(14px,2vw,20px) var(--f-body);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6);text-align:center;width:min(90%,640px);pointer-events:none}
+.badge{position:absolute;bottom:10px;left:max(10px,env(safe-area-inset-left,0px));font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:#F3C677;background:rgba(40,28,8,.75);border:1px solid #6B5320;padding:5px 8px;border-radius:6px}
+.layers{position:absolute;top:54px;right:max(10px,env(safe-area-inset-right,0px));background:rgba(10,18,26,.82);border:1px solid #26384A;border-radius:10px;padding:10px;display:grid;gap:6px;color:#DDE6EC;font-size:12px;width:168px}
+.layers label{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer}
+.layers input[type=checkbox]{accent-color:var(--mint)}
+.layers input[type=range]{width:100%;accent-color:var(--mint)}
+.layers .t{font:600 10.5px var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:#8FA3B3}
+.zoom{position:absolute;bottom:10px;right:max(10px,env(safe-area-inset-right,0px));display:flex;gap:6px}
+.zoom button,.layers-toggle{font:500 12px var(--f-body);background:rgba(12,20,28,.8);color:#E9EEF2;border:1px solid #2A3946;border-radius:8px;padding:7px 10px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.layers-toggle{position:absolute;top:12px;right:max(10px,env(safe-area-inset-right,0px))}
+.modal{position:fixed;inset:0;background:rgba(5,10,15,.72);display:grid;place-items:center;z-index:20;padding:16px}
+.modal .card{background:var(--panel);color:var(--fg);border-radius:12px;max-width:960px;width:100%;max-height:100%;overflow:auto;padding:16px;display:grid;gap:12px}
+.modal img{width:100%;border-radius:6px;background:#000}
+.modal h3{margin:0;font:600 18px var(--f-display)}
+.modal textarea{width:100%;min-height:120px;font:13px/1.5 var(--f-mono);border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);color:var(--fg);box-sizing:border-box}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 14px;border-radius:8px;font-weight:500;z-index:30}
+@media (max-width:860px){
+  html,body{height:auto}
+  .app{height:auto;display:block}
+  main{display:flex;flex-direction:column-reverse}
+  .stage{height:64svh;min-height:360px}
+  aside{border-right:0;overflow:visible}
+  .steps{order:3;flex-basis:100%}
+  .steps button{flex:1;justify-content:center;padding:8px 6px}
+  .layers{top:52px}
+  .prompt{left:12px;right:90px;transform:none;width:auto;text-align:left;font-size:13px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <a class="home" href="/" aria-label="Back to Notile">‹ Notile</a>
+    <h1>Smile Card</h1>
+    <nav class="steps" aria-label="Workflow">
+      <button data-step="photo"><span class="n">1</span>Photo</button>
+      <button data-step="face"><span class="n">2</span>Face</button>
+      <button data-step="measure"><span class="n">3</span>Measurement</button>
+      <button data-step="design"><span class="n">4</span>Smile design</button>
+    </nav>
+    <button class="btn" id="exportTop">Export</button>
+  </header>
+  <main>
+    <aside>
+      <!-- PHOTO -->
+      <section data-panel="photo">
+        <h2>Photo</h2>
+        <p class="sub">Start with a full-face photo at maximum smile, taken square to the face. You can swap to lip-at-rest or retracted views later; the design and scale stay in place.</p>
+        <label class="btn primary" for="file">Add photo or video</label>
+        <input id="file" type="file" accept="image/*,video/*" hidden>
+        <p class="sub">A smile video lets you scrub to the most natural full smile and use that frame, which is how DSD uses dynamic analysis.</p>
+        <h3>Case photos</h3>
+        <p class="sub">DSD's core set: frontal smile, lips at rest, retracted, 12 o'clock and profile. The design shows on the frontal views.</p>
+        <div class="plist" id="photoList"></div>
+        <button class="btn" id="toFace">Next: face analysis</button>
+      </section>
+      <section data-panel="photo">
+        <h3>Cases on this device</h3>
+        <p class="sub">Saved in this browser only, including the photos. Nothing is uploaded. Only use a device your trust's policy allows for patient images.</p>
+        <div class="act"><button class="btn primary" id="caseSave">Save case</button><button class="btn" id="caseNew">New case</button></div>
+        <div class="plist" id="caseList"></div>
+        <h3>Case notes</h3>
+        <textarea id="caseNotes" class="txt" rows="3" placeholder="Concerns, expectations, plan. No patient names, CHI or hospital numbers."></textarea>
+      </section>
+      <section data-panel="photo">
+        <h3>Clinic details</h3>
+        <p class="sub">Shown on exported images and reports. Saved on this device only.</p>
+        <input id="clinicName" class="txt" placeholder="Clinic or department name" aria-label="Clinic name">
+        <div class="drow"><label class="btn" for="logoFile">Add logo</label><button class="btn" id="logoClear">Remove logo</button></div>
+        <input id="logoFile" type="file" accept="image/*" hidden>
+        <img id="logoPrev" alt="Clinic logo" hidden>
+      </section>
+      <!-- FACE -->
+      <section data-panel="face">
+        <h2 id="faceTitle">Face analysis</h2>
+        <p class="sub" id="faceHelp">Mark the landmarks on a full-face photo. Pick one below, then tap the photo, or drag the points.</p>
+        <label class="check" for="faceOn">Use face analysis <input id="faceOn" type="checkbox"></label>
+        <div class="lmgrid" id="lmList"></div>
+        <div class="readout" id="faceRead"></div>
+        <div class="drow"><button class="btn" id="faceReset">Reset points</button><button class="btn primary" id="toMeasure">Next</button></div>
+      </section>
+      <!-- MEASURE -->
+      <section data-panel="measure">
+        <h2>Measurement</h2>
+        <p class="sub">Drag the arrow ends across a tooth you know the width of, usually a central incisor, then enter that width.</p>
+        <span class="lbl">Measure (mm)</span>
+        <div class="mmrow"><input id="mm" type="number" min="0" step="0.1" placeholder="e.g. 8.5" aria-label="Measured width in mm"><button class="btn" id="clearMeas" aria-label="Clear measurement">Clear</button></div>
+        <p class="sub" id="scaleMsg"></p>
+        <button class="btn primary" id="toDesign">Next: smile design</button>
+      </section>
+      <!-- DESIGN -->
+      <section data-panel="design">
+        <h2>Smile design</h2>
+        <div class="seg" id="mode" role="group" aria-label="Edit mode">
+          <button data-v="transform"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3c-3 0-4 3-4 7s1 8 3 10 3-2 4-2 2 3 4 2 3-6 3-10-1-7-4-7c-2 0-2 1-3 1S9 3 7 3z"/><path d="M17 15v6M14 18h6"/></svg>Transform</button>
+          <button data-v="outline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3c-3 0-4 3-4 7s1 8 3 10 3-2 4-2 2 3 4 2 3-6 3-10-1-7-4-7c-2 0-2 1-3 1S10 3 8 3z"/><circle cx="4" cy="10" r="1.6" fill="currentColor"/><circle cx="18" cy="10" r="1.6" fill="currentColor"/><circle cx="11" cy="3.5" r="1.6" fill="currentColor"/></svg>Outline</button>
+          <button data-v="draw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/><path d="M14 7l3 3"/></svg>Draw</button>
+          <button data-v="lips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 12c3-4 6-5 10-3 4-2 7-1 10 3-3 5-7 7-10 7S5 17 2 12z"/><path d="M2 12h20"/></svg>Lips</button>
+          <button data-v="ruler"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/></svg>Ruler</button>
+        </div>
+        <p class="sub" id="modeHint"></p>
+        <div id="lipOpts" class="anopts" hidden>
+          <div class="act"><button class="btn primary" id="lipDetect">Detect lips</button><button class="btn" id="lipReset">Reset contour</button></div>
+          <button class="btn" id="lipDel" disabled>Delete selected point</button>
+          <label class="check" for="lipClip">Keep mock-up inside lips <input id="lipClip" type="checkbox"></label>
+          <label class="check" for="hideTeeth">Hide patient teeth <input id="hideTeeth" type="checkbox"></label>
+          <p class="sub">Hide patient teeth shows only the design inside the lips, useful when the design is shorter than the existing teeth.</p>
+        </div>
+        <div id="rulerOpts" class="anopts" hidden>
+          <button class="btn" id="rulerClear">Clear rulers</button>
+        </div>
+        <div id="frameNudge" class="anopts" hidden>
+          <span class="lbl">Position smile frame</span>
+          <div class="pad" id="framePad"><button data-d="l" aria-label="Move left">←</button><button data-d="u" aria-label="Move up">↑</button><button data-d="d" aria-label="Move down">↓</button><button data-d="r" aria-label="Move right">→</button></div>
+        </div>
+        <div id="toothAdj" class="anopts" hidden>
+          <span class="lbl" id="toothAdjT"></span>
+          <div class="pad" id="toothPad"><button data-d="l" aria-label="Move tooth left">←</button><button data-d="u" aria-label="Move tooth up">↑</button><button data-d="d" aria-label="Move tooth down">↓</button><button data-d="r" aria-label="Move tooth right">→</button></div>
+          <div class="adj" id="toothOps">
+            <span>Height</span><button data-op="h-">−</button><button data-op="h+">+</button>
+            <span>Width</span><button data-op="w-">−</button><button data-op="w+">+</button>
+            <span>Size</span><button data-op="s-">−</button><button data-op="s+">+</button>
+            <span>Rotate</span><button data-op="r-" aria-label="Rotate anticlockwise">↺</button><button data-op="r+" aria-label="Rotate clockwise">↻</button>
+          </div>
+          <label class="check" for="groupAdj">Group: apply to all designed teeth <input id="groupAdj" type="checkbox"></label>
+          <button class="btn" id="reflect">Reflect to other side</button>
+        </div>
+        <div id="drawOpts" class="anopts" hidden>
+          <div class="swatches" id="swatches" role="group" aria-label="Pen colour">
+            <button data-c="#FF3B30" style="background:#FF3B30" aria-label="Red"></button><button data-c="#FFD23F" style="background:#FFD23F" aria-label="Yellow"></button><button data-c="#3FE0C5" style="background:#3FE0C5" aria-label="Teal"></button><button data-c="#FFFFFF" style="background:#FFFFFF" aria-label="White"></button><button data-c="#111111" style="background:#111111" aria-label="Black"></button>
+          </div>
+          <div class="seg" id="drawTool" role="group" aria-label="Drawing tool"><button data-v="pen">Pen</button><button data-v="line">Line</button><button data-v="arrow">Arrow</button></div>
+          <div class="seg" id="drawW" role="group" aria-label="Line weight"><button data-v="2">Fine</button><button data-v="4">Medium</button><button data-v="8">Bold</button></div>
+          <div class="act"><button class="btn" id="drawUndo">Remove last mark</button><button class="btn" id="drawClear">Clear drawing</button></div>
+        </div>
+        <label class="check" for="sym">Symmetric design <input id="sym" type="checkbox"></label>
+        <label class="check" for="link">Linked lines <input id="link" type="checkbox"></label>
+      </section>
+      <section data-panel="design">
+        <h3>Design options</h3>
+        <p class="sub">Keep several designs for the same patient to compare treatment options.</p>
+        <div class="drow"><select id="designSel" aria-label="Current design"></select><input id="designName" class="txt" aria-label="Design name"></div>
+        <div class="act"><button class="btn" id="designDup">Duplicate</button><button class="btn" id="designNew">New design</button></div>
+        <button class="btn" id="designDel">Delete this design</button>
+      </section>
+      <section data-panel="design">
+        <h3>Smile frame</h3>
+        <p class="sub">Orange dashed line: the patient's real dental midline (drag its diamond). White line: your ideal midline. Pink dotted band: ideal papilla zone, 30–50% from the cervical.</p>
+        <div class="readout" id="frameRead"></div>
+        <button class="btn" id="alignFace">Align design to face</button>
+        <p class="sub">Lower lip: trace the upper border of the lower lip at full smile, then make the incisal curve follow it for a consonant smile arc.</p>
+        <div class="act"><button class="btn" id="lipAdd">Add lower lip line</button><button class="btn" id="lipFollow">Follow lower lip</button></div>
+        <div class="sl"><span class="lbl">Papilla height</span><output id="papO"></output><input id="papS" type="range" min="20" max="60" step="1" aria-label="Papilla height as percent of crown length"></div>
+        <div class="sl"><span class="lbl">Arch width (narrow ⟷ wide)</span><output id="archO"></output><input id="archS" type="range" min="-10" max="10" step="1" aria-label="Arch width"></div>
+        <span class="lbl">Teeth to design</span>
+        <div class="chips" id="toothChips"></div>
+        <p class="sub">Tap a tooth to leave it out, for single-tooth or 2–2 cases.</p>
+        <p class="sub" id="chgHint"></p>
+      </section>
+      <section data-panel="design">
+        <h3>Auto-align to photo</h3>
+        <p class="sub">Place the outline roughly over the teeth, then analyse. Smile Card finds the gingival margins, incisal edges and contact points and fits the design to them.</p>
+        <button class="btn primary" id="analyse">Analyse photo</button>
+        <p class="sub" id="anStatus"></p>
+        <div class="anopts">
+          <label class="check" for="anCerv">Gingival margins → cervical line <input id="anCerv" type="checkbox"></label>
+          <label class="check" for="anInc">Incisal edges → incisal line <input id="anInc" type="checkbox"></label>
+          <label class="check" for="anCont">Midline &amp; contact points <input id="anCont" type="checkbox"></label>
+          <label class="check" for="anWidths">Use existing tooth widths <input id="anWidths" type="checkbox"></label>
+          <label class="check" for="anEach">Fit each tooth individually <input id="anEach" type="checkbox"></label>
+          <p class="sub">Untick incisal edges when you are planning new incisal length, for example on worn teeth.</p>
+          <div class="sens"><span class="lbl">Tooth detection</span><input id="anSens" type="range" min="-20" max="20" step="1" aria-label="Tooth detection sensitivity"><span class="sub">More ⟷ less</span></div>
+          <label class="check" for="anMask">Show tooth &amp; gum map <input id="anMask" type="checkbox"></label>
+          <div class="act"><button class="btn primary" id="anApply">Apply alignment</button><button class="btn" id="anClear">Hide analysis</button></div>
+        </div>
+      </section>
+      <section data-panel="design">
+        <h3>Mock-up colour</h3>
+        <div class="seg" id="viewMode" role="group" aria-label="Tooth display"><button data-v="outline">Outlines</button><button data-v="colour">Colour</button><button data-v="both">Both</button></div>
+        <div class="seg" id="shadeSel" role="group" aria-label="Shade"><button data-v="BL2">BL2</button><button data-v="B1">B1</button><button data-v="A1">A1</button><button data-v="A2">A2</button><button data-v="A3">A3</button></div>
+        <div class="seg" id="texSel" role="group" aria-label="Surface texture"><button data-v="smooth">Smooth</button><button data-v="natural">Natural</button><button data-v="characterised">Characterised</button></div>
+        <div class="sl"><span class="lbl">Value (brightness)</span><output id="brO"></output><input id="brS" type="range" min="-15" max="15" step="1" aria-label="Mock-up value"></div>
+        <div class="sl"><span class="lbl">Chroma</span><output id="chO"></output><input id="chS" type="range" min="-10" max="10" step="1" aria-label="Mock-up chroma"></div>
+        <div class="sl"><span class="lbl">Hue (cool ⟷ warm)</span><output id="huO"></output><input id="huS" type="range" min="-10" max="10" step="1" aria-label="Mock-up hue"></div>
+        <label class="check" for="gumSim">Simulate gingiva &amp; papillae <input id="gumSim" type="checkbox"></label>
+        <div class="seg" id="gumSel" role="group" aria-label="Gingiva colour"><button data-v="auto">From photo</button><button data-v="light">Light</button><button data-v="coral">Coral</button><button data-v="deep">Deep</button></div>
+        <p class="sub">Shades approximate Vita tabs for patient communication only; take the final shade clinically.</p>
+      </section>
+      <section data-panel="design">
+        <h3>Smile style</h3>
+        <span class="lbl">Visagism: how does the patient want to come across?</span>
+        <div class="visa" id="visaSel"><button data-v="strong">Strong</button><button data-v="dynamic">Dynamic</button><button data-v="sensitive">Sensitive</button><button data-v="peaceful">Peaceful</button></div>
+        <p class="sub" id="visaTxt">Pick a temperament to highlight matching styles.</p>
+        <div class="sgrid" id="styleGrid" role="group" aria-label="Smile style"></div>
+        <p class="sub" id="libDesc"></p>
+        <span class="lbl">Mix shapes</span>
+        <div class="drow"><span class="sub">Centrals</span><select id="mixC" aria-label="Central incisor shape"></select></div>
+        <div class="drow"><span class="sub">Laterals</span><select id="mixL" aria-label="Lateral incisor shape"></select></div>
+        <div class="drow"><span class="sub">Canines &amp; premolars</span><select id="mixK" aria-label="Canine and premolar shape"></select></div>
+        <select id="lib" aria-label="Basic tooth shapes">
+          <optgroup label="Basic shapes"><option value="natural">Natural ovoid</option><option value="square">Square</option><option value="tapering">Tapering</option><option value="youthful">Youthful (rounded)</option></optgroup>
+          <optgroup label="Smile styles" id="styleOpts"></optgroup>
+        </select>
+        <h3>Width proportion</h3>
+        <select id="prop" aria-label="Width proportion">
+          <option value="natural">Style's own proportions</option>
+          <option value="golden">Golden proportion (61.8%)</option>
+          <option value="red70">RED 70%</option>
+          <option value="red75">RED 75%</option>
+          <option value="red80">RED 80%</option>
+          <option value="preston">Preston</option>
+          <option value="detected">Existing teeth (measured)</option>
+        </select>
+        <div class="act">
+          <button class="btn" id="reset">Reset smile</button>
+          <button class="btn" id="delOutline">Reset outline</button>
+          <button class="btn" id="undo">Undo</button>
+          <button class="btn" id="redo">Redo</button>
+        </div>
+      </section>
+      <section data-panel="design">
+        <h3>Measurements</h3>
+        <div class="sl"><span class="lbl">Central incisor length</span><output id="lenO"></output><input id="lenS" type="range" step="0.5" aria-label="Central incisor length"></div>
+        <div class="sl"><span class="lbl">Width : length UR1</span><output id="wlRO"></output><input id="wlR" type="range" min="65" max="95" step="1" aria-label="UR1 width to length"></div>
+        <div class="sl"><span class="lbl">Width : length UL1</span><output id="wlLO"></output><input id="wlL" type="range" min="65" max="95" step="1" aria-label="UL1 width to length"></div>
+        <div class="readout" id="readout"></div>
+        <button class="btn primary" id="exportSide">Export photos</button>
+      </section>
+    </aside>
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="prompt" id="prompt"></div>
+      <div class="bl"><div class="badge" id="badge">Sample photo</div><select id="photoSel" aria-label="Photo shown"></select></div>
+      <button class="layers-toggle" id="layersBtn" aria-expanded="true">Layers</button>
+      <div class="layers" id="layers">
+        <span class="t">Opacity</span>
+        <input id="op" type="range" min="10" max="100" step="5" aria-label="Overlay opacity">
+        <label><span>Cervical &amp; incisal lines</span><input type="checkbox" data-layer="lines"></label>
+        <label><span>Outlines</span><input type="checkbox" data-layer="outlines"></label>
+        <label><span>Colour mock-up</span><input type="checkbox" data-layer="fill"></label>
+        <label><span>Contact lines</span><input type="checkbox" data-layer="contacts"></label>
+        <label><span>Ideal midline &amp; canine guide</span><input type="checkbox" data-layer="refs"></label>
+        <label><span>Real midline</span><input type="checkbox" data-layer="real"></label>
+        <label><span>Papilla zone</span><input type="checkbox" data-layer="papilla"></label>
+        <label><span>Lower lip line</span><input type="checkbox" data-layer="lip"></label>
+        <label><span>Proportions (%)</span><input type="checkbox" data-layer="props"></label>
+        <label><span>Facial lines</span><input type="checkbox" data-layer="face"></label>
+        <label><span>Drawings</span><input type="checkbox" data-layer="ann"></label>
+        <label><span>Measurements &amp; rulers</span><input type="checkbox" data-layer="meas"></label>
+        <span class="t">Guidelines</span>
+        <div class="gbtns"><button id="guideH">+ Horizontal</button><button id="guideV">+ Vertical</button></div>
+      </div>
+      <div class="zoom">
+        <button id="mirrorBtn">Mirror: off</button>
+        <button id="wipeBtn" aria-pressed="false">Before / after</button>
+        <button id="cmp" title="Hold to hide the design">Hold: before</button>
+        <button id="zout" aria-label="Zoom out">−</button>
+        <button id="zin" aria-label="Zoom in">+</button>
+        <button id="zfit">Fit</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="modal" id="vidModal" hidden>
+  <div class="card">
+    <h3>Pick a frame from the video</h3>
+    <video id="vid" muted playsinline preload="auto"></video>
+    <input id="vidT" type="range" min="0" max="1000" value="0" aria-label="Video position">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="vidBack">◀ Frame</button><button class="btn" id="vidFwd">Frame ▶</button><span class="sub" id="vidTime"></span><span style="flex:1"></span>
+      <select id="vidView" aria-label="Photo view"></select><button class="btn primary" id="vidUse">Use this frame</button><button class="btn" id="vidCancel">Cancel</button></div>
+  </div>
+</div>
+<div class="modal" id="modal" hidden>
+  <div class="card">
+    <h3>Export</h3>
+    <div class="seg" id="expView" role="group" aria-label="Export layout">
+      <button data-v="design">Design</button><button data-v="pair">Before / after</button><button data-v="final">Final picture</button><button data-v="face">Face</button><button data-v="compare" id="expCompare">Compare</button><button data-v="report">Report</button>
+    </div>
+    <img id="outImg" alt="Exported smile design">
+    <p class="sub">Copy the image into the notes, or long-press / right-click it to save. The report uses the note below, so edit it first if you like.</p>
+    <textarea id="noteTxt" aria-label="Clinical note text"></textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="copyImg">Copy image</button><button class="btn" id="copyNote">Copy note</button><span style="flex:1"></span><button class="btn" id="closeM">Close</button></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage');
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const C_CERV='#2F5BEA',C_INC='#55B8EA';
+
+/* ---------- library ---------- */
+const RATIOS={natural:[1,.72,.58,.44,.36],golden:[1,.618,.382,.236,.146],red70:[1,.7,.49,.343,.24],
+  red75:[1,.75,.5625,.42,.316],red80:[1,.8,.64,.512,.41],preston:[1,.66,.55,.47,.4]};
+const PROP_LABEL={natural:"style's own proportions",golden:'golden proportion',red70:'RED 70%',red75:'RED 75%',red80:'RED 80%',preston:'Preston',detected:'measured from existing teeth'};
+const LIB_LABEL={natural:'Natural ovoid',square:'Square',tapering:'Tapering',youthful:'Youthful (rounded)'};
+setTimeout(()=>{for(const k in STYLES)LIB_LABEL[k]=STYLES[k].name+' style';});
+const TYPES=['c','l','k','p','p'];
+const INSET=[[0,1],[.07,.9],[0,.97],[.05,.9],[.08,.86]]; // [top,bottom] of each tooth between cervical and incisal lines
+// outline points: u 0 = mesial, 1 = distal; v 0 = cervical, 1 = incisal
+const BASE={
+  c:[[.55,0],[.24,.03],[.06,.14],[0,.42],[.01,.8],[.07,.97],[.32,1],[.7,.995],[.93,.95],[1,.78],[.98,.38],[.86,.08]],
+  l:[[.5,0],[.2,.05],[.04,.2],[0,.5],[.04,.8],[.18,.96],[.45,1],[.75,.97],[.94,.84],[1,.55],[.95,.22],[.8,.05]],
+  k:[[.5,0],[.18,.04],[.02,.24],[0,.56],[.06,.84],[.24,.96],[.44,1],[.66,.97],[.88,.87],[1,.62],[.97,.26],[.8,.04]],
+  p:[[.5,0],[.2,.05],[.05,.22],[0,.5],[.08,.78],[.3,.95],[.5,1],[.7,.95],[.92,.78],[1,.5],[.95,.22],[.8,.05]]
+};
+const MODS={
+  natural:{},
+  square:{c:{1:[.15,.01],2:[.02,.08],5:[.02,.99],6:[.3,1],8:[.98,.985],11:[.93,.04]},l:{1:[.12,.02],2:[.02,.12],5:[.08,.99],7:[.8,.995],8:[.98,.92],11:[.88,.03]}},
+  tapering:{c:{1:[.32,.04],2:[.14,.16],3:[.03,.45],10:[.94,.42],11:[.8,.1]},l:{1:[.3,.06],2:[.14,.22],10:[.9,.25],11:[.74,.07]},k:{2:[.12,.22],10:[.9,.25]}},
+  youthful:{c:{5:[.12,.96],6:[.35,1],8:[.88,.93],9:[.99,.74]},l:{5:[.24,.94],8:[.9,.86],9:[.99,.62]}}
+};
+const STYLES={
+  dominant:{name:'Dominant',desc:'Strong, square centrals that clearly lead the smile; laterals noticeably smaller.',c:{rm:.04,rd:.06,t:.1},l:{rm:.08,rd:.14,t:.15},k:{kp:.5},ratio:[1,.66,.55,.42,.34],lat:[.08,.86],can:[.02,.95]},
+  aggressive:{name:'Aggressive',desc:'Square, flat incisal edges with sharp angles and pointed canines.',c:{rm:.03,rd:.04,t:.06},l:{rm:.04,rd:.06,t:.08},k:{kp:1},ratio:[1,.72,.62,.46,.37],lat:[.06,.92],can:[0,1]},
+  enhanced:{name:'Enhanced',desc:'Slightly rounded corners, gentle lateral step-up and open incisal embrasures.',c:{rm:.08,rd:.14,t:.15},l:{rm:.1,rd:.18,t:.18},k:{kp:.55},ratio:[1,.7,.58,.44,.36],lat:[.07,.89],can:[.01,.96]},
+  focused:{name:'Focused',desc:'Rounded, dominant centrals with smaller laterals set clearly higher.',c:{rm:.1,rd:.16,t:.18},l:{rm:.14,rd:.22,t:.2},k:{kp:.5},ratio:[1,.64,.54,.42,.34],lat:[.09,.85],can:[.03,.93]},
+  functional:{name:'Functional',desc:'Square, even incisal plane with tight embrasures and blunt canines.',c:{rm:.03,rd:.04,t:.08},l:{rm:.04,rd:.05,t:.1},k:{kp:.3},ratio:[1,.74,.62,.47,.38],lat:[.05,.96],can:[.02,.97]},
+  hollywood:{name:'Hollywood',desc:'Broad, uniform and even: wide laterals and canines, minimal step-up.',c:{rm:.05,rd:.07,t:.06},l:{rm:.05,rd:.08,t:.08},k:{kp:.45},ratio:[1,.78,.68,.52,.42],lat:[.03,.97],can:[.01,.98]},
+  mature:{name:'Mature',desc:'Flat, worn-looking incisal edges with closed embrasures.',c:{rm:.02,rd:.03,t:.12},l:{rm:.03,rd:.04,t:.14},k:{kp:.2},ratio:[1,.72,.6,.45,.36],lat:[.05,.97],can:[.02,.95]},
+  naturalst:{name:'Natural',desc:'Softly rounded, balanced proportions with a modest lateral step-up.',c:{rm:.07,rd:.12,t:.14},l:{rm:.1,rd:.18,t:.16},k:{kp:.6},ratio:[1,.72,.58,.44,.36],lat:[.07,.9],can:[0,.97]},
+  oval:{name:'Oval',desc:'Rounded, ovoid outlines on every tooth.',c:{rm:.16,rd:.24,t:.22},l:{rm:.2,rd:.28,t:.22},k:{kp:.45},ratio:[1,.7,.58,.44,.36],lat:[.07,.9],can:[.02,.95]},
+  softened:{name:'Softened',desc:'Squarish forms with softened incisal angles.',c:{rm:.12,rd:.18,t:.14},l:{rm:.14,rd:.22,t:.16},k:{kp:.4},ratio:[1,.72,.6,.45,.36],lat:[.06,.91],can:[.02,.95]},
+  vigorous:{name:'Vigorous',desc:'Robust, square teeth with prominent pointed canines.',c:{rm:.04,rd:.06,t:.08},l:{rm:.05,rd:.08,t:.1},k:{kp:.85},ratio:[1,.74,.64,.48,.38],lat:[.05,.93],can:[0,1]},
+  youthfulst:{name:'Youthful',desc:'Long centrals, rounded open embrasures and a clear gull-wing lateral step.',c:{rm:.1,rd:.2,t:.16},l:{rm:.16,rd:.28,t:.18},k:{kp:.6},ratio:[1,.68,.56,.43,.35],lat:[.09,.84],can:[.02,.94]}
+};
+// canine: broad, rounded cusp; kp (0-1) only slightly lowers the cusp shoulders so even 'pointed' styles stay natural
+const canPts=k=>taperPts([[.5,0],[.18,.04],[.02,.24],[0,.56],[.06,.86-.05*k],[.24,.975-.04*k],[.44,1],[.66,.985-.04*k],[.88,.9-.06*k],[1,.62],[.97,.26],[.8,.04]],.12);
+const taperPts=(P,t)=>P.map(([u,v])=>v<.5?[.5+(u-.5)*(1-t*(1-2*v)),v]:[u,v]);
+function genPts(type,st){
+  if(type==='c'||type==='l'){const{rm,rd,t}=st[type];return taperPts([[.55,0],[.24,.03],[.06,.14],[0,.42],[.005,1-rm*1.8-.04],[rm*.5,1-rm*.3],[.3+rm*.3,1],[.72-rd*.3,.995],[1-rd*.5,.99-rd*.35],[1,Math.max(.45,.97-rd*1.8-.03)],[.985,.38],[.86,.08]],t);}
+  if(type==='k')return canPts(st.k.kp);
+  return taperPts(BASE.p.map(q=>q.slice()),.12);
+}
+function insetFor(i){const mix=S.d&&S.d.mix||{},key=i===1?(mix.l||S.d.lib):i>=2?(mix.k||S.d.lib):S.d&&S.d.lib;const st=STYLES[key];if(!st)return INSET[i];
+  return[[0,1],st.lat,st.can,[st.lat[0]*.7+.02,st.can[1]-.07],[st.lat[0]*.7+.04,st.can[1]-.11]][i];}
+function libPts(type,lib){const mx=S.d&&S.d.mix&&S.d.mix[type==='p'?'k':type];if(mx)lib=mx;if(STYLES[lib])return genPts(type,STYLES[lib]);const b=BASE[type].map(p=>p.slice());const m=(MODS[lib]||{})[type]||{};for(const k in m)b[k]=m[k].slice();return b;}
+
+/* ---------- state ---------- */
+const S={img:null,iw:0,ih:0,sample:true,step:'design',mode:'transform',sym:true,link:false,sel:null,hide:false,
+  layers:{lines:true,outlines:true,fill:false,contacts:true,refs:true,meas:true,real:true,papilla:false,props:false,face:false,ann:true,lip:true},op:.95,
+  meas:{a:[0,0],b:[0,0],mm:null},photos:[],pi:0,profile:null,designs:[{name:'Design A',d:null,hist:[],hi:-1}],di:0,
+  face:{on:true,pts:null},faceActive:null,wipe:null,lips:null,lipSel:null,lipClip:true,hideTeeth:false,gumSim:true,guides:[],drawCol:'#FF3B30',drawW:4,drawTool:'pen',clinic:{name:'',logo:null},logoImg:null,patRef:''};
+Object.defineProperty(S,'d',{get(){return S.designs[S.di].d;},set(v){S.designs[S.di].d=v;}});
+const V={scale:1,ox:0,oy:0};
+function defaultDesign(cx,cy,span,H){
+  const e=span*1.45;
+  return{mx:cx,real:cx,spanL:span,spanR:span,prop:'natural',lib:'natural',edits:{},ann:[],
+    cerv:{L:[cx-e,cy-H*.1],R:[cx+e,cy-H*.1],M:cy},inc:{L:[cx-e,cy+H*.25],R:[cx+e,cy+H*.25],M:cy+H}};
+}
+
+/* ---------- geometry ---------- */
+function quad(L,M,R,mx){const[x0,y0]=L,[x2,y2]=R,x1=mx,y1=M;
+  const d0=(x0-x1)*(x0-x2),d1=(x1-x0)*(x1-x2),d2=(x2-x0)*(x2-x1);
+  return x=>(!d0||!d1||!d2)?y1:y0*(x-x1)*(x-x2)/d0+y1*(x-x0)*(x-x2)/d1+y2*(x-x0)*(x-x1)/d2;}
+function geom(){
+  const D=S.d;if(D.real==null)D.real=D.mx;if(!D.ann)D.ann=[];
+  const cf=quad(D.cerv.L,D.cerv.M,D.cerv.R,D.mx),inf=quad(D.inc.L,D.inc.M,D.inc.R,D.mx),list=[];
+  for(const s of[-1,1]){const span=s<0?D.spanL:D.spanR;let m=0;
+    const st=STYLES[D.lib],r0=D.prop==='detected'&&D.det?D.det[s<0?'R':'L']:(D.prop==='natural'&&st?st.ratio:RATIOS[D.prop==='detected'?'natural':D.prop]),af=1+(D.arch||0)*.03,r=r0.map((v,i)=>i>=2?v*Math.pow(af,i-1):v),sum=r.reduce((a,b)=>a+b,0);
+    r.forEach((ri,i)=>{const w=ri/sum*span;list.push({id:(s<0?'R':'L')+(i+1),s,i,type:TYPES[i],a:D.mx+s*m,w,top:insetFor(i)[0],bot:insetFor(i)[1],hid:(D.hidden||[]).includes((s<0?'R':'L')+(i+1))});m+=w;});}
+  return{list,cf,inf};
+}
+function toothPts(t,g){
+  const base=libPts(t.type,S.d.lib),ed=S.d.edits[t.id]||[];
+  return base.map((p,k)=>{const e=ed[k]||[0,0];const u=p[0]+e[0],v=p[1]+e[1];
+    const x=t.a+t.s*u*t.w,vv=t.top+v*(t.bot-t.top);return[x,g.cf(x)+vv*(g.inf(x)-g.cf(x))];});
+}
+function crPath(c,P){const n=P.length;c.beginPath();c.moveTo(...P[0]);
+  for(let i=0;i<n;i++){const p0=P[(i-1+n)%n],p1=P[i],p2=P[(i+1)%n],p3=P[(i+2)%n];
+    c.bezierCurveTo(p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6,p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6,p2[0],p2[1]);}
+  c.closePath();}
+function inPoly(pt,P){let ins=false;for(let i=0,j=P.length-1;i<P.length;j=i++){const[xi,yi]=P[i],[xj,yj]=P[j];
+  if(((yi>pt[1])!==(yj>pt[1]))&&pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi)ins=!ins;}return ins;}
+const pxPerMm=()=>{const m=S.meas;if(!(m.mm>0))return null;const d=Math.hypot(m.b[0]-m.a[0],m.b[1]-m.a[1]);return d>2?d/m.mm:null;};
+const fmt=px=>{const k=pxPerMm();return k?(px/k).toFixed(2)+' mm':Math.round(px)+' px';};
+function central(g){const t=g.list.find(t=>t.id==='R1');const xc=t.a-t.w/2;
+  const len=(g.inf(xc)-g.cf(xc))*(t.bot-t.top);return{t,w:t.w,len,xc,y0:g.cf(xc)+t.top*(g.inf(xc)-g.cf(xc))};}
+
+/* ---------- drawing ---------- */
+function drawDesign(c,u,ui){
+  if(S.hide)return;const g=geom(),D=S.d;
+  const lastL=D.mx-D.spanL,lastR=D.mx+D.spanR;
+  const yTop=Math.min(D.cerv.L[1],D.cerv.R[1],D.cerv.M),yBot=Math.max(D.inc.L[1],D.inc.R[1],D.inc.M);
+  c.save();c.globalAlpha=S.op;
+  if(S.layers.refs){
+    const canL=g.list.find(t=>t.id==='R3'),canR=g.list.find(t=>t.id==='L3');
+    c.strokeStyle='rgba(255,255,255,.85)';c.lineWidth=1.2*u;c.beginPath();
+    for(const x of[D.mx,canL.a-canL.w,canR.a+canR.w]){c.moveTo(x,-1e5);c.lineTo(x,1e5);}c.stroke();
+  }
+  if(S.layers.contacts){
+    c.strokeStyle='rgba(255,255,255,.7)';c.lineWidth=.9*u;c.beginPath();
+    g.list.filter(t=>!t.hid).forEach(t=>{const x=t.a+t.s*t.w;c.moveTo(x,g.cf(x));c.lineTo(x,g.inf(x));});c.stroke();
+  }
+  if(S.layers.papilla){
+    const r3=g.list.find(t=>t.id==='R3'),l3=g.list.find(t=>t.id==='L3'),xa=r3.a-r3.w,xb=l3.a+l3.w;
+    c.strokeStyle='#FF8FB8';c.lineWidth=1.6*u;c.setLineDash([2*u,4*u]);
+    for(const pc of[.3,.5]){c.beginPath();for(let i=0;i<=40;i++){const x=xa+(xb-xa)*i/40,y=g.cf(x)+pc*(g.inf(x)-g.cf(x));i?c.lineTo(x,y):c.moveTo(x,y);}c.stroke();}
+    c.setLineDash([]);
+  }
+  if(D.lip&&S.layers.lip){const lf=lipF(),L=D.lip.L,R=D.lip.R;c.strokeStyle='#E84A8A';c.lineWidth=2.4*u;c.setLineDash([]);c.beginPath();
+    for(let i=0;i<=60;i++){const x=L[0]+(R[0]-L[0])*i/60;i?c.lineTo(x,lf(x)):c.moveTo(x,lf(x));}c.stroke();
+    c.font=`600 ${11*u}px "Source Sans 3", Carlito, sans-serif`;c.textAlign='left';c.lineWidth=3*u;c.strokeStyle='rgba(0,0,0,.55)';c.fillStyle='#FF8FBF';
+    c.strokeText('Lower lip',R[0]+6*u,R[1]);c.fillText('Lower lip',R[0]+6*u,R[1]);}
+  if(S.layers.real){
+    const H=D.inc.M-D.cerv.M;c.strokeStyle='#FF9A3C';c.lineWidth=2*u;c.setLineDash([7*u,5*u]);
+    c.beginPath();c.moveTo(D.real,yTop-H*.9);c.lineTo(D.real,yBot+H*.9);c.stroke();c.setLineDash([]);
+    c.font=`600 ${11*u}px "Source Sans 3", Carlito, sans-serif`;c.textAlign='center';c.lineWidth=3*u;c.strokeStyle='rgba(0,0,0,.55)';c.fillStyle='#FFB070';
+    c.strokeText('Real',D.real,yTop-H*.95);c.fillText('Real',D.real,yTop-H*.95);
+  }
+  const vis=g.list.filter(t=>!t.hid);
+  if(S.layers.fill){c.save();
+    if(S.lips&&S.lipClip){polyPath(c,S.lips.pts);c.clip();}
+    if(S.lips&&S.hideTeeth){polyPath(c,S.lips.pts);const gr=c.createLinearGradient(0,yTop,0,yBot+(yBot-yTop));gr.addColorStop(0,'#3A1C20');gr.addColorStop(1,'#1E0E10');c.fillStyle=gr;c.fill();}
+    if(S.gumSim&&vis.length)paintGum(c,g,vis,u);
+    vis.forEach(t=>paintTooth(c,toothPts(t,g),t,u));c.restore();}
+  if(S.layers.outlines||S.layers.fill){
+    vis.forEach(t=>{const P=toothPts(t,g);crPath(c,P);
+      if(S.layers.outlines){c.lineWidth=2.2*u;c.strokeStyle=S.layers.fill?'rgba(255,255,255,.85)':'#FFFFFF';
+        if(!S.layers.fill){c.shadowColor='rgba(0,0,0,.45)';c.shadowBlur=3*u;}c.stroke();c.shadowBlur=0;}
+      if(ui&&S.step==='design'&&S.mode==='outline'&&S.sel===t.id){
+        c.lineWidth=2.6*u;c.strokeStyle='#3FA9A0';c.stroke();
+        P.forEach(p=>{c.beginPath();c.arc(p[0],p[1],5*u,0,7);c.fillStyle='#fff';c.fill();c.lineWidth=1.6*u;c.strokeStyle='#1C7293';c.stroke();});
+      }
+    });
+  }
+  if(S.layers.lines){
+    for(const[k,col]of[['cerv',C_CERV],['inc',C_INC]]){const f=k==='cerv'?g.cf:g.inf,L=D[k].L,R=D[k].R;
+      c.strokeStyle=col;c.lineWidth=2.4*u;c.beginPath();for(let i=0;i<=60;i++){const x=L[0]+(R[0]-L[0])*i/60;i?c.lineTo(x,f(x)):c.moveTo(x,f(x));}c.stroke();
+      c.fillStyle=col;for(const p of[L,R]){c.beginPath();c.arc(p[0],p[1],(ui?7:4)*u,0,7);c.fill();}}
+  }
+  if(S.layers.props){
+    const ce=central(g);c.font=`600 ${11*u}px ui-monospace, Consolas, monospace`;c.textAlign='center';c.lineWidth=3*u;
+    g.list.filter(t=>t.i<3).forEach(t=>{const xc=t.a+t.s*t.w/2,y=g.cf(xc)-9*u,txt=Math.round(t.w/ce.w*100)+'%';
+      c.strokeStyle='rgba(0,0,0,.6)';c.fillStyle='#fff';c.strokeText(txt,xc,y);c.fillText(txt,xc,y);});
+  }
+  if(S.layers.ann)drawAnn(c,D.ann);
+  if(S.layers.meas&&D.rulers)drawRulers(c,D.rulers,u);
+  if(S.layers.papilla){const ce=central(g);c.font=`600 ${10*u}px ui-monospace, Consolas, monospace`;c.textAlign='center';
+    vis.slice(0).forEach(t=>{if(t.i>2)return;const x=t.a+(t.s<0?-t.w:t.w)*0,y=g.cf(x)+(D.papH||.4)*(g.inf(x)-g.cf(x));c.beginPath();c.arc(x,y,3.5*u,0,7);c.fillStyle='#FF8FB8';c.fill();});}
+  if(S.layers.meas){
+    const ce=central(g),k=10*u;c.strokeStyle='rgba(20,25,30,.85)';c.fillStyle='rgba(20,25,30,.9)';c.lineWidth=1.3*u;
+    const ym=ce.y0+ce.len*.55,x0=ce.t.a,x1=ce.t.a-ce.w;
+    c.beginPath();c.moveTo(x0,ym);c.lineTo(x1,ym);c.moveTo(ce.xc,ce.y0);c.lineTo(ce.xc,ce.y0+ce.len);c.stroke();
+    const tick=(x,y,dx,dy)=>{c.beginPath();c.moveTo(x-dy*4*u,y-dx*4*u);c.lineTo(x+dy*4*u,y+dx*4*u);c.stroke();};
+    tick(x0,ym,0,1);tick(x1,ym,0,1);tick(ce.xc,ce.y0,1,0);tick(ce.xc,ce.y0+ce.len,1,0);
+    c.font=`500 ${12*u}px ui-monospace, Consolas, monospace`;c.lineWidth=3*u;c.strokeStyle='rgba(255,255,255,.75)';
+    const lab=(t,x,y,rot)=>{c.save();c.translate(x,y);if(rot)c.rotate(Math.PI/2);c.textAlign='center';c.strokeText(t,0,0);c.fillText(t,0,0);c.restore();};
+    lab(fmt(ce.w),x1+ce.w*.27,ym-7*u);lab(fmt(ce.len),ce.xc+8*u,ce.y0+ce.len*.22,true);
+    c.font=`600 ${14*u}px ui-monospace, Consolas, monospace`;c.fillStyle='#fff';c.strokeStyle='rgba(0,0,0,.5)';
+    lab(Math.round(ce.w/ce.len*100)+' %',D.mx,yBot+46*u);
+  }
+  c.restore();
+}
+function handlePts(){
+  const D=S.d,g=geom(),yC=g.cf(D.mx),yI=g.inf(D.mx),midY=(g.cf(D.mx-D.spanL)+g.inf(D.mx-D.spanL))/2,midYR=(g.cf(D.mx+D.spanR)+g.inf(D.mx+D.spanR))/2;
+  const gap=Math.max(28/V.scale,(yI-yC)*.18);
+  return{move:[D.mx,yC-gap*2.2],cm:[D.mx,yC-gap*.55],im:[D.mx,yI+gap*.55],
+    cL:D.cerv.L,cR:D.cerv.R,iL:D.inc.L,iR:D.inc.R,
+    sL:[D.mx-D.spanL-gap*.9,midY],sR:[D.mx+D.spanR+gap*.9,midYR],real:[D.real,yI+gap*2.6],
+    ...(D.lip&&S.layers.lip?{lL:D.lip.L,lR:D.lip.R,lM:[D.mx-gap*1.2,lipF()(D.mx-gap*1.2)]}:{})};
+}
+let dpr=1;
+function resize(){const r=stage.getBoundingClientRect();dpr=window.devicePixelRatio||1;cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);fit();}
+function fit(){const w=cv.width/dpr,h=cv.height/dpr;if(!S.iw)return;
+  if(S.step==='face'||S.step==='photo'){V.scale=Math.min(w/S.iw,h/S.ih)*.96;V.ox=(w-S.iw*V.scale)/2;V.oy=(h-S.ih*V.scale)/2;draw();return;}
+  // frame the smile: commissure to commissure plus margin, never smaller than the whole photo would allow
+  const D=S.d,x0=Math.min(D.cerv.L[0],D.inc.L[0]),x1=Math.max(D.cerv.R[0],D.inc.R[0]),H=D.inc.M-D.cerv.M;
+  const rw=(x1-x0)*1.22,rh=H*4.2,cx=(x0+x1)/2,cy=(D.cerv.M+D.inc.M)/2;
+  V.scale=Math.max(Math.min(w/rw,h/rh),Math.min(w/S.iw,h/S.ih)*.98);V.ox=w/2-cx*V.scale;V.oy=h/2-cy*V.scale;draw();}
+const i2s=(x,y)=>[x*V.scale+V.ox,y*V.scale+V.oy];
+const s2i=(x,y)=>[(x-V.ox)/V.scale,(y-V.oy)/V.scale];
+function draw(){
+  const w=cv.width/dpr,h=cv.height/dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#0A0F14';ctx.fillRect(0,0,w,h);
+  if(!S.img)return;
+  ctx.setTransform(dpr*V.scale,0,0,dpr*V.scale,dpr*V.ox,dpr*V.oy);ctx.imageSmoothingQuality='high';ctx.drawImage(S.img,0,0);
+  if(S.step==='design'&&S.wipe!=null&&isFrontal()){const sx=S.wipe*w,ix=(sx-V.ox)/V.scale;ctx.save();ctx.beginPath();ctx.rect(ix,-1e6,2e6,4e6);ctx.clip();
+    withLayers(FINAL,()=>drawDesign(ctx,1/V.scale,false));ctx.restore();ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx,0);ctx.lineTo(sx,h);ctx.stroke();
+    ctx.beginPath();ctx.arc(sx,70,20,0,7);ctx.fillStyle='#E24B4B';ctx.fill();ctx.fillStyle='#fff';
+    for(const d of[-1,1]){ctx.beginPath();ctx.moveTo(sx+d*11,70);ctx.lineTo(sx+d*4,63);ctx.lineTo(sx+d*4,77);ctx.closePath();ctx.fill();}
+    ctx.font='600 12px "Source Sans 3", Carlito, sans-serif';ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,.9)';
+    if(sx>70)ctx.fillText('Before',sx-44,h-50);if(sx<w-70)ctx.fillText('After',sx+44,h-50);return;}
+  if(S.step==='design'&&S.an&&S.showAn)drawAnalysis(ctx,1/V.scale);
+  if(S.mirror&&isFrontal()){drawMirror();ctx.setTransform(dpr,0,0,dpr,0,0);drawGuides(w,h);return;}
+  if(S.step==='face'){if(isProfile())drawProfile(ctx,1/V.scale,true);else drawFace(ctx,1/V.scale,true);}
+  else if(S.step==='design'&&S.layers.face&&!S.hide&&isFrontal())drawFace(ctx,1/V.scale,false);
+  if((S.step==='design'||S.step==='photo')&&isFrontal())drawDesign(ctx,1/V.scale,true);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(S.step==='measure')drawMeasure();
+  if(S.step==='design'&&S.mode==='transform'&&!S.hide&&isFrontal())drawHandles();
+  if(S.step==='design'&&S.mode==='lips'&&S.lips)drawLipEdit();
+  drawGuides(w,h);
+}
+function arrowHead(x,y,ang,sz,col){ctx.save();ctx.translate(x,y);ctx.rotate(ang);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(-sz,-sz*.55);ctx.lineTo(-sz,sz*.55);ctx.closePath();ctx.fillStyle=col;ctx.fill();ctx.restore();}
+function drawMeasure(){
+  const a=i2s(...S.meas.a),b=i2s(...S.meas.b),ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
+  ctx.strokeStyle='#26323C';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.6)';ctx.lineWidth=5;ctx.globalCompositeOperation='destination-over';ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();ctx.globalCompositeOperation='source-over';
+  arrowHead(...b,ang,12,'#26323C');arrowHead(...a,ang+Math.PI,12,'#26323C');
+  for(const p of[a,b]){ctx.beginPath();ctx.arc(p[0],p[1],14,0,7);ctx.strokeStyle='rgba(63,169,160,.9)';ctx.lineWidth=2;ctx.stroke();}
+  if(S.meas.mm>0){ctx.font='600 14px ui-monospace, Consolas, monospace';ctx.textAlign='center';ctx.lineWidth=4;ctx.strokeStyle='rgba(255,255,255,.85)';ctx.fillStyle='#132433';
+    const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2-14;ctx.strokeText(S.meas.mm+' mm',mx,my);ctx.fillText(S.meas.mm+' mm',mx,my);}
+}
+function drawHandles(){
+  const H=handlePts(),pt=k=>i2s(...H[k]);
+  // move cross
+  const[mx,my]=pt('move');ctx.save();ctx.translate(mx,my);ctx.fillStyle=C_CERV;ctx.strokeStyle=C_CERV;ctx.lineWidth=3.2;
+  ctx.beginPath();ctx.moveTo(-16,0);ctx.lineTo(16,0);ctx.moveTo(0,-16);ctx.lineTo(0,16);ctx.stroke();
+  for(let i=0;i<4;i++){ctx.rotate(Math.PI/2);ctx.beginPath();ctx.moveTo(20,0);ctx.lineTo(12,-6);ctx.lineTo(12,6);ctx.closePath();ctx.fill();}ctx.restore();
+  // mid triangles
+  const tri=(p,up,col)=>{ctx.beginPath();ctx.moveTo(p[0],p[1]+(up?-9:9));ctx.lineTo(p[0]-14,p[1]+(up?5:-5));ctx.lineTo(p[0]+14,p[1]+(up?5:-5));ctx.closePath();ctx.fillStyle=col;ctx.fill();};
+  tri(pt('cm'),true,C_CERV);tri(pt('im'),false,C_INC);
+  // side arrows
+  const side=(p,right)=>{ctx.beginPath();ctx.moveTo(p[0]+(right?10:-10),p[1]);ctx.lineTo(p[0]+(right?-6:6),p[1]-20);ctx.lineTo(p[0]+(right?-6:6),p[1]+20);ctx.closePath();ctx.fillStyle='rgba(225,232,238,.85)';ctx.fill();ctx.strokeStyle='rgba(60,75,90,.5)';ctx.lineWidth=1;ctx.stroke();};
+  side(pt('sL'),false);side(pt('sR'),true);
+  for(const k of['lL','lR','lM'])if(H[k]){const p=pt(k);ctx.beginPath();ctx.arc(p[0],p[1],7,0,7);ctx.fillStyle='#E84A8A';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();}
+  // real midline diamond
+  {const p=pt('real');ctx.save();ctx.translate(p[0],p[1]);ctx.rotate(Math.PI/4);ctx.fillStyle='#FF9A3C';ctx.fillRect(-7,-7,14,14);ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.strokeRect(-7,-7,14,14);ctx.restore();}
+  // endpoint rings
+  for(const[k,col]of[['cL',C_CERV],['cR',C_CERV],['iL',C_INC],['iR',C_INC]]){const p=pt(k);ctx.beginPath();ctx.arc(p[0],p[1],8,0,7);ctx.fillStyle=col;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();}
+}
+
+/* ---------- history ---------- */
+let hist=[],hi=-1;
+function commit(){const s=JSON.stringify(S.d);if(hist[hi]===s)return;hist=hist.slice(0,hi+1);hist.push(s);if(hist.length>80)hist.shift();hi=hist.length-1;syncUI();}
+function undo(){if(hi>0){hi--;S.d=JSON.parse(hist[hi]);syncUI();draw();}}
+function switchDesign(n){S.designs[S.di].hist=hist;S.designs[S.di].hi=hi;S.di=n;hist=S.designs[n].hist;hi=S.designs[n].hi;S.sel=null;if(!hist.length)commit();syncUI();draw();}
+function nextName(){for(let i=0;i<26;i++){const nm='Design '+String.fromCharCode(65+i);if(!S.designs.some(d=>d.name===nm))return nm;}return 'Design '+(S.designs.length+1);}
+function redo(){if(hi<hist.length-1){hi++;S.d=JSON.parse(hist[hi]);syncUI();draw();}}
+$('undo').onclick=undo;$('redo').onclick=redo;
+addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='z'&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName)){e.preventDefault();e.shiftKey?redo():undo();}});
+
+/* ---------- pointer ---------- */
+const ptrs=new Map();let drag=null,pinch=null;
+const pos=e=>{const r=cv.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top];};
+function hitHandle(p){
+  let best=null,bd=24;
+  if(S.step==='measure'){for(const k of['a','b']){const q=i2s(...S.meas[k]);const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best='m'+k;}}
+    if(!best){const a=i2s(...S.meas.a),b=i2s(...S.meas.b),L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;
+      const t=clamp(((p[0]-a[0])*(b[0]-a[0])+(p[1]-a[1])*(b[1]-a[1]))/L/L,0,1);const d=Math.hypot(a[0]+t*(b[0]-a[0])-p[0],a[1]+t*(b[1]-a[1])-p[1]);if(d<14)best='mline';}
+    return best;}
+  if(S.step==='face'){if(!faceOnNow())return null;const FP=curPts();for(const[k]of curLMS()){const q=i2s(...FP[k]);const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best='f:'+k;}}return best;}
+  if(S.step!=='design'||S.mode==='draw'||!isFrontal())return null;
+  if(S.mode==='transform'){const H=handlePts();for(const k in H){const q=i2s(...H[k]);const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best=k;}}return best;}
+  // outline mode
+  const g=geom(),ip=s2i(...p);
+  if(S.sel){const t=g.list.find(t=>t.id===S.sel);const P=toothPts(t,g);
+    for(let k=0;k<P.length;k++){const q=i2s(...P[k]);const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best='pt:'+k;}}
+    if(best)return best;if(inPoly(ip,P))return 'tooth';}
+  for(const t of g.list){if(inPoly(ip,toothPts(t,g))){S.sel=t.id;draw();return 'tooth';}}
+  S.sel=null;draw();return null;
+}
+cv.addEventListener('pointerdown',e=>{
+  cv.setPointerCapture(e.pointerId);const p=pos(e);ptrs.set(e.pointerId,p);
+  if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),scale:V.scale,c:[(a[0]+b[0])/2,(a[1]+b[1])/2],ox:V.ox,oy:V.oy};if(drag&&drag.k==='draw')S.d.ann.pop();drag=null;draw();return;}
+  if(S.step==='design'&&S.wipe!=null&&isFrontal()){const w=cv.width/dpr;drag=Math.abs(p[0]-S.wipe*w)<40?{k:'wipe',start:s2i(...p)}:{k:'pan',last:p,start:s2i(...p)};return;}
+  if(S.step==='design'&&S.mode==='lips'&&S.lips){const ip=s2i(...p),P=S.lips.pts;let bi=-1,bd=18;
+    P.forEach((q,i)=>{const sq=i2s(...q),d=Math.hypot(sq[0]-p[0],sq[1]-p[1]);if(d<bd){bd=d;bi=i;}});
+    if(bi<0){let bs=-1,bsd=14;for(let i=0;i<P.length;i++){const a=i2s(...P[i]),b=i2s(...P[(i+1)%P.length]),L2=(b[0]-a[0])**2+(b[1]-a[1])**2||1,t=clamp(((p[0]-a[0])*(b[0]-a[0])+(p[1]-a[1])*(b[1]-a[1]))/L2,0,1),d=Math.hypot(a[0]+t*(b[0]-a[0])-p[0],a[1]+t*(b[1]-a[1])-p[1]);if(d<bsd){bsd=d;bs=i;}}
+      if(bs>=0){P.splice(bs+1,0,ip);bi=bs+1;}}
+    if(bi>=0){S.lipSel=bi;drag={k:'lip:'+bi,start:ip};syncUI();draw();return;}
+    S.lipSel=null;syncUI();}
+  if(S.step==='design'&&S.mode==='ruler'){const ip=s2i(...p),R=S.d.rulers||(S.d.rulers=[]);let hit=null;
+    R.forEach((r,i)=>{for(const e of['a','b']){const q=i2s(...r[e]);if(Math.hypot(q[0]-p[0],q[1]-p[1])<16)hit='ru:'+i+':'+e;}});
+    if(!hit){R.push({a:ip,b:ip});hit='ru:'+(R.length-1)+':b';}drag={k:hit,start:ip};draw();return;}
+  if(S.step==='design'&&S.mode==='draw'&&!S.hide){const ip=s2i(...p);S.layers.ann=true;S.d.ann.push({t:S.drawTool,c:S.drawCol,w:S.drawW/V.scale,pts:[ip,ip]});drag={k:'draw',start:ip};draw();return;}
+  const h0=hitHandle(p);
+  if(!h0&&S.step==='face'&&faceOnNow()&&S.faceActive){const LL=curLMS();curPts()[S.faceActive]=s2i(...p);const i=LL.findIndex(l=>l[0]===S.faceActive);S.faceActive=i<LL.length-1?LL[i+1][0]:null;syncUI();draw();drag=null;return;}
+  let h=h0;if(!h){const gi=hitGuide(p);if(gi>=0)h='gd:'+gi;}drag={k:h||'pan',last:p,start:s2i(...p),d0:JSON.parse(JSON.stringify(S.d)),m0:JSON.parse(JSON.stringify(S.meas))};
+});
+cv.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId)){if(S.step==='design'&&S.wipe!=null){cv.style.cursor=Math.abs(pos(e)[0]-S.wipe*cv.width/dpr)<40?'ew-resize':'grab';return;}if(S.step==='design'&&S.mode==='draw'){cv.style.cursor='crosshair';return;}const h=hitHandle(pos(e));cv.style.cursor=h?'pointer':(S.step==='face'&&S.faceActive?'crosshair':'default');return;}
+  const p=pos(e);ptrs.set(e.pointerId,p);
+  if(pinch&&ptrs.size===2){const[a,b]=[...ptrs.values()];const ns=clamp(pinch.scale*Math.hypot(a[0]-b[0],a[1]-b[1])/pinch.d,.05,20);
+    V.ox=(a[0]+b[0])/2-(pinch.c[0]-pinch.ox)*ns/pinch.scale;V.oy=(a[1]+b[1])/2-(pinch.c[1]-pinch.oy)*ns/pinch.scale;V.scale=ns;draw();return;}
+  if(!drag)return;const ip=s2i(...p),dx=ip[0]-drag.start[0],dy=ip[1]-drag.start[1],D=S.d,D0=drag.d0,k=drag.k;
+  if(k==='pan'){V.ox+=p[0]-drag.last[0];V.oy+=p[1]-drag.last[1];drag.last=p;draw();return;}
+  if(k==='wipe'){S.wipe=clamp(p[0]/(cv.width/dpr),0,1);draw();return;}
+  if(k.startsWith('lip:')){S.lips.pts[+k.slice(4)]=ip;draw();return;}
+  if(k.startsWith('ru:')){const[,i,e]=k.split(':');D.rulers[+i][e]=ip;draw();return;}
+  if(k.startsWith('gd:')){const gd=S.guides[+k.slice(3)];gd.p=gd.o==='h'?ip[1]:ip[0];draw();return;}
+  if(k==='draw'){const m=D.ann[D.ann.length-1];if(!m)return;if(m.t==='pen'){const q=m.pts[m.pts.length-1];if(Math.hypot(ip[0]-q[0],ip[1]-q[1])>1.5/V.scale)m.pts.push(ip);}else m.pts[1]=ip;draw();return;}
+  if(k.startsWith('f:')){curPts()[k.slice(2)]=ip;syncUI();draw();return;}
+  if(k==='real'){D.real=D0.real+dx;syncUI();draw();return;}
+  if((k==='lL'||k==='lR')&&D.lip){const side=k[1],np=[D0.lip[side][0]+dx,D0.lip[side][1]+dy];np[0]=side==='L'?Math.min(np[0],D.mx-20):Math.max(np[0],D.mx+20);D.lip[side]=np;
+    if(S.sym)D.lip[side==='L'?'R':'L']=[2*D.mx-np[0],np[1]];syncUI();draw();return;}
+  if(k==='lM'&&D.lip){D.lip.M=D0.lip.M+dy;syncUI();draw();return;}
+  if(k==='ma'||k==='mb'){S.meas[k[1]]=ip;syncUI();draw();return;}
+  if(k==='mline'){S.meas.a=[drag.m0.a[0]+dx,drag.m0.a[1]+dy];S.meas.b=[drag.m0.b[0]+dx,drag.m0.b[1]+dy];draw();return;}
+  const sh=(pt)=>[pt[0]+dx,pt[1]+dy];
+  if(k==='move'){D.mx=D0.mx+dx;for(const c of['cerv','inc']){D[c].L=sh(D0[c].L);D[c].R=sh(D0[c].R);D[c].M=D0[c].M+dy;}}
+  else if(k==='cm'){D.cerv.M=Math.min(D0.cerv.M+dy,D.inc.M-10);}
+  else if(k==='im'){D.inc.M=Math.max(D0.inc.M+dy,D.cerv.M+10);}
+  else if(['cL','cR','iL','iR'].includes(k)){
+    const line=k[0]==='c'?'cerv':'inc',other=line==='cerv'?'inc':'cerv',side=k[1];
+    const np=sh(D0[line][side]);np[0]=side==='L'?Math.min(np[0],D.mx-20):Math.max(np[0],D.mx+20);
+    D[line][side]=np;
+    if(S.link){D[other][side]=sh(D0[other][side]);D[other][side][0]=np[0];}
+    if(S.sym){const os=side==='L'?'R':'L';D[line][os]=[2*D.mx-np[0],np[1]];if(S.link)D[other][os]=[2*D.mx-np[0],D[other][side][1]];}
+  }else if(k==='sL'||k==='sR'){
+    const span=Math.max(20,k==='sL'?D.mx-ip[0]:ip[0]-D.mx);
+    if(S.sym){D.spanL=D.spanR=span;}else if(k==='sL')D.spanL=span;else D.spanR=span;
+  }else if(k==='tooth'||k.startsWith('pt:')){
+    const g=geom(),t=g.list.find(t=>t.id===S.sel);if(!t)return;const base=libPts(t.type,D.lib);
+    const ed0=D0.edits[t.id]||base.map(()=>[0,0]);
+    const toUV=(x,y)=>{const u=(x-t.a)/(t.s*t.w);const cy=g.cf(x),iy=g.inf(x);const vv=(y-cy)/((iy-cy)||1);return[u,(vv-t.top)/((t.bot-t.top)||1)];};
+    let ed;
+    if(k==='tooth'){const[u0,v0]=toUV(...drag.start),[u1,v1]=toUV(...ip);ed=base.map((_,i)=>{const e=ed0[i]||[0,0];return[e[0]+u1-u0,e[1]+v1-v0];});}
+    else{const idx=+k.slice(3);const[u,v]=toUV(...ip);ed=base.map((_,i)=>(ed0[i]||[0,0]).slice());ed[idx]=[u-base[idx][0],v-base[idx][1]];}
+    D.edits[t.id]=ed;if(S.sym)D.edits[(t.id[0]==='R'?'L':'R')+t.id[1]]=ed.map(e=>e.slice());
+  }
+  syncUI();draw();
+});
+const end=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;if(!ptrs.size){endSpecial();if(drag&&!['pan','ma','mb','mline','wipe'].includes(drag.k)&&!/^(f|lip|gd):/.test(drag.k))commit();drag=null;}};
+cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);
+cv.addEventListener('wheel',e=>{e.preventDefault();zoomAt(pos(e),e.deltaY<0?1.1:1/1.1);},{passive:false});
+function zoomAt(p,f){const ns=clamp(V.scale*f,.05,20);V.ox=p[0]-(p[0]-V.ox)*ns/V.scale;V.oy=p[1]-(p[1]-V.oy)*ns/V.scale;V.scale=ns;draw();}
+const ctr=()=>[cv.width/dpr/2,cv.height/dpr/2];
+$('zin').onclick=()=>zoomAt(ctr(),1.25);$('zout').onclick=()=>zoomAt(ctr(),.8);$('zfit').onclick=fit;
+const cmp=$('cmp');cmp.addEventListener('pointerdown',e=>{e.preventDefault();S.hide=true;draw();});
+['pointerup','pointerleave','pointercancel'].forEach(ev=>cmp.addEventListener(ev,()=>{if(S.hide){S.hide=false;draw();}}));
+
+/* ---------- UI ---------- */
+const PROMPTS={photo:'Load the patient photo.',face:'Mark the face. Pick a landmark, then tap the photo, or drag the points.',measure:'Input measurement. Move arrows to adjust.',
+  design:{lips:'Drag points to trace the inner lip contour. Tap the contour to add a point.',ruler:'Drag to measure anywhere on the photo. Drag a ruler end to adjust it.',transform:'Adjust the cervical line and the incisal line. Drag the side arrows for width.',outline:'Tap a tooth, then drag its points to reshape it or drag inside it to move it.',draw:'Draw on the design to explain it to the patient, your team or the lab.'}};
+function setStep(s){const prev=S.step;S.step=s;if(s!=='design')S.wipe=null;if(s!=='design')S.sel=null;if(s!=='face')S.faceActive=null;syncUI();if(prev!==s&&(s==='face'||prev==='face'||prev==='photo'||s==='photo'))fit();else draw();}
+document.querySelectorAll('.steps button').forEach(b=>b.onclick=()=>setStep(b.dataset.step));
+$('toFace').onclick=()=>setStep('face');$('toMeasure').onclick=()=>setStep('measure');$('toDesign').onclick=()=>setStep('design');
+function syncUI(){
+  const order=['photo','face','measure','design'];
+  document.querySelectorAll('.steps button').forEach(b=>{b.toggleAttribute('aria-current',false);if(b.dataset.step===S.step)b.setAttribute('aria-current','step');
+    b.classList.toggle('done',order.indexOf(b.dataset.step)<order.indexOf(S.step)||(b.dataset.step==='measure'&&!!pxPerMm()));});
+  document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==S.step);
+  $('prompt').textContent=S.step==='design'?(S.wipe!=null?'Drag the divider to compare before and after.':PROMPTS.design[S.mode]):PROMPTS[S.step];
+  $('wipeBtn').hidden=S.step!=='design';$('wipeBtn').setAttribute('aria-pressed',String(S.wipe!=null));$('wipeBtn').textContent=S.wipe!=null?'Back to design':'Before / after';
+  $('frameNudge').hidden=S.mode!=='transform';$('toothAdj').hidden=S.mode!=='outline'||!S.sel;
+  if(S.sel){const nm=S.sel.replace('R','UR').replace(/^L/,'UL'),mi=(S.sel[0]==='R'?'UL':'UR')+S.sel[1];$('toothAdjT').textContent=`Adjust ${nm}${S.sym?' and '+mi:''}`;$('reflect').textContent=`Reflect ${nm} to ${mi}`;}
+  syncShade();syncSliders();syncStyle();syncPhotos();syncVisa();syncMix();
+  if(S.step==='design'&&!isFrontal())$('prompt').textContent=`${VIEWS[curPhoto().view]} view: the design shows on frontal photos only.`;
+  $('lipOpts').hidden=S.mode!=='lips';$('rulerOpts').hidden=S.mode!=='ruler';$('lipDel').disabled=S.lipSel==null;$('lipClip').checked=S.lipClip;$('hideTeeth').checked=S.hideTeeth;
+  $('gumSim').checked=S.gumSim;$('gumSel').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===(S.d.gum||'auto'))));
+  $('papS').value=Math.round((S.d.papH||.4)*100);$('papO').textContent=Math.round((S.d.papH||.4)*100)+'% of crown';$('archS').value=S.d.arch||0;$('archO').textContent=(S.d.arch>0?'+':'')+(S.d.arch||0);
+  $('toothChips').innerHTML=['R5','R4','R3','R2','R1','L1','L2','L3','L4','L5'].map(id=>`<button data-id="${id}" aria-pressed="${!(S.d.hidden||[]).includes(id)}">${id.replace('R','UR').replace(/^L/,'UL')}</button>`).join('');
+  $('chS').value=(S.d.shade||{}).chroma||0;$('chO').textContent=((S.d.shade||{}).chroma||0);$('huS').value=(S.d.shade||{}).hue||0;$('huO').textContent=((S.d.shade||{}).hue||0);
+  $('mode').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.mode)));
+  $('modeHint').textContent=S.mode==='transform'?'Move the whole smile, its lines and its width.':S.mode==='outline'?'Reshape individual teeth. With Symmetric on, the matching tooth follows.':S.mode==='lips'?'Trace the inner lip contour so the mock-up sits behind the lips.':S.mode==='ruler'?'Measure distances in mm once the photo is calibrated.':'Freehand, straight lines or arrows. Marks are saved with this design and included in exports.';
+  $('drawOpts').hidden=S.mode!=='draw';
+  $('swatches').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.c===S.drawCol)));
+  $('drawTool').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.drawTool)));
+  $('drawW').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.v===S.drawW)));
+  syncDesigns();syncFace();syncFrame();
+  $('sym').checked=S.sym;$('link').checked=S.link;$('lib').value=S.d.lib;$('prop').value=S.d.prop;
+  $('op').value=Math.round(S.op*100);
+  document.querySelectorAll('[data-layer]').forEach(i=>i.checked=S.layers[i.dataset.layer]);
+  $('undo').disabled=hi<=0;$('redo').disabled=hi>=hist.length-1;
+  $('delOutline').textContent=S.sel?`Reset ${S.sel.replace('R','UR').replace(/^L/,'UL')}`:'Reset outlines';
+  syncAn();
+  const k=pxPerMm();$('scaleMsg').textContent=k?`Scale set: ${k.toFixed(1)} px per mm.`:'No scale yet. Sizes will show in pixels.';
+  if(document.activeElement!==$('mm'))$('mm').value=S.meas.mm||'';
+  const g=geom(),ce=central(g);
+  const w2=g.list.find(t=>t.id==='R2').w,w3=g.list.find(t=>t.id==='R3').w;
+  $('readout').innerHTML=`<span>UR1 width</span><span>${fmt(ce.w)}</span><span>UR1 length</span><span>${fmt(ce.len)}</span><span>UR1 width : length</span><span>${Math.round(ce.w/ce.len*100)}%</span><span>Lateral : central</span><span>${Math.round(w2/ce.w*100)}%</span><span>Canine : lateral</span><span>${Math.round(w3/w2*100)}%</span><span>Proportion</span><span>${PROP_LABEL[S.d.prop]}</span>`;
+}
+$('mode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.mode=b.dataset.v;if(S.mode==='transform')S.sel=null;syncUI();draw();});
+$('sym').onchange=e=>{S.sym=e.target.checked;syncUI();};$('link').onchange=e=>{S.link=e.target.checked;};
+$('lib').onchange=e=>{S.d.lib=e.target.value;commit();draw();};
+$('prop').onchange=e=>{S.d.prop=e.target.value;commit();draw();};
+$('op').oninput=e=>{S.op=e.target.value/100;draw();};
+document.querySelectorAll('[data-layer]').forEach(i=>i.onchange=()=>{S.layers[i.dataset.layer]=i.checked;draw();});
+$('layersBtn').onclick=()=>{const L=$('layers');L.hidden=!L.hidden;$('layersBtn').setAttribute('aria-expanded',String(!L.hidden));};
+$('mm').oninput=e=>{const v=parseFloat(e.target.value);S.meas.mm=v>0?v:null;syncUI();draw();};
+$('clearMeas').onclick=()=>{S.meas.mm=null;placeMeasure();syncUI();draw();};
+$('reset').onclick=()=>{S.d=initialDesign();S.sel=null;commit();draw();toast('Smile reset');};
+$('delOutline').onclick=()=>{if(S.sel){delete S.d.edits[S.sel];if(S.sym)delete S.d.edits[(S.sel[0]==='R'?'L':'R')+S.sel[1]];}else S.d.edits={};commit();draw();};
+
+/* ---------- photo ---------- */
+let initialDesign;
+const VIEWS={smile:'Smile (frontal)',rest:'Lips at rest',retracted:'Retracted',twelve:"12 o'clock",profile:'Profile',occlusal:'Occlusal'};
+const FRONTAL=['smile','rest','retracted'];
+const curPhoto=()=>S.photos[S.pi];
+const isFrontal=()=>!curPhoto()||FRONTAL.includes(curPhoto().view);
+const isProfile=()=>!!curPhoto()&&curPhoto().view==='profile';
+$('file').onchange=e=>{const f=e.target.files[0];if(!f)return;e.target.value='';
+  if(f.type.startsWith('video/')){openVideo(f);return;}
+  const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>loadImage(im,false,guessView());im.onerror=()=>toast('That file could not be opened as an image.');im.src=rd.result;};rd.readAsDataURL(f);};
+function guessView(){const used=S.photos.filter(p=>!p.sample).map(p=>p.view);return['smile','rest','retracted','twelve','profile','occlusal'].find(v=>!used.includes(v))||'smile';}
+function saveCur(){const P=curPhoto();if(!P)return;Object.assign(P,{meas:S.meas,face:S.face,lips:S.lips,guides:S.guides,an:S.an,gumAuto:S.gumAuto,profile:S.profile});}
+function applyPhoto(P){S.img=P.img;S.iw=P.iw;S.ih=P.ih;S.sample=P.sample;S.meas=P.meas;S.face=P.face;S.lips=P.lips;S.guides=P.guides;S.an=P.an;S.gumAuto=P.gumAuto;S.profile=P.profile;$('badge').hidden=!P.sample;}
+function switchPhoto(i){if(i===S.pi)return;saveCur();S.pi=i;applyPhoto(curPhoto());S.sel=null;S.wipe=null;S.faceActive=null;syncUI();fit();}
+function thumbOf(im){const c=document.createElement('canvas');c.width=112;c.height=84;const x=c.getContext('2d'),w=im.naturalWidth||im.width,h=im.naturalHeight||im.height,k=Math.max(112/w,84/h);
+  x.drawImage(im,(112-w*k)/2,(84-h*k)/2,w*k,h*k);return c.toDataURL('image/jpeg',.7);}
+function loadImage(im,sample,view){
+  saveCur();const first=!S.photos.length||S.photos.every(p=>p.sample);
+  const P={img:im,iw:im.naturalWidth||im.width,ih:im.naturalHeight||im.height,sample,view:view||'smile',meas:{a:[0,0],b:[0,0],mm:null},face:{on:true,pts:null},lips:null,guides:[],an:null,gumAuto:null,profile:null};
+  P.thumb=thumbOf(im);
+  if(sample||first){S.photos=[P];S.pi=0;}else{S.photos.push(P);S.pi=S.photos.length-1;}
+  applyPhoto(P);
+  if(!sample){
+    if(first){const W=S.iw;initialDesign=()=>defaultDesign(S.iw/2,S.ih*.62,W*.12,W*.065);S.designs=[{name:'Design A',d:null,hist:[],hi:-1}];S.di=0;
+      S.d=initialDesign();placeMeasure();hist=[];hi=-1;commit();S.face.pts=defaultFace();S.faceActive='pr';S.step='face';}
+    else{placeMeasure();S.face.pts=defaultFace();if(P.view==='profile')S.profile={pts:defaultProfile()};toast(`${VIEWS[P.view]} photo added. Change its view in the photo list if needed.`);}
+  }
+  syncUI();fit();
+}
+function syncPhotos(){
+  $('photoList').innerHTML=S.photos.map((p,i)=>`<div class="prow" aria-current="${i===S.pi}"><img src="${p.thumb}" data-i="${i}" alt="${VIEWS[p.view]} photo"><select data-i="${i}" aria-label="View">${Object.entries(VIEWS).map(([k,v])=>`<option value="${k}" ${k===p.view?'selected':''}>${v}</option>`).join('')}</select>${p.sample?'':`<button data-del="${i}" aria-label="Remove photo">✕</button>`}</div>`).join('');
+  const sel=$('photoSel');sel.hidden=S.photos.length<2;sel.innerHTML=S.photos.map((p,i)=>`<option value="${i}">${VIEWS[p.view]}</option>`).join('');sel.value=String(S.pi);
+}
+$('photoList').addEventListener('click',e=>{const im=e.target.closest('img');if(im){switchPhoto(+im.dataset.i);return;}
+  const d=e.target.closest('[data-del]');if(d){const i=+d.dataset.del;if(S.photos.filter(p=>!p.sample).length<2){toast('Keep at least one photo. Add another before removing this one.');return;}
+    saveCur();S.photos.splice(i,1);if(i<S.pi)S.pi--;else if(i===S.pi)S.pi=Math.min(i,S.photos.length-1);applyPhoto(curPhoto());syncUI();fit();}});
+$('photoList').addEventListener('change',e=>{const sl=e.target.closest('select');if(!sl)return;const P=S.photos[+sl.dataset.i];P.view=sl.value;
+  if(P.view==='profile'&&!P.profile){P.profile={pts:defaultProfile(P)};if(+sl.dataset.i===S.pi)S.profile=P.profile;}syncUI();draw();});
+$('photoSel').onchange=e=>switchPhoto(+e.target.value);
+
+/* ---------- video frame picker (dynamic analysis) ---------- */
+let vidURL=null;
+function openVideo(f){const v=$('vid');if(vidURL)URL.revokeObjectURL(vidURL);vidURL=URL.createObjectURL(f);v.src=vidURL;
+  $('vidView').innerHTML=Object.entries(VIEWS).map(([k,l])=>`<option value="${k}">${l}</option>`).join('');$('vidView').value=guessView();
+  v.onloadedmetadata=()=>{$('vidT').value=0;v.currentTime=Math.min(.1,v.duration||0);upd();};
+  v.onerror=()=>{$('vidModal').hidden=true;toast('That video could not be opened here. Try a photo, or export a still from the video.');};
+  const upd=()=>{$('vidTime').textContent=`${(v.currentTime||0).toFixed(2)} s of ${(v.duration||0).toFixed(1)} s`;};v.onseeked=upd;
+  $('vidModal').hidden=false;}
+$('vidT').oninput=e=>{const v=$('vid');if(v.duration)v.currentTime=v.duration*e.target.value/1000;};
+$('vidBack').onclick=()=>{const v=$('vid');v.currentTime=Math.max(0,v.currentTime-1/30);$('vidT').value=v.duration?v.currentTime/v.duration*1000:0;};
+$('vidFwd').onclick=()=>{const v=$('vid');v.currentTime=Math.min(v.duration||0,v.currentTime+1/30);$('vidT').value=v.duration?v.currentTime/v.duration*1000:0;};
+$('vidCancel').onclick=()=>{$('vidModal').hidden=true;$('vid').pause();};
+$('vidUse').onclick=()=>{const v=$('vid');if(!v.videoWidth){toast('The video has not loaded yet.');return;}
+  const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+  $('vidModal').hidden=true;v.pause();loadImage(c,false,$('vidView').value);};
+
+/* ---------- profile (sagittal) analysis ---------- */
+const PLMS=[['nt','Nose tip'],['cm','Columella'],['sn','Subnasale'],['ls','Upper lip'],['li','Lower lip'],['pg','Soft-tissue pogonion']];
+function defaultProfile(P){const w=(P||S).iw,h=(P||S).ih;return{nt:[w*.70,h*.42],cm:[w*.665,h*.465],sn:[w*.63,h*.49],ls:[w*.655,h*.56],li:[w*.645,h*.63],pg:[w*.62,h*.76]};}
+const curLMS=()=>isProfile()?PLMS:LMS;
+function curPts(){if(isProfile()){if(!S.profile)S.profile={pts:defaultProfile()};return S.profile.pts;}if(!S.face.pts)S.face.pts=defaultFace();return S.face.pts;}
+const faceOnNow=()=>isProfile()||S.face.on;
+function profileMetrics(P){if(!P)return null;const p=P.pts;
+  const v1=[p.cm[0]-p.sn[0],p.cm[1]-p.sn[1]],v2=[p.ls[0]-p.sn[0],p.ls[1]-p.sn[1]];
+  const nla=Math.acos(clamp((v1[0]*v2[0]+v1[1]*v2[1])/(Math.hypot(...v1)*Math.hypot(...v2)||1),-1,1))*180/Math.PI;
+  const ex=p.pg[0]-p.nt[0],ey=p.pg[1]-p.nt[1],el=Math.hypot(ex,ey)||1,sd=q=>((q[0]-p.nt[0])*ey-(q[1]-p.nt[1])*ex)/el,sgn=-Math.sign(sd(p.sn))||1;
+  return{nla,ul:sd(p.ls)*sgn,ll:sd(p.li)*sgn};}
+function profileRows(P,k){const m=profileMetrics(P);if(!m)return[];const f=px=>k?(px/k).toFixed(1)+' mm':Math.round(px)+' px';
+  return[['Nasolabial angle',m.nla.toFixed(0)+'° (typical 90–110°)'],['Upper lip to E-line',(m.ul>=0?'+':'−')+f(Math.abs(m.ul))],['Lower lip to E-line',(m.ll>=0?'+':'−')+f(Math.abs(m.ll))]];}
+function drawProfile(c,u,ui){if(!S.profile)S.profile={pts:defaultProfile()};const p=S.profile.pts;c.save();
+  const ext=(a,b,k,col,w,dash)=>{const dx=b[0]-a[0],dy=b[1]-a[1];c.strokeStyle=col;c.lineWidth=w*u;c.setLineDash(dash?[8*u,6*u]:[]);c.beginPath();c.moveTo(a[0]-dx*k,a[1]-dy*k);c.lineTo(b[0]+dx*k,b[1]+dy*k);c.stroke();};
+  ext(p.nt,p.pg,.15,'#3FE0C5',2.2,true);ext(p.sn,p.cm,.6,'#FFD23F',2,false);ext(p.sn,p.ls,.4,'#FFD23F',2,false);c.setLineDash([]);
+  if(ui){c.font=`500 ${11*u}px "Source Sans 3", Carlito, sans-serif`;c.textBaseline='middle';
+    PLMS.forEach(([k,l])=>{const[x,y]=p[k],act=S.faceActive===k;c.beginPath();c.arc(x,y,(act?9:7)*u,0,7);c.fillStyle=act?'#3FA9A0':'#fff';c.fill();c.lineWidth=2*u;c.strokeStyle='#0B2E4A';c.stroke();
+      c.textAlign='left';c.lineWidth=3*u;c.strokeStyle='rgba(0,0,0,.6)';c.fillStyle='#fff';c.strokeText(l,x+12*u,y);c.fillText(l,x+12*u,y);});}
+  c.restore();}
+
+/* ---------- mirror check (visual fragmentation) ---------- */
+S.mirror=null;
+function mirrorAxis(){const f=isFrontal()?faceMetrics():null,D=S.d;return f?f.midX(D.inc.M):D.real;}
+$('mirrorBtn').onclick=()=>{S.mirror=S.mirror==null?'R':S.mirror==='R'?'L':null;$('mirrorBtn').textContent=S.mirror==null?'Mirror: off':S.mirror==='R'?"Mirror: patient's right":"Mirror: patient's left";draw();};
+function drawMirror(){const a=mirrorAxis();ctx.save();ctx.beginPath();if(S.mirror==='R')ctx.rect(a,-1e6,2e6,4e6);else ctx.rect(a-2e6,-1e6,2e6,4e6);ctx.clip();
+  ctx.translate(2*a,0);ctx.scale(-1,1);ctx.drawImage(S.img,0,0);ctx.restore();
+  ctx.save();ctx.strokeStyle='rgba(63,224,197,.9)';ctx.lineWidth=1.5/V.scale;ctx.setLineDash([8/V.scale,6/V.scale]);ctx.beginPath();ctx.moveTo(a,0);ctx.lineTo(a,S.ih);ctx.stroke();ctx.restore();}
+
+/* ---------- visagism ---------- */
+const VISA={strong:{txt:'Strong: straight vertical lines and rectangular centrals that convey decisiveness.',st:['dominant','aggressive','vigorous']},
+  dynamic:{txt:'Dynamic: inclined lines and tapering, triangular forms that convey energy and extroversion.',st:['enhanced','focused','youthfulst']},
+  sensitive:{txt:'Sensitive: curved lines and oval, rounded forms that convey gentleness.',st:['oval','softened','naturalst']},
+  peaceful:{txt:'Peaceful: horizontal lines and broad, square-rounded forms that convey calm.',st:['hollywood','functional','mature']}};
+$('visaSel').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.d.visa=S.d.visa===b.dataset.v?null:b.dataset.v;commit();});
+function syncVisa(){const v=S.d.visa;$('visaSel').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));
+  $('visaTxt').textContent=v?VISA[v].txt+' Suggested styles are outlined.':'Pick a temperament to highlight matching styles (visagism, Paolucci and Coachman).';
+  $('styleGrid').querySelectorAll('button').forEach(b=>b.classList.toggle('sug',!!v&&VISA[v].st.includes(b.dataset.k)));}
+
+function placeMeasure(){const g=geom(),ce=central(g),y=ce.y0+ce.len*.8;S.meas.a=[ce.t.a-ce.w,y];S.meas.b=[ce.t.a,y];}
+
+/* ---------- export ---------- */
+let expView='design',lastCanvas=null;
+function smileRegion(){const D=S.d,sp=Math.max(D.spanL,D.spanR)*1.6,yc=(D.cerv.M+D.inc.M)/2,h=sp*1.0;return[D.mx-sp,yc-h/2,sp*2,h];}
+function scene(x,reg,box,opt){
+  const[sx,sy,sw,sh]=reg,[bx,by,bw,bh]=box,k=Math.min(bw/sw,bh/sh);
+  x.save();x.beginPath();x.rect(bx,by,bw,bh);x.clip();x.fillStyle='#0A0F14';x.fillRect(bx,by,bw,bh);
+  x.translate(bx+(bw-sw*k)/2,by+(bh-sh*k)/2);x.scale(k,k);x.translate(-sx,-sy);x.drawImage(S.img,0,0);
+  const u=Math.max(.8,bw/1100)/k,was=S.hide,lay={...S.layers};S.hide=false;
+  if(opt.light)Object.assign(S.layers,{meas:false,props:false,papilla:false,contacts:false,refs:false,real:false,ann:false});
+  if(opt.final){Object.assign(S.layers,FINAL);}
+  if(opt.face&&S.face.on)drawFace(x,u,false);if(opt.design)drawDesign(x,u,false);S.hide=was;S.layers=lay;x.restore();
+  if(opt.tag){x.font=`600 ${Math.round(Math.max(14,bw/40))}px "Source Sans 3", Carlito, sans-serif`;const tw=x.measureText(opt.tag).width,pd=8;
+    x.fillStyle='rgba(11,46,74,.88)';x.fillRect(bx+10,by+10,tw+pd*2,Math.max(14,bw/40)+pd*1.6);x.fillStyle='#fff';x.textBaseline='top';x.textAlign='left';x.fillText(opt.tag,bx+10+pd,by+10+pd*.8);}
+}
+function strip(x,W,y0,h){
+  x.fillStyle='#0B2E4A';x.fillRect(0,y0,W,h);x.textBaseline='middle';x.textAlign='left';let lx=h*.4;
+  if(S.logoImg){const lh=h*.68,lw=S.logoImg.width*lh/S.logoImg.height;x.fillStyle='#fff';x.fillRect(lx-4,y0+(h-lh)/2-4,lw+8,lh+8);x.drawImage(S.logoImg,lx,y0+(h-lh)/2,lw,lh);lx+=lw+h*.4;}
+  x.fillStyle='#fff';x.font=`600 ${h*.4}px Caladea, Georgia, serif`;x.fillText(S.clinic.name||'Smile Card',lx,y0+h/2);
+  const ce=central(geom());x.fillStyle='#A9C6D6';x.font=`500 ${h*.28}px ui-monospace, Consolas, monospace`;x.textAlign='right';
+  x.fillText(`${S.patRef?S.patRef+' · ':''}${S.designs.length>1?S.designs[S.di].name+' · ':''}UR1 ${fmt(ce.w)} × ${fmt(ce.len)} · W:L ${Math.round(ce.w/ce.len*100)}% · ${new Date().toLocaleDateString('en-GB')}`,W-h*.4,y0+h/2);
+}
+function renderExport(){const keep=S.pi;let fi=isFrontal()?S.pi:S.photos.findIndex(p=>FRONTAL.includes(p.view));
+  if(fi>=0&&fi!==S.pi){saveCur();S.pi=fi;applyPhoto(curPhoto());}
+  try{renderExport0();}finally{if(S.pi!==keep){saveCur();S.pi=keep;applyPhoto(curPhoto());}}}
+function renderExport0(){
+  $('expCompare').hidden=S.designs.length<2;if(expView==='compare'&&S.designs.length<2)expView='design';
+  let c;const showFace=S.layers.face&&S.face.on;
+  if(expView==='report')c=renderReport();
+  else{
+    let W,H,panels=[];const reg=smileRegion(),full=[0,0,S.iw,S.ih];
+    if(expView==='final'){const k=Math.min(1,2000/Math.max(S.iw,S.ih));W=Math.round(S.iw*k);H=Math.round(S.ih*k);panels=[[full,[0,0,W,H],{design:true,final:true}]];}
+    else if(expView==='design'||expView==='face'){const k=Math.min(1,2000/Math.max(S.iw,S.ih));W=Math.round(S.iw*k);H=Math.round(S.ih*k);
+      panels=[[full,[0,0,W,H],{design:true,face:expView==='face'||showFace}]];}
+    else if(expView==='pair'){W=2200;H=1100*reg[3]/reg[2];panels=[[reg,[0,0,1094,H],{tag:'Before'}],[reg,[1106,0,1094,H],{design:true,final:S.layers.fill,tag:S.layers.fill?'After (simulation)':'Design'}]];}
+    else{const n=S.designs.length,cols=Math.min(2,n),rows=Math.ceil(n/cols),pw=1094,ph=pw*reg[3]/reg[2];W=cols*pw+(cols-1)*12;H=rows*ph+(rows-1)*12;
+      S.designs.forEach((d,i)=>panels.push([reg,[(i%cols)*(pw+12),Math.floor(i/cols)*(ph+12),pw,ph],{design:true,tag:d.name,di:i}]));}
+    const sh=Math.round(Math.max(48,W*.032));c=document.createElement('canvas');c.width=W;c.height=Math.round(H+sh);const x=c.getContext('2d');
+    x.fillStyle='#0A0F14';x.fillRect(0,0,W,c.height);
+    const keep=S.di;panels.forEach(([r,b,o])=>{if(o.di!=null)S.di=o.di;scene(x,r,b,o);S.di=keep;});
+    strip(x,W,Math.round(H),sh);
+  }
+  lastCanvas=c;$('outImg').src=c.toDataURL('image/png');
+  $('expView').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===expView)));
+}
+function wrapText(x,text,X,Y,maxW,lh,maxY){
+  for(const para of text.split('\n')){let line='';for(const w of para.split(' ')){const t=line?line+' '+w:w;if(x.measureText(t).width>maxW&&line){if(Y>maxY)return Y;x.fillText(line,X,Y);Y+=lh;line=w;}else line=t;}
+    if(line){if(Y>maxY)return Y;x.fillText(line,X,Y);Y+=lh;}}return Y;}
+function renderReport(){
+  const W=1240,H=1754,M=60,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const NAVY='#0B2E4A',TEAL='#1C7293',GREY='#5C6E7D';
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);x.fillStyle=NAVY;x.fillRect(0,0,W,140);x.textBaseline='middle';x.textAlign='left';
+  let lx=M;if(S.logoImg){const lh=76,lw=Math.min(220,S.logoImg.width*lh/S.logoImg.height);x.fillStyle='#fff';x.fillRect(lx-6,32,lw+12,lh+12);x.drawImage(S.logoImg,lx,38,lw,lh);lx+=lw+30;}
+  x.fillStyle='#fff';x.font='600 34px Caladea, Georgia, serif';x.fillText(S.clinic.name||'Smile Card',lx,58);
+  x.font='500 18px "Source Sans 3", Carlito, sans-serif';x.fillStyle='#A9C6D6';x.fillText('Smile design report',lx,98);
+  x.textAlign='right';x.font='500 16px ui-monospace, Consolas, monospace';x.fillText(new Date().toLocaleDateString('en-GB'),W-M,58);
+  if(S.patRef)x.fillText('Patient: '+S.patRef,W-M,92);
+  const label=(t,y)=>{x.textAlign='left';x.textBaseline='alphabetic';x.fillStyle=TEAL;x.font='600 15px "Source Sans 3", Carlito, sans-serif';x.fillText(t.toUpperCase(),M,y);x.fillStyle='#DCE4EA';x.fillRect(M,y+8,W-2*M,1.5);};
+  const rows=(list,X,Y,w)=>{x.textBaseline='alphabetic';list.forEach(([k,v])=>{x.textAlign='left';x.fillStyle=GREY;x.font='400 16px "Source Sans 3", Carlito, sans-serif';x.fillText(k,X,Y);
+    x.textAlign='right';x.fillStyle=NAVY;x.font='500 16px ui-monospace, Consolas, monospace';x.fillText(v,X+w,Y);Y+=30;});return Y;};
+  // face
+  label('Face analysis',185);
+  if(S.face.on){scene(x,[0,0,S.iw,S.ih],[M,205,520,560],{face:true,design:true,light:true});rows(faceRows(),620,240,W-M-620);}
+  const pp=S.photos.find(q=>q.view==='profile');if(pp){const P=pp.profile||{pts:defaultProfile(pp)},k=pp.meas&&pp.meas.mm>0?Math.hypot(pp.meas.b[0]-pp.meas.a[0],pp.meas.b[1]-pp.meas.a[1])/pp.meas.mm:null;
+    const box=[620,450,230,315],kk=Math.min(box[2]/pp.iw,box[3]/pp.ih);x.save();x.beginPath();x.rect(...box);x.clip();x.fillStyle='#0A0F14';x.fillRect(...box);
+    x.translate(box[0]+(box[2]-pp.iw*kk)/2,box[1]+(box[3]-pp.ih*kk)/2);x.scale(kk,kk);x.drawImage(pp.img,0,0);const sp=S.profile;S.profile=P;drawProfile(x,1.4/kk,false);S.profile=sp;x.restore();
+    x.textBaseline='alphabetic';let yy2=470;profileRows(P,k).forEach(([a,b])=>{x.textAlign='left';x.fillStyle=GREY;x.font='400 14px "Source Sans 3", Carlito, sans-serif';x.fillText(a,870,yy2);yy2+=20;x.fillStyle=NAVY;x.font='500 14px ui-monospace, Consolas, monospace';x.fillText(b,870,yy2);yy2+=30;});}
+  else{x.fillStyle=GREY;x.font='400 16px "Source Sans 3", Carlito, sans-serif';x.textAlign='left';x.fillText('Face analysis not used for this case.',M,230);}
+  // smile
+  const reg=smileRegion(),ph=545*reg[3]/reg[2];label('Smile: before and design',805);
+  scene(x,reg,[M,825,545,ph],{tag:'Before'});scene(x,reg,[W-M-545,825,545,ph],{design:true,final:S.layers.fill,tag:S.designs[S.di].name});
+  // design table
+  const ty=825+ph+50;label('Design',ty);const g=geom(),ce=central(g);
+  x.textBaseline='alphabetic';x.fillStyle=GREY;x.font='600 13px "Source Sans 3", Carlito, sans-serif';x.textAlign='left';x.fillText('TOOTH',M,ty+40);
+  const ch=changes();x.textAlign='right';x.fillText('WIDTH',M+170,ty+40);x.fillText('% UR1',M+245,ty+40);x.fillText('LENGTH',M+345,ty+40);
+  if(ch){x.fillText('EDGE Δ',M+445,ty+40);x.fillText('ZENITH Δ',M+540,ty+40);}
+  let yy=ty+70;['R3','R2','R1','L1','L2','L3'].forEach(id=>{const t=g.list.find(q=>q.id===id),xc=t.a+t.s*t.w/2,len=(g.inf(xc)-g.cf(xc))*(t.bot-t.top);
+    x.textAlign='left';x.fillStyle=NAVY;x.font='500 15px "Source Sans 3", Carlito, sans-serif';x.fillText(id.replace('R','UR').replace(/^L/,'UL'),M,yy);
+    x.textAlign='right';x.font='500 14px ui-monospace, Consolas, monospace';x.fillText(fmt(t.w),M+170,yy);x.fillText(Math.round(t.w/ce.w*100)+'%',M+245,yy);x.fillText(fmt(len),M+345,yy);
+    if(ch){const c2=ch[id];x.fillText(c2?sgn(c2.edge):'–',M+445,yy);x.fillText(c2?sgn(c2.zen):'–',M+540,yy);}yy+=28;});
+  if(ch){x.textAlign='left';x.fillStyle=GREY;x.font='400 12px "Source Sans 3", Carlito, sans-serif';x.fillText('Δ vs existing teeth: edge + = longer, zenith + = more apical.',M,yy+2);yy+=20;}
+  const ry=rows(frameRows().concat([['Tooth library',LIB_LABEL[S.d.lib]],['Width proportion',PROP_LABEL[S.d.prop]]]),620,ty+40,W-M-620);
+  // notes
+  const ny=Math.max(yy,ry)+12;label('Notes',ny);x.fillStyle=NAVY;x.font='400 14px "Source Sans 3", Carlito, sans-serif';x.textAlign='left';x.textBaseline='alphabetic';
+  wrapText(x,$('noteTxt').value||noteText(),M,ny+36,W-2*M,21,H-70);
+  x.fillStyle=GREY;x.font='400 13px "Source Sans 3", Carlito, sans-serif';x.fillText('Created with Smile Card. 2D photographic simulation for planning and communication; not a guarantee of outcome.',M,H-40);
+  return c;
+}
+function noteText(){
+  const ce=central(geom()),cal=!!pxPerMm(),edited=Object.keys(S.d.edits).length;
+  const fm=faceMetrics(),D=S.d;
+  const extra=[];if(S.designs.length>1)extra.push(`${S.designs.length} design options recorded; this note describes ${S.designs[S.di].name}.`);
+  if(Math.abs(D.real-D.mx)>.5)extra.push(`Ideal midline set ${sideTxt(D.mx-D.real)} of the real dental midline.`);
+  if(fm)extra.push(`Facial analysis: real dental midline ${sideTxt(D.real-fm.midX(D.inc.M),true)} of the facial midline; interpupillary line ${fm.ip.toFixed(1)}° from horizontal; incisal plane ${fm.incCant.toFixed(1)}° and commissure line ${fm.commCant.toFixed(1)}° relative to the interpupillary line.`);
+  extra.push(`Smile arc: ${smileArc().toLowerCase()}${D.lip?' (lower lip traced at full smile)':''}.`);
+  const ch=changes();if(ch){const t=['R1','L1','R2','L2','R3','L3'].filter(k=>ch[k]).map(k=>`${k.replace('R','UR').replace(/^L/,'UL')} edge ${sgn(ch[k].edge)}, zenith ${sgn(ch[k].zen)}`);if(t.length)extra.push('Planned change vs existing teeth: '+t.join('; ')+'.');}
+  if(D.ann&&D.ann.length)extra.push('Annotations drawn on design.');
+  if(D.mix&&(D.mix.c||D.mix.l||D.mix.k))extra.push('Mixed tooth shapes: '+['c','l','k'].filter(k=>D.mix[k]).map(k=>({c:'centrals',l:'laterals',k:'canines/premolars'})[k]+' '+(STYLES[D.mix[k]]?STYLES[D.mix[k]].name:LIB_LABEL[D.mix[k]])).join(', ')+'.');
+  if(S.notes&&S.notes.trim())extra.push('Clinician notes: '+S.notes.trim());
+  return[`Digital smile design (Smile Card), ${new Date().toLocaleDateString('en-GB')}.`,
+    `Design UR5–UL5, ${LIB_LABEL[S.d.lib].toLowerCase()} tooth library, ${PROP_LABEL[S.d.prop]} width proportion${S.sym?', symmetric':''}.`,
+    `UR1 ${fmt(ce.w)} wide × ${fmt(ce.len)} long, W:L ${Math.round(ce.w/ce.len*100)}%.`,
+    cal?`Calibrated from a ${S.meas.mm} mm reference measurement on the photo.`:'Not calibrated: dimensions are in photo pixels, proportions only.',
+    `Cervical and incisal lines set on the frontal photograph${edited?'; individual outlines adjusted':''}.`].concat(extra).join('\n');
+}
+function openExport(){$('noteTxt').value=noteText();renderExport();$('modal').hidden=false;}
+$('exportTop').onclick=openExport;$('exportSide').onclick=openExport;$('closeM').onclick=()=>$('modal').hidden=true;
+$('expView').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;expView=b.dataset.v;renderExport();});
+$('noteTxt').addEventListener('change',()=>{if(expView==='report')renderExport();});
+$('copyImg').onclick=()=>{try{const p=new Promise(r=>lastCanvas.toBlob(r,'image/png'));
+  navigator.clipboard.write([new ClipboardItem({'image/png':p})]).then(()=>toast('Image copied'),()=>toast('Copy was blocked here. Long-press or right-click the image to save it.'));}
+  catch(_){toast('Copy was blocked here. Long-press or right-click the image to save it.');}};
+$('copyNote').onclick=()=>{const t=$('noteTxt').value;const fb=()=>{$('noteTxt').focus();$('noteTxt').select();toast('Text selected. Copy it with your keyboard or the menu.');};
+  try{navigator.clipboard.writeText(t).then(()=>toast('Note copied'),fb);}catch(_){fb();}};
+let tt;function toast(m){let el=document.querySelector('.toast');if(!el){el=document.createElement('div');el.className='toast';document.body.appendChild(el);}
+  el.textContent=m;el.hidden=false;clearTimeout(tt);tt=setTimeout(()=>el.hidden=true,2600);}
+
+/* ---------- analysis: find teeth, gingival margins, incisal edges and contacts ---------- */
+S.an=null;S.showAn=true;S.showMask=false;S.anOpt={cerv:true,inc:true,contacts:true,widths:false,each:true,sens:0};
+function toLab(r,g,b){r/=255;g/=255;b/=255;const f=c=>c>.04045?Math.pow((c+.055)/1.055,2.4):c/12.92;r=f(r);g=f(g);b=f(b);
+  const X=(r*.4124+g*.3576+b*.1805)/.95047,Y=r*.2126+g*.7152+b*.0722,Z=(r*.0193+g*.1192+b*.9505)/1.08883;
+  const h=t=>t>.008856?Math.cbrt(t):7.787*t+16/116;const fx=h(X),fy=h(Y),fz=h(Z);return[116*fy-16,500*(fx-fy),200*(fy-fz)];}
+function otsu(vals,lo,hi){const N=64,hist=new Array(N).fill(0);for(const v of vals)hist[clamp(Math.floor((v-lo)/(hi-lo)*N),0,N-1)]++;
+  const tot=vals.length;let sum=0;hist.forEach((h,i)=>sum+=i*h);let sB=0,wB=0,best=-1,th=N/2;
+  for(let i=0;i<N;i++){wB+=hist[i];if(!wB)continue;const wF=tot-wB;if(!wF)break;sB+=i*hist[i];const v=wB*wF*(sB/wB-(sum-sB)/wF)**2;if(v>best){best=v;th=i;}}
+  return lo+(th+.5)/N*(hi-lo);}
+function medianF(a,r){const o=new Float32Array(a.length).fill(NaN);for(let i=0;i<a.length;i++){if(isNaN(a[i]))continue;const w=[];
+  for(let k=i-r;k<=i+r;k++)if(k>=0&&k<a.length&&!isNaN(a[k]))w.push(a[k]);w.sort((x,y)=>x-y);o[i]=w[w.length>>1];}return o;}
+function analyse(){
+  const D=S.d,g=geom(),H=Math.max(20,D.inc.M-D.cerv.M);
+  const x0=Math.max(0,D.mx-D.spanL*1.3),x1=Math.min(S.iw,D.mx+D.spanR*1.3);
+  const y0=Math.max(0,Math.min(D.cerv.L[1],D.cerv.R[1],D.cerv.M)-H*.6),y1=Math.min(S.ih,Math.max(D.inc.L[1],D.inc.R[1],D.inc.M)+H*.5);
+  const rw=x1-x0,rh=y1-y0;if(rw<20||rh<20){toast('Move the outline over the teeth first.');return;}
+  const sf=Math.min(1,700/rw),W=Math.max(10,Math.round(rw*sf)),Hh=Math.max(10,Math.round(rh*sf));
+  const c=document.createElement('canvas');c.width=W;c.height=Hh;const x=c.getContext('2d',{willReadFrequently:true});
+  x.drawImage(S.img,x0,y0,rw,rh,0,0,W,Hh);
+  let px;try{px=x.getImageData(0,0,W,Hh).data;}catch(e){toast('This photo could not be read for analysis.');return;}
+  const n=W*Hh,L=new Float32Array(n),A=new Float32Array(n),C=new Float32Array(n);
+  // A holds hue angle (deg): gingiva/lips sit near red (~20-45), enamel near yellow (~70-100)
+  for(let i=0;i<n;i++){const lab=toLab(px[i*4],px[i*4+1],px[i*4+2]);L[i]=lab[0];A[i]=Math.atan2(lab[2],lab[1])*57.2958;C[i]=Math.hypot(lab[1],lab[2]);}
+  // reference colours: tooth from the core of the centrals, gingiva/lip from just above the cervical line
+  const toCy=yI=>(yI-y0)*sf,toCx=xI=>(xI-x0)*sf,toIx=cx=>cx/sf+x0;
+  const region=(arr,xa,xb,ya,yb)=>{const v=[];xa=clamp(Math.round(xa),0,W-1);xb=clamp(Math.round(xb),0,W-1);ya=clamp(Math.round(ya),0,Hh-1);yb=clamp(Math.round(yb),0,Hh-1);
+    for(let yy=ya;yy<=yb;yy+=1)for(let xx=xa;xx<=xb;xx+=1)v.push(arr[yy*W+xx]);v.sort((p,q)=>p-q);return v.length?v[v.length>>1]:0;};
+  const wc=g.list.find(t=>t.id==='R1').w,Hs=H*sf,cM=toCy(D.cerv.M);
+  const toothA=region(A,toCx(D.mx-wc*.6),toCx(D.mx+wc*.6),cM+Hs*.3,cM+Hs*.7),toothL=region(L,toCx(D.mx-wc*.6),toCx(D.mx+wc*.6),cM+Hs*.3,cM+Hs*.7);
+  const gumA=region(A,toCx(D.mx-D.spanL*.7),toCx(D.mx+D.spanR*.7),cM-Hs*.28,cM-Hs*.06);
+  const Ls=[];for(let i=0;i<n;i+=3)Ls.push(L[i]);const tL0=otsu(Ls,0,100);
+  const hueGap=Math.max(8,toothA-gumA),tA=toothA-hueGap*clamp(.5-S.anOpt.sens/40,.1,.9),tL=Math.min(Math.max(tL0,toothL-30),toothL-10)+S.anOpt.sens;
+  const tooth=new Uint8Array(n),gum=new Uint8Array(n);
+  for(let i=0;i<n;i++){if(L[i]>tL&&(A[i]>tA||C[i]<5))tooth[i]=1;else if(A[i]<=tA&&C[i]>=5&&L[i]>tL0*.5)gum[i]=1;}
+  // per column: the margin is the strongest red-to-tooth step near the cervical line,
+  // the incisal edge is the strongest bright-to-dark step near the incisal line
+  const cm=(arr,cx,ya,yb)=>{let s=0,k=0;for(let yy=Math.max(0,ya);yy<=Math.min(Hh-1,yb);yy++){s+=arr[yy*W+cx];k++;}return k?s/k:0;};
+  let yc=new Float32Array(W).fill(NaN),yi=new Float32Array(W).fill(NaN);const br=new Float32Array(W).fill(NaN);
+  const band=Hs*.45,r=Math.max(2,Math.round(Hs*.03));
+  for(let cx=0;cx<W;cx++){const xi=toIx(cx),ec=toCy(g.cf(xi)),ei=toCy(g.inf(xi)),hc=Math.max(ei-ec,Hs*.3);
+    let tc=0,tt=0;for(let yy=Math.round(ec+hc*.3);yy<=Math.round(ec+hc*.7);yy++){if(yy<0||yy>=Hh)continue;tt++;tc+=tooth[yy*W+cx];}
+    if(!tt||tc<tt*.5)continue;
+    // tooth runs in this column (small gaps from reflections tolerated); keep the run that best fills the expected tooth band
+    const gapTol=Math.max(2,Math.round(Hs*.04));let best=-1e9,ym=NaN,ye=NaN,st=-1,last=-1;
+    const consider=(a0,a1)=>{if(a0<ec-band||a0>ec+band)return;const e1=Math.min(a1,ei+band),ov=Math.min(e1,ei)-Math.max(a0,ec);const sc=ov-.5*Math.max(0,ec-a0);
+      if(e1-a0>Hs*.3&&sc>best){best=sc;ym=a0;ye=e1;}};
+    for(let yy=Math.max(0,Math.round(ec-band));yy<=Math.min(Hh-1,Math.round(ei+band));yy++){
+      if(tooth[yy*W+cx]){if(st<0||yy-last>gapTol+1){if(st>=0)consider(st,last);st=yy;}last=yy;}}
+    if(st>=0)consider(st,last);
+    if(isNaN(ym))continue;
+    yc[cx]=ym;yi[cx]=ye;br[cx]=cm(L,cx,Math.round(ym+(ye-ym)*.25),Math.round(ym+(ye-ym)*.75));}
+  yc=medianF(yc,3);yi=medianF(yi,3);
+  // contact score: short columns (papilla + incisal embrasure) and darker columns mark interproximal contacts
+  const lens=[],bv=[];for(let i=0;i<W;i++)if(!isNaN(yc[i])){lens.push(yi[i]-yc[i]);bv.push(br[i]);}
+  if(lens.length<W*.15){S.an={roi:[x0,y0,rw,rh],sf,mask:maskCanvas(tooth,gum,W,Hh),cerv:[],inc:[],contacts:[],teeth:[],found:0,mid:D.mx};S.showAn=true;syncUI();draw();
+    toast('No teeth found under the outline. Move it over the teeth or raise detection.');return;}
+  const mL=lens.reduce((a,b)=>a+b,0)/lens.length,mB=bv.reduce((a,b)=>a+b,0)/bv.length,sdB=Math.sqrt(bv.reduce((a,b)=>a+(b-mB)**2,0)/bv.length)||1;
+  let sc=new Float32Array(W);for(let i=0;i<W;i++)sc[i]=isNaN(yc[i])?-1:(yi[i]-yc[i])/mL+.35*(br[i]-mB)/sdB;
+  const sm=new Float32Array(W);for(let i=0;i<W;i++){let s=0,k=0;for(let j=i-2;j<=i+2;j++)if(j>=0&&j<W){s+=sc[j];k++;}sm[i]=s/k;}sc=sm;
+  const toC=xi=>(xi-x0)*sf,toI=cx=>cx/sf+x0;
+  const argmin=(a,b)=>{a=Math.max(0,Math.round(a));b=Math.min(W-1,Math.round(b));let bi=-1,bvv=1e9;for(let i=a;i<=b;i++)if(sc[i]<bvv){bvv=sc[i];bi=i;}return bi;};
+  const exp={R:g.list.filter(t=>t.s<0).map(t=>t.w*sf),L:g.list.filter(t=>t.s>0).map(t=>t.w*sf)};
+  const mid=argmin(toC(D.mx)-exp.L[0]*.35,toC(D.mx)+exp.L[0]*.35);
+  const teeth=[],contactsC=[mid];
+  for(const[side,s]of[['R',-1],['L',1]]){let prev=mid,alive=true;
+    for(let i=0;i<5;i++){const w=exp[side][i],e=prev+s*w;
+      let a=e-w*.35,b=e+w*.35;if(s>0)a=Math.max(a,prev+w*.55);else b=Math.min(b,prev-w*.55);
+      const cpt=(s>0&&a>=W-2)||(s<0&&b<=1)?-1:argmin(a,b);
+      if(cpt<0)alive=false;
+      let ok=false,zen=null,edge=null,lo=Math.min(prev,cpt),hi=Math.max(prev,cpt);
+      if(alive){const m=Math.round((hi-lo)*.15);let valid=0,zy=1e9,zx=0,ey=-1e9,ex=0,tot=0;
+        const zs=[],es=[];for(let k=lo+m;k<=hi-m;k++){tot++;if(!isNaN(yc[k])){valid++;zs.push([yc[k],k]);es.push([yi[k],k]);}}
+        if(zs.length){zs.sort((p,q)=>p[0]-q[0]);es.sort((p,q)=>q[0]-p[0]);const zq=zs[Math.floor(zs.length*.12)],eq=es[Math.floor(es.length*.12)];zy=zq[0];zx=zq[1];ey=eq[0];ex=eq[1];}
+        ok=tot>0&&valid>=tot*.55;if(ok){zen=[toI(zx),zy/sf+y0];edge=[toI(ex),ey/sf+y0];contactsC.push(cpt);}else alive=false;}
+      teeth.push({id:side+(i+1),side,s,i,ok,zen,edge,w:alive?Math.abs(cpt-prev)/sf:null});
+      if(alive)prev=cpt;}}
+  const seg=arr=>{const out=[];let cur=[];for(let i=0;i<W;i++){if(isNaN(arr[i])){if(cur.length>1)out.push(cur);cur=[];}else cur.push([toI(i),arr[i]/sf+y0]);}if(cur.length>1)out.push(cur);return out;};
+  S.an={roi:[x0,y0,rw,rh],sf,mask:maskCanvas(tooth,gum,W,Hh),cerv:seg(yc),inc:seg(yi),contacts:contactsC.map(toI),teeth,found:teeth.filter(t=>t.ok).length,mid:toI(mid),top:y0,bot:y1};
+  if(S.an.found>=2&&teeth[0].ok&&teeth[5].ok){S.d.real=S.an.mid;commit();}
+  S.showAn=true;syncUI();draw();
+}
+function maskCanvas(tooth,gum,W,Hh){const mc=document.createElement('canvas');mc.width=W;mc.height=Hh;const m=mc.getContext('2d'),im=m.createImageData(W,Hh);
+  for(let i=0;i<W*Hh;i++){if(tooth[i]){im.data[i*4]=40;im.data[i*4+1]=220;im.data[i*4+2]=200;im.data[i*4+3]=110;}else if(gum[i]){im.data[i*4]=235;im.data[i*4+1]=50;im.data[i*4+2]=150;im.data[i*4+3]=90;}}
+  m.putImageData(im,0,0);return mc;}
+function drawAnalysis(c,u){
+  const A=S.an;c.save();
+  if(S.showMask&&A.mask){c.imageSmoothingEnabled=false;c.drawImage(A.mask,...A.roi);}
+  const poly=(segs,col)=>{c.strokeStyle=col;c.lineWidth=2.4*u;c.setLineDash([]);segs.forEach(sg=>{c.beginPath();sg.forEach((p,i)=>i?c.lineTo(...p):c.moveTo(...p));c.stroke();});};
+  poly(A.cerv,'#FF4FA0');poly(A.inc,'#FFD23F');
+  c.strokeStyle='#FF9A3C';c.lineWidth=1.6*u;c.setLineDash([6*u,4*u]);
+  A.contacts.forEach(x=>{c.beginPath();c.moveTo(x,A.top);c.lineTo(x,A.bot);c.stroke();});c.setLineDash([]);
+  A.teeth.forEach(t=>{if(!t.ok)return;for(const[p,col]of[[t.zen,'#FF4FA0'],[t.edge,'#FFD23F']]){c.beginPath();c.arc(p[0],p[1],5*u,0,7);c.fillStyle=col;c.fill();c.lineWidth=1.5*u;c.strokeStyle='#1a1a1a';c.stroke();}});
+  c.restore();
+}
+function fitCurveLimited(pts,mx,sym,span,maxRise){
+  let f=fitCurve(pts,mx,sym||pts.length<6);if(!f)return null;
+  const rise=Math.max(Math.abs(f(mx-span)-f(mx)),Math.abs(f(mx+span)-f(mx)));
+  if(rise<=maxRise)return f;
+  // too curved for the evidence: keep a symmetric arc with capped curvature, levelled to the points
+  const c0=(f(mx-span)+f(mx+span)-2*f(mx))/2/(span*span),c=Math.sign(c0)*maxRise/(span*span);
+  let sw=0,sy=0;pts.forEach(([x,y,w])=>{sw+=w;sy+=w*(y-c*(x-mx)**2);});const a=sy/sw;return x=>a+c*(x-mx)**2;
+}
+function fitCurve(pts,mx,sym){ // weighted least squares parabola about the midline
+  const basis=sym||pts.length<4?(x=>[1,(x-mx)**2]):(x=>[1,x-mx,(x-mx)**2]),k=basis(0).length;
+  const M=Array.from({length:k},()=>new Array(k+1).fill(0));
+  pts.forEach(([x,y,w])=>{const b=basis(x);for(let i=0;i<k;i++){for(let j=0;j<k;j++)M[i][j]+=w*b[i]*b[j];M[i][k]+=w*b[i]*y;}});
+  for(let i=0;i<k;i++){let p=i;for(let r=i+1;r<k;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;[M[i],M[p]]=[M[p],M[i]];
+    if(Math.abs(M[i][i])<1e-9)return null;for(let r=0;r<k;r++)if(r!==i){const f=M[r][i]/M[i][i];for(let j=i;j<=k;j++)M[r][j]-=f*M[i][j];}}
+  const co=M.map((r,i)=>r[k]/r[i]);return x=>basis(x).reduce((s,b,i)=>s+b*co[i],0);
+}
+function applyAnalysis(){
+  const A=S.an,D=S.d,o=S.anOpt;if(!A||A.found<2){toast('Analyse the photo first. At least two teeth need to be found.');return;}
+  const WT=[3,2,2,1,1];
+  if(o.contacts){
+    D.mx=A.mid;const det={};
+    for(const side of['R','L']){const ws=[];for(const t of A.teeth.filter(t=>t.side===side).sort((a,b)=>a.i-b.i)){if(!t.ok)break;ws.push(t.w);}
+      if(!ws.length)continue;const base=RATIOS[D.prop==='detected'?'natural':D.prop],full=[];
+      for(let i=0;i<5;i++)full.push(i<ws.length?ws[i]:full[i-1]*base[i]/base[i-1]);
+      det[side]=full;D['span'+side]=o.widths?full.reduce((a,b)=>a+b,0):ws.reduce((a,b)=>a+b,0)/(base.slice(0,ws.length).reduce((a,b)=>a+b,0)/base.reduce((a,b)=>a+b,0));}
+    if(S.sym){const sp=(D.spanL+D.spanR)/2;D.spanL=D.spanR=sp;if(det.R&&det.L){det.R=det.L=det.R.map((v,i)=>(v+det.L[i])/2);}}
+    if(o.widths&&det.R&&det.L){D.det={R:det.R,L:det.L};D.prop='detected';}
+    else if(o.widths){const one=det.R||det.L;if(one){D.det={R:one,L:one};D.prop='detected';}}
+  }
+  const ok=A.teeth.filter(t=>t.ok),Lx=D.mx-D.spanL*1.4,Rx=D.mx+D.spanR*1.4;
+  const setLine=(k,f)=>{if(!f)return;D[k].L=[Lx,f(Lx)];D[k].R=[Rx,f(Rx)];D[k].M=f(D.mx);};
+  let cf=geom().cf;const c1=ok.find(t=>t.i===0),Hn=c1?c1.edge[1]-c1.zen[1]:D.inc.M-D.cerv.M;
+  if(o.cerv){const pts=ok.map(t=>{const[top,bot]=insetFor(t.i);const len=(t.edge[1]-t.zen[1])/((bot-top)||1);return[t.zen[0],t.zen[1]-top*len,WT[t.i]];});
+    const f=fitCurveLimited(pts,D.mx,S.sym,Math.max(D.spanL,D.spanR),Hn*.45);setLine('cerv',f);if(f)cf=f;}
+  if(o.inc){const pts=ok.map(t=>{const bot=insetFor(t.i)[1],y0=cf(t.edge[0]);return[t.edge[0],y0+(t.edge[1]-y0)/bot,WT[t.i]];});setLine('inc',fitCurveLimited(pts,D.mx,S.sym,Math.max(D.spanL,D.spanR),Hn*.9));}
+  if(D.inc.M<D.cerv.M+10)D.inc.M=D.cerv.M+10;
+  if(o.each){
+    const g=geom(),vz={},ve={};
+    ok.forEach(t=>{const gt=g.list.find(q=>q.id===t.id);if(!gt)return;const xc=gt.a+gt.s*gt.w/2,cy=g.cf(xc),iy=g.inf(xc),span=(iy-cy)||1;
+      vz[t.id]=clamp(((t.zen[1]-cy)/span-gt.top)/(gt.bot-gt.top),-.35,.35);ve[t.id]=o.inc?clamp(((t.edge[1]-cy)/span-gt.top)/(gt.bot-gt.top),.65,1.35):1;});
+    if(S.sym)for(let i=1;i<=5;i++){const r='R'+i,l='L'+i;if(r in vz&&l in vz){const z=(vz[r]+vz[l])/2,e=(ve[r]+ve[l])/2;vz[r]=vz[l]=z;ve[r]=ve[l]=e;}}
+    for(const id in vz){const t=g.list.find(q=>q.id===id),base=libPts(t.type,D.lib);
+      D.edits[id]=base.map(p=>[0,(vz[id]+p[1]*(ve[id]-vz[id]))-p[1]]);}
+  }
+  commit();draw();toast(`Aligned to ${A.found} of 10 teeth`);
+}
+function syncAn(){
+  const A=S.an,o=S.anOpt;
+  $('anCerv').checked=o.cerv;$('anInc').checked=o.inc;$('anCont').checked=o.contacts;$('anWidths').checked=o.widths;$('anEach').checked=o.each;
+  $('anSens').value=o.sens;$('anMask').checked=S.showMask;
+  $('anApply').disabled=!A||A.found<2;$('anClear').textContent=S.showAn?'Hide analysis':'Show analysis';$('anClear').disabled=!A;
+  $('anStatus').textContent=!A?'Not analysed yet.':A.found>=8?`Found ${A.found} of 10 teeth. Pink: gingival margin. Yellow: incisal edge. Orange: contact points.`:
+    A.found>=2?`Found ${A.found} of 10 teeth. Check the marks, move the outline closer or adjust detection, then apply.`:'Too few teeth found. Move the outline over the teeth or adjust detection, then analyse again.';
+}
+$('analyse').onclick=()=>{analyse();if(S.an)toast(`Found ${S.an.found} of 10 teeth`);};
+$('anApply').onclick=applyAnalysis;
+$('anClear').onclick=()=>{S.showAn=!S.showAn;syncUI();draw();};
+for(const[id,k]of[['anCerv','cerv'],['anInc','inc'],['anCont','contacts'],['anWidths','widths'],['anEach','each']])$(id).onchange=e=>{S.anOpt[k]=e.target.checked;};
+$('anSens').oninput=e=>{S.anOpt.sens=+e.target.value;};
+$('anSens').onchange=()=>{if(S.an)analyse();};
+$('anMask').onchange=e=>{S.showMask=e.target.checked;draw();};
+
+/* ---------- cases saved on this device (IndexedDB) ---------- */
+S.caseId=null;S.notes='';
+const DB={db:null,open(){return new Promise((res,rej)=>{try{const r=indexedDB.open('smilecard',1);r.onupgradeneeded=()=>r.result.createObjectStore('cases',{keyPath:'id'});
+    r.onsuccess=()=>res(this.db=r.result);r.onerror=()=>rej(r.error);}catch(e){rej(e);}});},
+  async run(mode,fn){const db=this.db||await this.open();return new Promise((res,rej)=>{const t=db.transaction('cases',mode),q=fn(t.objectStore('cases'));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error);});}};
+function imgData(P){const c=document.createElement('canvas');c.width=P.iw;c.height=P.ih;c.getContext('2d').drawImage(P.img,0,0);return c.toDataURL('image/jpeg',.92);}
+async function saveCase(){saveCur();S.designs[S.di].hist=hist;S.designs[S.di].hi=hi;
+  try{const id=S.caseId||('c'+Date.now()),rec={id,name:`Case ${new Date().toLocaleString('en-GB',{dateStyle:'short',timeStyle:'short'})}`,saved:Date.now(),notes:S.notes,
+    photos:S.photos.map(P=>({view:P.view,sample:P.sample,iw:P.iw,ih:P.ih,src:imgData(P),meas:P.meas,face:P.face,lips:P.lips,guides:P.guides,profile:P.profile})),pi:S.pi,
+    designs:S.designs.map(d=>({name:d.name,d:d.d})),di:S.di,opts:{sym:S.sym,link:S.link,layers:S.layers,op:S.op,lipClip:S.lipClip,hideTeeth:S.hideTeeth,gumSim:S.gumSim}};
+    await DB.run('readwrite',st=>st.put(rec));S.caseId=id;toast('Case saved on this device');listCases();}
+  catch(e){toast('Could not save here. Browser storage may be blocked or full.');}}
+async function listCases(){let all=[];try{all=await DB.run('readonly',st=>st.getAll())||[];}catch(_){ $('caseList').innerHTML='<p class="sub">Saving is not available in this browser.</p>';return;}
+  all.sort((a,b)=>b.saved-a.saved);
+  $('caseList').innerHTML=all.length?all.map(r=>`<div class="prow" aria-current="${r.id===S.caseId}"><img src="${r.photos[0]?r.photos[0].src:''}" data-open="${r.id}" alt="Open case"><span class="sub" style="cursor:pointer" data-open="${r.id}">${r.name.replace(/</g,'&lt;')}<br>${new Date(r.saved).toLocaleString('en-GB',{dateStyle:'short',timeStyle:'short'})} · ${r.photos.length} photo${r.photos.length>1?'s':''}</span><button data-delc="${r.id}" aria-label="Delete case">✕</button></div>`).join(''):'<p class="sub">No saved cases yet.</p>';}
+async function openCase(id){let r;try{r=await DB.run('readonly',st=>st.get(id));}catch(_){}if(!r){toast('That case could not be opened.');return;}
+  const imgs=await Promise.all(r.photos.map(p=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=p.src;})));
+  S.photos=r.photos.map((p,i)=>({img:imgs[i],iw:p.iw,ih:p.ih,sample:p.sample,view:p.view,meas:p.meas,face:p.face,lips:p.lips,guides:p.guides||[],profile:p.profile,an:null,gumAuto:null,thumb:imgs[i]?thumbOf(imgs[i]):''})).filter(p=>p.img);
+  S.pi=Math.min(r.pi||0,S.photos.length-1);S.designs=r.designs.map(d=>({name:d.name,d:d.d,hist:[],hi:-1}));S.di=Math.min(r.di||0,S.designs.length-1);
+  Object.assign(S,{sym:r.opts.sym,link:r.opts.link,op:r.opts.op,lipClip:r.opts.lipClip,hideTeeth:r.opts.hideTeeth,gumSim:r.opts.gumSim});S.layers={...S.layers,...r.opts.layers};
+  S.caseId=r.id;S.patRef='';S.notes=r.notes||'';$('caseNotes').value=S.notes;
+  const P0=S.photos[S.pi];initialDesign=()=>defaultDesign(P0.iw/2,P0.ih*.62,P0.iw*.12,P0.iw*.065);
+  applyPhoto(S.photos[S.pi]);hist=[];hi=-1;commit();S.step='design';S.sel=null;S.wipe=null;listCases();syncUI();fit();toast('Case opened');}
+$('caseSave').onclick=saveCase;
+$('caseNew').onclick=()=>{S.caseId=null;S.notes='';S.patRef='';$('caseNotes').value='';makeSample();setStep('photo');listCases();toast('New case. Add the first photo.');};
+$('caseList').addEventListener('click',async e=>{const o=e.target.closest('[data-open]');if(o){openCase(o.dataset.open);return;}
+  const d=e.target.closest('[data-delc]');if(d){if(d.dataset.confirm!=='1'){d.dataset.confirm='1';d.textContent='Delete?';setTimeout(()=>{d.dataset.confirm='';d.textContent='✕';},3000);return;}
+    try{await DB.run('readwrite',st=>st.delete(d.dataset.delc));}catch(_){}if(S.caseId===d.dataset.delc)S.caseId=null;listCases();toast('Case deleted');}});
+$('caseNotes').oninput=e=>{S.notes=e.target.value;};
+
+/* ---------- mix shapes, texture, group ---------- */
+function shapeOpts(){return '<option value="">Same as style</option><optgroup label="Smile styles">'+Object.entries(STYLES).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('')+
+  '</optgroup><optgroup label="Basic shapes"><option value="natural">Natural ovoid</option><option value="square">Square</option><option value="tapering">Tapering</option><option value="youthful">Youthful</option></optgroup>';}
+for(const[id,k]of[['mixC','c'],['mixL','l'],['mixK','k']]){$(id).innerHTML=shapeOpts();$(id).onchange=e=>{S.d.mix={...(S.d.mix||{}),[k]:e.target.value||null};S.d.edits={};commit();draw();};}
+function syncMix(){const m=S.d.mix||{};$('mixC').value=m.c||'';$('mixL').value=m.l||'';$('mixK').value=m.k||'';
+  $('texSel').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===((S.d.shade||{}).texture||'natural'))));$('groupAdj').checked=!!S.group;}
+$('texSel').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.d.shade={...(S.d.shade||{}),texture:b.dataset.v};if(!S.layers.fill)S.layers.fill=true;commit();draw();});
+$('groupAdj').onchange=e=>{S.group=e.target.checked;};
+
+/* ---------- lips, gingiva, rulers, guides, selective teeth ---------- */
+function defaultLips(){const D=S.d,H=D.inc.M-D.cerv.M,f=S.face.on&&S.face.pts?S.face.pts:null;
+  const L=f?f.cr:[D.mx-D.spanL*1.45,(D.cerv.M+D.inc.M)/2],R=f?f.cl:[D.mx+D.spanR*1.45,(D.cerv.M+D.inc.M)/2],P=[L];
+  const top=D.cerv.M-H*.18,bot=D.inc.M+H*.55;
+  for(let i=1;i<=5;i++){const t=i/6,x=L[0]+(R[0]-L[0])*t,e=1-Math.pow(2*t-1,2);P.push([x,(L[1]+R[1])/2+(top-(L[1]+R[1])/2)*Math.pow(e,.6)]);}
+  P.push(R);for(let i=5;i>=1;i--){const t=i/6,x=L[0]+(R[0]-L[0])*t,e=1-Math.pow(2*t-1,2);P.push([x,(L[1]+R[1])/2+(bot-(L[1]+R[1])/2)*Math.pow(e,.7)]);}
+  return{pts:P};}
+function detectLips(){
+  const D=S.d,g=geom(),H=Math.max(20,D.inc.M-D.cerv.M),base=defaultLips().pts,L=base[0],R=base[6];
+  const x0=Math.max(0,L[0]-H*.2),x1=Math.min(S.iw,R[0]+H*.2),y0=Math.max(0,D.cerv.M-H*1.3),y1=Math.min(S.ih,D.inc.M+H*1.6),rw=x1-x0,rh=y1-y0;
+  const sf=Math.min(1,600/rw),W=Math.max(10,Math.round(rw*sf)),Hh=Math.max(10,Math.round(rh*sf));
+  const c=document.createElement('canvas');c.width=W;c.height=Hh;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(S.img,x0,y0,rw,rh,0,0,W,Hh);
+  let px;try{px=x.getImageData(0,0,W,Hh).data;}catch(_){toast('This photo could not be read.');return;}
+  const n=W*Hh,Lc=new Float32Array(n),Ac=new Float32Array(n),Bc=new Float32Array(n);for(let i=0;i<n;i++){const l=toLab(px[i*4],px[i*4+1],px[i*4+2]);Lc[i]=l[0];Ac[i]=l[1];Bc[i]=l[2];}
+  const ref=(xa,xb,ya,yb)=>{const v=[[],[],[]];for(let yy=Math.max(0,Math.round(ya));yy<=Math.min(Hh-1,Math.round(yb));yy++)for(let xx=Math.max(0,Math.round(xa));xx<=Math.min(W-1,Math.round(xb));xx++){const i=yy*W+xx;v[0].push(Lc[i]);v[1].push(Ac[i]);v[2].push(Bc[i]);}
+    return v.map(a=>{a.sort((p,q)=>p-q);return a.length?a[a.length>>1]:0;});};
+  const cx=(D.mx-x0)*sf,cyT=(D.cerv.M-y0)*sf,Hs=H*sf,wc=g.list[0].w*sf;
+  const tooth=ref(cx-wc*.5,cx+wc*.5,cyT+Hs*.35,cyT+Hs*.65),gum=ref(cx-wc*.8,cx+wc*.8,cyT-Hs*.2,cyT-Hs*.06);
+  // lips are the most saturated band around the mouth: walk outwards from inside each tooth until the colour turns lip-red
+  const Cc=new Float32Array(n);for(let i=0;i<n;i++)Cc[i]=Math.hypot(Ac[i],Bc[i]);
+  const toothC=Math.hypot(tooth[1],tooth[2]),cs=[];
+  for(let xx=Math.round(cx-wc*1.5);xx<=Math.round(cx+wc*1.5);xx+=2)for(let yy=Math.round((D.inc.M-y0)*sf);yy<Math.min(Hh,Math.round((D.inc.M+H*1.6-y0)*sf));yy++)if(xx>=0&&xx<W)cs.push(Cc[yy*W+xx]);
+  cs.sort((p,q)=>p-q);const lipC=cs.length?cs[Math.floor(cs.length*.9)]:toothC+20,thrC=toothC+(lipC-toothC)*.55,darkL=tooth[0]*.4;
+  if(lipC-toothC<6){toast('Lips and teeth are too similar in colour here. Drag the points to trace the lips.');S.lips=defaultLips();syncUI();draw();return;}
+  const isLip=i=>Cc[i]>thrC&&Lc[i]>darkL;
+  const cols=11,P=[],B=[];
+  for(let k=1;k<=cols;k++){const xI=L[0]+(R[0]-L[0])*k/(cols+1),xc=Math.round((xI-x0)*sf);if(xc<0||xc>=W)continue;
+    const seed=Math.round(((g.cf(xI)+g.inf(xI))/2-y0)*sf),lim=Math.round(Hs*1.3);let top=-1,bot=-1,run=0;
+    for(let yy=seed;yy>=Math.max(0,seed-lim);yy--){if(isLip(yy*W+xc)){if(++run>=3){top=yy+3;break;}}else run=0;}
+    run=0;for(let yy=seed;yy<=Math.min(Hh-1,seed+lim*1.4);yy++){if(isLip(yy*W+xc)){if(++run>=3){bot=yy-3;break;}}else run=0;}
+    if(top>=0&&bot>top){P.push([xI,top/sf+y0]);B.push([xI,bot/sf+y0]);}}
+  if(P.length<5){toast('Could not find the lips. Drag the points to trace them.');S.lips=defaultLips();draw();return;}
+  const sm=a=>a.map((q,i)=>{const ys=[a[i-1],q,a[i+1]].filter(Boolean).map(v=>v[1]).sort((m,n)=>m-n);return[q[0],ys[ys.length>>1]];});
+  S.lips={pts:[L,...sm(P),R,...sm(B).reverse()]};S.lipSel=null;syncUI();draw();toast('Lip contour detected. Check and adjust the points.');
+}
+function polyPath(c,P){c.beginPath();P.forEach((q,i)=>i?c.lineTo(...q):c.moveTo(...q));c.closePath();}
+function drawLipEdit(){const P=S.lips.pts.map(q=>i2s(...q));ctx.save();ctx.strokeStyle='#FFD23F';ctx.lineWidth=2;
+  ctx.beginPath();P.forEach((q,i)=>i?ctx.lineTo(...q):ctx.moveTo(...q));ctx.closePath();ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);
+  P.forEach((q,i)=>{ctx.beginPath();ctx.arc(q[0],q[1],i===S.lipSel?8:6,0,7);ctx.fillStyle=i===S.lipSel?'#FFD23F':'#fff';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#5A4A10';ctx.stroke();});ctx.restore();}
+const GUMS={light:[232,150,155],coral:[222,122,122],deep:[180,82,92]};
+function gumRGB(){const k=S.d.gum||'auto';if(GUMS[k])return GUMS[k];if(S.gumAuto)return S.gumAuto;
+  try{const D=S.d,H=D.inc.M-D.cerv.M,c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');
+    x.drawImage(S.img,D.mx-D.spanL*.3,D.cerv.M-H*.25,D.spanL*.6,H*.15,0,0,1,1);const d=x.getImageData(0,0,1,1).data;S.gumAuto=[d[0],d[1],d[2]];return S.gumAuto;}catch(_){return GUMS.coral;}}
+function paintGum(c,g,vis,u){
+  const D=S.d,[r,gg,b]=gumRGB(),xs=vis.map(t=>[t.a,t.a+t.s*t.w]).flat(),xa=Math.min(...xs),xb=Math.max(...xs),H=D.inc.M-D.cerv.M,ph=D.papH||.4;
+  c.beginPath();c.moveTo(xa,g.cf(xa)-H*.35);for(let i=0;i<=30;i++){const x=xa+(xb-xa)*i/30;c.lineTo(x,g.cf(x)-H*.35);}
+  const contacts=[...new Set(xs.map(v=>+v.toFixed(2)))].sort((p,q)=>q-p);
+  contacts.forEach(x=>{const y0=g.cf(x),y=y0+ph*(g.inf(x)-y0);c.lineTo(x,y);});c.closePath();
+  const soft=!(S.lips&&S.lipClip),gr=c.createLinearGradient(0,D.cerv.M-H*.35,0,D.cerv.M+H*.5);gr.addColorStop(0,`rgba(${r*.85|0},${gg*.8|0},${b*.82|0},${soft?0:1})`);gr.addColorStop(soft?.4:.01,`rgba(${r*.9|0},${gg*.86|0},${b*.88|0},1)`);gr.addColorStop(1,`rgb(${r},${gg},${b})`);c.fillStyle=gr;c.fill();}
+function drawRulers(c,R,u){c.save();R.forEach(r=>{const d=Math.hypot(r.b[0]-r.a[0],r.b[1]-r.a[1]);if(d<2)return;const ang=Math.atan2(r.b[1]-r.a[1],r.b[0]-r.a[0]),nx=-Math.sin(ang)*6*u,ny=Math.cos(ang)*6*u;
+  c.strokeStyle='#FFD23F';c.lineWidth=1.8*u;c.beginPath();c.moveTo(...r.a);c.lineTo(...r.b);for(const e of[r.a,r.b]){c.moveTo(e[0]-nx,e[1]-ny);c.lineTo(e[0]+nx,e[1]+ny);}c.stroke();
+  const m=[(r.a[0]+r.b[0])/2,(r.a[1]+r.b[1])/2];c.font=`600 ${12*u}px ui-monospace, Consolas, monospace`;c.textAlign='center';c.lineWidth=3*u;c.strokeStyle='rgba(0,0,0,.7)';c.fillStyle='#FFD23F';
+  c.strokeText(fmt(d),m[0]+nx*2,m[1]+ny*2-4*u);c.fillText(fmt(d),m[0]+nx*2,m[1]+ny*2-4*u);});c.restore();}
+function drawGuides(w,h){if(!S.guides.length)return;ctx.save();ctx.strokeStyle='rgba(80,220,255,.9)';ctx.lineWidth=1.2;ctx.setLineDash([8,5]);
+  S.guides.forEach(gd=>{ctx.beginPath();if(gd.o==='h'){const y=i2s(0,gd.p)[1];ctx.moveTo(0,y);ctx.lineTo(w,y);}else{const x=i2s(gd.p,0)[0];ctx.moveTo(x,0);ctx.lineTo(x,h);}ctx.stroke();});ctx.restore();}
+function hitGuide(p){let bi=-1,bd=9;S.guides.forEach((gd,i)=>{const d=gd.o==='h'?Math.abs(i2s(0,gd.p)[1]-p[1]):Math.abs(i2s(gd.p,0)[0]-p[0]);if(d<bd){bd=d;bi=i;}});return bi;}
+function endSpecial(){if(drag&&drag.k&&drag.k.startsWith('gd:')){const i=+drag.k.slice(3),gd=S.guides[i];if(gd&&(gd.p<0||gd.p>(gd.o==='h'?S.ih:S.iw))){S.guides.splice(i,1);toast('Guideline removed');}draw();}
+  if(drag&&drag.k&&drag.k.startsWith('ru:')){const r=S.d.rulers[+drag.k.split(':')[1]];if(r&&Math.hypot(r.b[0]-r.a[0],r.b[1]-r.a[1])<3/V.scale)S.d.rulers.splice(+drag.k.split(':')[1],1);}}
+$('guideH').onclick=()=>{const c=s2i(cv.width/dpr/2,cv.height/dpr/2);S.guides.push({o:'h',p:c[1]});draw();toast('Drag the guideline into place. Drag it off the photo to remove it.');};
+$('guideV').onclick=()=>{const c=s2i(cv.width/dpr/2,cv.height/dpr/2);S.guides.push({o:'v',p:c[0]});draw();toast('Drag the guideline into place. Drag it off the photo to remove it.');};
+$('lipDetect').onclick=detectLips;
+$('lipReset').onclick=()=>{S.lips=defaultLips();S.lipSel=null;syncUI();draw();};
+$('lipDel').onclick=()=>{if(S.lipSel==null||S.lips.pts.length<=6)return;S.lips.pts.splice(S.lipSel,1);S.lipSel=null;syncUI();draw();};
+addEventListener('keydown',e=>{if((e.key==='Delete'||e.key==='Backspace')&&S.mode==='lips'&&S.lipSel!=null&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();$('lipDel').click();}});
+$('lipClip').onchange=e=>{S.lipClip=e.target.checked;draw();};
+$('hideTeeth').onchange=e=>{S.hideTeeth=e.target.checked;if(S.hideTeeth&&!S.layers.fill){S.layers.fill=true;}syncUI();draw();};
+$('rulerClear').onclick=()=>{S.d.rulers=[];commit();draw();};
+$('gumSim').onchange=e=>{S.gumSim=e.target.checked;draw();};
+$('gumSel').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.d.gum=b.dataset.v;commit();draw();});
+for(const[id,key]of[['chS','chroma'],['huS','hue']]){$(id).oninput=e=>{S.d.shade={...(S.d.shade||{}),[key]:+e.target.value};syncUI();draw();};$(id).onchange=()=>commit();}
+$('papS').oninput=e=>{S.d.papH=+e.target.value/100;S.layers.papilla=true;syncUI();draw();};$('papS').onchange=()=>commit();
+$('archS').oninput=e=>{S.d.arch=+e.target.value;syncUI();draw();};$('archS').onchange=()=>commit();
+$('toothChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const h=new Set(S.d.hidden||[]),id=b.dataset.id;
+  if(h.has(id))h.delete(id);else{if(h.size>=9){toast('Keep at least one tooth in the design.');return;}h.add(id);}S.d.hidden=[...h];commit();draw();});
+$('mode').addEventListener('click',()=>{if(S.mode==='lips'&&!S.lips){S.lips=defaultLips();syncUI();draw();}});
+
+/* ---------- smile style gallery ---------- */
+function stylePreview(cv2,key){const W=cv2.width,H=cv2.height,x=cv2.getContext('2d'),st=STYLES[key];x.fillStyle='#2A1215';x.fillRect(0,0,W,H);
+  const gm=x.createLinearGradient(0,0,0,H*.4);gm.addColorStop(0,'#C9707A');gm.addColorStop(1,'#E39B9E');x.fillStyle=gm;x.fillRect(0,0,W,H*.32);
+  const sum=st.ratio.slice(0,4).reduce((a,b)=>a+b,0),span=W*.52,cerv=H*.22,len=H*.62,arc=H*.12;
+  for(const sd of[-1,1]){let m=0;for(let i=0;i<4;i++){const w=st.ratio[i]/sum*span,ins=[[0,1],st.lat,st.can,[st.lat[0]*.7+.02,st.can[1]-.07]][i],a=W/2+sd*m;
+    const P=genPts(TYPES[i],st).map(([u,v])=>{const xx=a+sd*u*w,dx=(xx-W/2)/span,ci=cerv+arc*.3*dx*dx,ii=cerv+len-arc*dx*dx;return[xx,ci+(ins[0]+v*(ins[1]-ins[0]))*(ii-ci)];});
+    crPath(x,P);const tg=x.createLinearGradient(0,cerv,0,cerv+len);tg.addColorStop(0,'#E7DDC8');tg.addColorStop(.7,'#FAF8F2');tg.addColorStop(1,'#C9D3DC');x.fillStyle=tg;x.fill();
+    x.lineWidth=1;x.strokeStyle='rgba(90,70,55,.6)';x.stroke();m+=w;}}}
+function buildStyles(){const g=$('styleGrid');g.innerHTML='';$('styleOpts').innerHTML=Object.entries(STYLES).map(([k,v])=>`<option value="${k}">${v.name} style</option>`).join('');
+  for(const k in STYLES){const b=document.createElement('button');b.dataset.k=k;b.setAttribute('aria-label',STYLES[k].name+' style');
+    const c2=document.createElement('canvas');c2.width=180;c2.height=84;stylePreview(c2,k);const sp=document.createElement('span');sp.textContent=STYLES[k].name;b.append(c2,sp);g.append(b);}}
+$('styleGrid').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.d.lib=b.dataset.k;S.d.mix=null;if(S.d.prop!=='detected')S.d.prop='natural';S.d.edits={};commit();draw();toast(STYLES[b.dataset.k].name+' style applied');});
+function syncStyle(){$('styleGrid').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.k===S.d.lib)));
+  const st=STYLES[S.d.lib];$('libDesc').textContent=st?st.desc:'Basic shape: '+LIB_LABEL[S.d.lib]+'. Pick a smile style above for a complete look.';}
+buildStyles();
+
+/* ---------- mock-up colour ---------- */
+const SHADES={BL2:[249,248,243],B1:[245,241,228],A1:[243,236,219],A2:[238,227,203],A3:[230,215,186]};
+const FINAL={lines:false,outlines:false,fill:true,contacts:false,refs:false,meas:false,real:false,papilla:false,props:false,face:false,ann:false,lip:false};
+function withLayers(cfg,fn){const keep={...S.layers},op=S.op;Object.assign(S.layers,cfg);S.op=1;try{fn();}finally{S.layers=keep;S.op=op;}}
+function shadeRGB(){const sh=S.d.shade||{},b=SHADES[sh.preset||'A1'],k=(sh.bright||0)*2,cr=1+(sh.chroma||0)/10,hu=sh.hue||0,W=[252,251,247];
+  const c=b.map((v,i)=>W[i]+(v-W[i])*cr+k);c[0]+=hu*1.2;c[2]-=hu*1.8;return c.map(v=>clamp(Math.round(v),0,255));}
+function paintTooth(c,P,t,u){
+  const xs=P.map(p=>p[0]),ys=P.map(p=>p[1]),x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),w=x1-x0,h=y1-y0;
+  const[r,g,b]=shadeRGB(),col=(d,a)=>`rgba(${clamp(r+d,0,255)},${clamp(g+d,0,255)},${clamp(b+d*1.4,0,255)},${a})`;
+  c.save();crPath(c,P);c.clip();
+  let gr=c.createLinearGradient(0,y0,0,y1);gr.addColorStop(0,col(-24,1));gr.addColorStop(.22,col(-8,1));gr.addColorStop(.6,col(3,1));gr.addColorStop(1,col(-6,1));
+  c.fillStyle=gr;c.fillRect(x0-2,y0-2,w+4,h+4);
+  gr=c.createLinearGradient(0,y0+h*.7,0,y1);gr.addColorStop(0,'rgba(150,172,196,0)');gr.addColorStop(1,'rgba(118,140,170,.5)');c.fillStyle=gr;c.fillRect(x0-2,y0+h*.7,w+4,h*.32);
+  gr=c.createLinearGradient(x0,0,x1,0);gr.addColorStop(0,'rgba(95,72,52,.38)');gr.addColorStop(.2,'rgba(95,72,52,0)');gr.addColorStop(.8,'rgba(95,72,52,0)');gr.addColorStop(1,'rgba(95,72,52,.38)');c.fillStyle=gr;c.fillRect(x0-2,y0-2,w+4,h+4);
+  const hx=x0+w*(t.s<0?.44:.56),hy=y0+h*.42;gr=c.createRadialGradient(hx,hy,0,hx,hy,Math.max(w,h)*.32);gr.addColorStop(0,'rgba(255,255,255,.45)');gr.addColorStop(1,'rgba(255,255,255,0)');
+  c.save();c.translate(hx,hy);c.scale(.45,1);c.translate(-hx,-hy);c.fillStyle=gr;c.fillRect(x0-w,y0,w*3,h);c.restore();
+  const tex=(S.d.shade||{}).texture||'natural';
+  if(tex!=='smooth'&&(t.type==='c'||t.type==='l')){
+    // mamelon lobes: translucent gaps between three incisal lobes
+    for(const fu of[.36,.64]){const mx=x0+w*fu,g2=c.createRadialGradient(mx,y1-h*.1,0,mx,y1-h*.1,h*.22);g2.addColorStop(0,'rgba(120,145,175,.35)');g2.addColorStop(1,'rgba(120,145,175,0)');
+      c.save();c.translate(mx,y1-h*.1);c.scale(.35,1);c.translate(-mx,-(y1-h*.1));c.fillStyle=g2;c.fillRect(mx-w,y1-h*.4,w*2,h*.45);c.restore();}
+    // incisal halo
+    c.save();c.beginPath();c.rect(x0-2,y1-h*.07,w+4,h*.1);c.clip();c.lineWidth=2.2*u;c.strokeStyle='rgba(255,255,255,.6)';crPath(c,P);c.stroke();c.restore();
+  }
+  if(tex==='characterised'){c.strokeStyle='rgba(120,100,80,.08)';c.lineWidth=.8*u;for(let k=1;k<=7;k++){const yy=y0+h*(.08+k*.06);c.beginPath();c.moveTo(x0,yy);c.quadraticCurveTo(x0+w/2,yy+h*.015,x1,yy);c.stroke();}
+    c.fillStyle='rgba(255,255,255,.28)';c.beginPath();c.ellipse(x0+w*(t.s<0?.62:.38),y0+h*.3,w*.06,h*.03,0,0,7);c.fill();}
+  c.restore();
+  c.lineWidth=1*u;c.strokeStyle='rgba(90,72,58,.55)';crPath(c,P);c.stroke();
+}
+function syncShade(){const sh=S.d.shade||{};
+  $('shadeSel').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===(sh.preset||'A1'))));
+  $('brS').value=sh.bright||0;$('brO').textContent=(sh.bright>0?'+':'')+(sh.bright||0);
+  const vm=S.layers.fill&&S.layers.outlines?'both':S.layers.fill?'colour':'outline';$('viewMode').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===vm)));}
+$('shadeSel').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.d.shade={...(S.d.shade||{}),preset:b.dataset.v};if(!S.layers.fill)S.layers.fill=true;commit();draw();});
+$('brS').oninput=e=>{S.d.shade={...(S.d.shade||{}),bright:+e.target.value};syncShade();draw();};$('brS').onchange=()=>commit();
+$('viewMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const v=b.dataset.v;S.layers.fill=v!=='outline';S.layers.outlines=v!=='colour';syncUI();draw();});
+$('wipeBtn').onclick=()=>{S.wipe=S.wipe==null?.5:null;syncUI();draw();};
+
+/* ---------- central incisor sliders ---------- */
+function centralOf(id){const g=geom(),t=g.list.find(q=>q.id===id),xc=t.a+t.s*t.w/2;return{w:t.w,len:(g.inf(xc)-g.cf(xc))*(t.bot-t.top)};}
+function syncSliders(){const r=centralOf('R1'),l=centralOf('L1');
+  if(document.activeElement!==$('lenS')){$('lenS').min=(r.w*.9).toFixed(1);$('lenS').max=(r.w*1.7).toFixed(1);$('lenS').value=r.len;}
+  $('lenO').textContent=fmt(r.len);$('wlR').value=Math.round(r.w/r.len*100);$('wlL').value=Math.round(l.w/l.len*100);
+  $('wlRO').textContent=Math.round(r.w/r.len*100)+'%';$('wlLO').textContent=Math.round(l.w/l.len*100)+'%';}
+$('lenS').oninput=e=>{const D=S.d,dl=+e.target.value-centralOf('R1').len;D.inc.L[1]+=dl;D.inc.R[1]+=dl;D.inc.M+=dl;syncUI();draw();};
+for(const[id,side]of[['wlR','R1'],['wlL','L1']]){$(id).oninput=e=>{const D=S.d,c1=centralOf(side),f=(+e.target.value/100*c1.len)/c1.w;
+  if(S.sym){D.spanL*=f;D.spanR*=f;}else if(side==='R1')D.spanL*=f;else D.spanR*=f;syncUI();draw();};$(id).onchange=()=>commit();}
+$('lenS').onchange=()=>commit();
+
+/* ---------- nudges and per-tooth adjust ---------- */
+const stepPx=()=>{const k=pxPerMm();return k?k*.25:2/V.scale;};
+const DIRS={l:[-1,0],r:[1,0],u:[0,-1],d:[0,1]};
+$('framePad').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const[dx,dy]=DIRS[b.dataset.d].map(v=>v*stepPx()),D=S.d;
+  D.mx+=dx;for(const c of['cerv','inc']){D[c].L=[D[c].L[0]+dx,D[c].L[1]+dy];D[c].R=[D[c].R[0]+dx,D[c].R[1]+dy];D[c].M+=dy;}commit();draw();});
+const mirrorId=id=>(id[0]==='R'?'L':'R')+id[1];
+function editTooth(fn){if(!S.sel)return;const g=geom(),ids=S.group?g.list.filter(t=>!t.hid).map(t=>t.id):[S.sel];
+  ids.forEach(id=>editOne(id,fn,g,S.group?false:S.sym));commit();draw();}
+function editOne(id,fn,g,sym){const t=g.list.find(q=>q.id===id),base=libPts(t.type,S.d.lib),ed=S.d.edits[id]||base.map(()=>[0,0]);
+  const xc=t.a+t.s*t.w/2,h=((g.inf(xc)-g.cf(xc))*(t.bot-t.top))||1;let pts=base.map((p,i)=>[p[0]+(ed[i]||[0,0])[0],p[1]+(ed[i]||[0,0])[1]]);
+  const cu=pts.reduce((a,p)=>a+p[0],0)/pts.length,cvv=pts.reduce((a,p)=>a+p[1],0)/pts.length;
+  pts=pts.map(p=>fn(p,{cu,cv:cvv,w:t.w,h,s:t.s}));const ne=pts.map((p,i)=>[p[0]-base[i][0],p[1]-base[i][1]]);
+  S.d.edits[id]=ne;if(sym)S.d.edits[mirrorId(id)]=ne.map(e=>e.slice());}
+$('toothPad').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const[dx,dy]=DIRS[b.dataset.d],st=stepPx();
+  editTooth(([u,v],o)=>[u+dx*st/(o.s*o.w),v+dy*st/o.h]);});
+$('toothOps').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const op=b.dataset.op,k=op[1]==='+'?1.04:1/1.04;
+  if(op[0]==='h')editTooth(([u,v],o)=>[u,o.cv+(v-o.cv)*k]);
+  else if(op[0]==='w')editTooth(([u,v],o)=>[o.cu+(u-o.cu)*k,v]);
+  else if(op[0]==='s')editTooth(([u,v],o)=>[o.cu+(u-o.cu)*k,o.cv+(v-o.cv)*k]);
+  else{const a=(op[1]==='+'?1:-1)*2*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);
+    editTooth(([u,v],o)=>{const x=(u-o.cu)*o.w*o.s,y=(v-o.cv)*o.h,x2=x*ca-y*sa,y2=x*sa+y*ca;return[o.cu+x2/(o.w*o.s),o.cv+y2/o.h];});}});
+$('reflect').onclick=()=>{const id=S.sel;if(!id)return;const ed=S.d.edits[id];if(ed)S.d.edits[mirrorId(id)]=ed.map(e=>e.slice());else delete S.d.edits[mirrorId(id)];commit();draw();toast('Mirrored to the other side');};
+
+/* ---------- face analysis ---------- */
+const LMS=[['pr','Right pupil'],['pl','Left pupil'],['gl','Glabella'],['nt','Nose tip'],['ph','Philtrum'],['me','Menton'],['cr','Right commissure'],['cl','Left commissure']];
+function defaultFace(){const D=S.d,mw=D.spanL*1.45,my=(D.cerv.M+D.inc.M)/2,cy=v=>clamp(v,S.ih*.02,S.ih*.98),cx=v=>clamp(v,S.iw*.02,S.iw*.98);
+  const py=cy(my-mw*2.3);return{pr:[cx(D.mx-mw),py],pl:[cx(D.mx+mw),py],gl:[D.mx,cy(py-mw*.2)],nt:[D.mx,cy(my-mw*.95)],ph:[D.mx,cy(my-mw*.5)],me:[D.mx,cy(my+mw*1.45)],cr:[cx(D.mx-mw),my],cl:[cx(D.mx+mw),my]};}
+const deg=r=>r*180/Math.PI;
+function faceMetrics(){
+  if(!S.face.on||!S.face.pts)return null;const P=S.face.pts,D=S.d;
+  const mp=[P.gl,P.nt,P.ph,P.me];let sy=0,sx=0,syy=0,sxy=0;mp.forEach(([x,y])=>{sy+=y;sx+=x;syy+=y*y;sxy+=x*y;});
+  const n=mp.length,den=n*syy-sy*sy,b=den?(n*sxy-sx*sy)/den:0,a=(sx-b*sy)/n,midX=y=>a+b*y;
+  const ipA=Math.atan2(P.pl[1]-P.pr[1],P.pl[0]-P.pr[0]),commA=Math.atan2(P.cl[1]-P.cr[1],P.cl[0]-P.cr[0]);
+  const g=geom(),xl=D.mx-D.spanL,xr=D.mx+D.spanR,incA=Math.atan2(g.inf(xr)-g.inf(xl),xr-xl);
+  const midTilt=deg(Math.atan(b))+deg(ipA); // facial midline vs perpendicular to the interpupillary line
+  const sn=(P.nt[1]+P.ph[1])/2,mid3=Math.abs(sn-P.gl[1]),low3=Math.abs(P.me[1]-sn);
+  return{midX,ip:deg(ipA),commCant:deg(commA-ipA),incCant:deg(incA-ipA),midTilt,thirds:mid3?low3/mid3:0};
+}
+function sideTxt(dx,ofFace){if(Math.abs(dx)<.5)return 'on';const v=fmt(Math.abs(dx));return `${v} to the patient's ${dx>0?'left':'right'}`;}
+function faceRows(){const f=faceMetrics();if(!f)return[];const D=S.d;
+  return[['Interpupillary line',f.ip.toFixed(1)+'° from horizontal'],['Commissure line',f.commCant.toFixed(1)+'° to interpupillary'],['Facial midline tilt',f.midTilt.toFixed(1)+'°'],
+    ['Real dental midline',sideTxt(D.real-f.midX(D.inc.M))],['Ideal dental midline',sideTxt(D.mx-f.midX(D.inc.M))],['Lower : middle facial third',f.thirds.toFixed(2)]];}
+function lipF(){const D=S.d;return D.lip?quad(D.lip.L,D.lip.M,D.lip.R,D.mx):null;}
+function smileArc(){const D=S.d,g=geom(),sp=Math.min(D.spanL,D.spanR)*.75,H=D.inc.M-D.cerv.M;
+  const rise=g.inf(D.mx)-(g.inf(D.mx-sp)+g.inf(D.mx+sp))/2,lf=lipF(),lr=lf?lf(D.mx)-(lf(D.mx-sp)+lf(D.mx+sp))/2:null;
+  let label=rise<-.04*H?'Reverse':rise<.06*H?'Flat':'Convex (positive)';
+  if(lf&&lr>.04*H){if(rise>=.06*H){const r=rise/lr;label=r>.6&&r<1.6?'Consonant with lower lip':r<=.6?'Flatter than lower lip':'Steeper than lower lip';}else label+=', not following lower lip';}
+  return label;}
+function changes(){if(!S.an)return null;const g=geom(),out={};
+  S.an.teeth.forEach(t=>{if(!t.ok)return;const gt=g.list.find(q=>q.id===t.id);if(!gt)return;const ys=toothPts(gt,g).map(p=>p[1]);
+    out[t.id]={edge:Math.max(...ys)-t.edge[1],zen:t.zen[1]-Math.min(...ys)};});return Object.keys(out).length?out:null;}
+const sgn=px=>(px>=0?'+':'−')+fmt(Math.abs(px));
+function frameRows(){const D=S.d,f=faceMetrics(),r=[['Ideal vs real midline',sideTxt(D.mx-D.real)],['Smile arc',smileArc()]];
+  const ch=changes();if(ch&&ch.R1){r.push(['UR1 incisal edge',sgn(ch.R1.edge)+(ch.R1.edge>=0?' longer':' shorter')]);r.push(['UR1 zenith',sgn(ch.R1.zen)+(ch.R1.zen>=0?' apical':' coronal')]);}
+  if(f){r.push(['Ideal vs facial midline',sideTxt(D.mx-f.midX(D.inc.M))]);r.push(['Incisal plane cant',f.incCant.toFixed(1)+'° to interpupillary']);}
+  const ce=central(geom());r.push(['UR1 width : length',Math.round(ce.w/ce.len*100)+'%']);return r;}
+function drawFace(c,u,ui){
+  if(!S.face.on||!S.face.pts)return;const P=S.face.pts,f=faceMetrics();c.save();if(!ui)c.globalAlpha=Math.min(1,S.op);
+  const ext=(a,b,k,col,w)=>{const dx=b[0]-a[0],dy=b[1]-a[1];c.strokeStyle=col;c.lineWidth=w*u;c.beginPath();c.moveTo(a[0]-dx*k,a[1]-dy*k);c.lineTo(b[0]+dx*k,b[1]+dy*k);c.stroke();};
+  ext(P.pr,P.pl,.55,'#FFD23F',2.2);ext(P.cr,P.cl,.35,'#FF9A3C',2.2);
+  c.setLineDash([10*u,7*u]);c.strokeStyle='#3FE0C5';c.lineWidth=2.2*u;c.beginPath();c.moveTo(f.midX(0),0);c.lineTo(f.midX(S.ih),S.ih);c.stroke();c.setLineDash([]);
+  const half=Math.hypot(P.pl[0]-P.pr[0],P.pl[1]-P.pr[1])*.42;c.strokeStyle='rgba(255,255,255,.75)';c.lineWidth=1.4*u;
+  for(const k of['gl','nt','me']){c.beginPath();c.moveTo(P[k][0]-half,P[k][1]);c.lineTo(P[k][0]+half,P[k][1]);c.stroke();}
+  if(ui){c.font=`500 ${11*u}px "Source Sans 3", Carlito, sans-serif`;c.textBaseline='middle';
+    LMS.forEach(([k,lbl])=>{const[x,y]=P[k],act=S.faceActive===k;c.beginPath();c.arc(x,y,(act?9:7)*u,0,7);c.fillStyle=act?'#3FA9A0':'#fff';c.fill();c.lineWidth=2*u;c.strokeStyle='#0B2E4A';c.stroke();
+      c.textAlign='left';c.lineWidth=3*u;c.strokeStyle='rgba(0,0,0,.6)';c.fillStyle='#fff';c.strokeText(lbl,x+12*u,y);c.fillText(lbl,x+12*u,y);});}
+  else LMS.forEach(([k])=>{c.beginPath();c.arc(P[k][0],P[k][1],4*u,0,7);c.fillStyle='#fff';c.fill();});
+  c.restore();
+}
+function syncFace(){
+  const prof=isProfile();$('faceTitle').textContent=prof?'Profile analysis':'Face analysis';
+  $('faceHelp').textContent=prof?'Mark the soft-tissue profile. The E-line runs from nose tip to soft-tissue pogonion; the nasolabial angle is measured at subnasale.':'Mark the landmarks on a full-face photo. Pick one below, then tap the photo, or drag the points.';
+  $('faceOn').closest('label').hidden=prof;$('faceOn').checked=S.face.on;$('lmList').hidden=!faceOnNow();
+  if(prof){$('lmList').innerHTML=PLMS.map(([k,l])=>`<button data-k="${k}" aria-pressed="${S.faceActive===k}"><span class="dot"></span>${l}</button>`).join('');
+    $('faceRead').innerHTML=profileRows(S.profile||{pts:curPts()},pxPerMm()).map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');return;}
+  $('lmList').innerHTML=LMS.map(([k,l])=>`<button data-k="${k}" aria-pressed="${S.faceActive===k}"><span class="dot"></span>${l}</button>`).join('');
+  $('faceRead').innerHTML=S.face.on?faceRows().map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join(''):'<span>Face analysis is off.</span><span></span>';
+}
+function syncFrame(){$('frameRead').innerHTML=frameRows().map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');$('alignFace').disabled=!faceMetrics();
+  $('lipAdd').textContent=S.d.lip?'Remove lower lip line':'Add lower lip line';$('lipFollow').disabled=!S.d.lip;
+  $('chgHint').textContent=changes()?'Edge and zenith changes compare the design with the teeth found by Analyse photo.':'Run Analyse photo to see planned incisal edge and zenith changes against the existing teeth.';}
+$('lipAdd').onclick=()=>{const D=S.d;if(D.lip)D.lip=null;else{const H=D.inc.M-D.cerv.M;D.lip={L:[D.inc.L[0],D.inc.L[1]+H*.3],R:[D.inc.R[0],D.inc.R[1]+H*.3],M:D.inc.M+H*.18};S.layers.lip=true;}commit();draw();};
+$('lipFollow').onclick=()=>{const D=S.d,lf=lipF();if(!lf)return;const gap=lf(D.mx)-D.inc.M;D.inc.L=[D.inc.L[0],lf(D.inc.L[0])-gap];D.inc.R=[D.inc.R[0],lf(D.inc.R[0])-gap];
+  commit();draw();toast('Incisal curve now follows the lower lip');};
+$('lmList').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.faceActive=S.faceActive===b.dataset.k?null:b.dataset.k;syncUI();draw();});
+$('faceOn').onchange=e=>{S.face.on=e.target.checked;if(!S.face.pts)S.face.pts=defaultFace();syncUI();draw();};
+$('faceReset').onclick=()=>{if(isProfile()){S.profile={pts:defaultProfile()};S.faceActive='nt';}else{S.face.pts=defaultFace();S.faceActive='pr';}syncUI();draw();};
+$('alignFace').onclick=()=>{const f=faceMetrics();if(!f)return;const D=S.d,dx=f.midX(D.inc.M)-D.mx,sl=Math.tan(f.ip*Math.PI/180);
+  D.mx+=dx;for(const k of['cerv','inc']){D[k].L[0]+=dx;D[k].R[0]+=dx;const avg=(D[k].L[1]+D[k].R[1])/2;D[k].L[1]=avg+sl*(D[k].L[0]-D.mx);D[k].R[1]=avg+sl*(D[k].R[0]-D.mx);}
+  commit();draw();toast('Design centred on the facial midline and levelled to the pupils');};
+
+/* ---------- drawing ---------- */
+function drawAnn(c,ann){(ann||[]).forEach(m=>{c.strokeStyle=m.c;c.fillStyle=m.c;c.lineWidth=m.w;c.lineCap='round';c.lineJoin='round';c.beginPath();
+  m.pts.forEach((q,i)=>i?c.lineTo(...q):c.moveTo(...q));c.stroke();
+  if(m.t==='arrow'&&m.pts.length>1){const[a,b]=m.pts,ang=Math.atan2(b[1]-a[1],b[0]-a[0]),sz=m.w*4;c.beginPath();c.moveTo(b[0],b[1]);
+    c.lineTo(b[0]-sz*Math.cos(ang-.45),b[1]-sz*Math.sin(ang-.45));c.lineTo(b[0]-sz*Math.cos(ang+.45),b[1]-sz*Math.sin(ang+.45));c.closePath();c.fill();}});}
+$('swatches').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.drawCol=b.dataset.c;syncUI();});
+$('drawTool').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.drawTool=b.dataset.v;syncUI();});
+$('drawW').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.drawW=+b.dataset.v;syncUI();});
+$('drawUndo').onclick=()=>{if(S.d.ann.length){S.d.ann.pop();commit();draw();}};
+$('drawClear').onclick=()=>{if(S.d.ann.length){S.d.ann=[];commit();draw();toast('Drawing cleared. Undo brings it back.');}};
+
+/* ---------- design options ---------- */
+function syncDesigns(){const sel=$('designSel');sel.innerHTML=S.designs.map((d,i)=>`<option value="${i}">${d.name.replace(/</g,'&lt;')}</option>`).join('');sel.value=String(S.di);
+  if(document.activeElement!==$('designName'))$('designName').value=S.designs[S.di].name;$('designDel').disabled=S.designs.length<2;}
+$('designSel').onchange=e=>switchDesign(+e.target.value);
+$('designName').oninput=e=>{S.designs[S.di].name=e.target.value||'Untitled';syncDesigns();};
+$('designDup').onclick=()=>{S.designs.push({name:nextName(),d:JSON.parse(JSON.stringify(S.d)),hist:[],hi:-1});switchDesign(S.designs.length-1);toast(`${S.designs[S.di].name} created from a copy`);};
+$('designNew').onclick=()=>{const real=S.d.real;S.designs.push({name:nextName(),d:initialDesign(),hist:[],hi:-1});switchDesign(S.designs.length-1);S.d.real=real;commit();toast(`${S.designs[S.di].name} started`);};
+$('designDel').onclick=()=>{if(S.designs.length<2)return;const nm=S.designs[S.di].name;S.designs.splice(S.di,1);S.di=Math.max(0,S.di-1);hist=S.designs[S.di].hist;hi=S.designs[S.di].hi;syncUI();draw();toast(`${nm} deleted`);};
+
+/* ---------- clinic branding (this device only) ---------- */
+function loadClinic(){try{const v=JSON.parse(localStorage.getItem('smilecard.clinic')||'null');if(v)S.clinic=v;}catch(_){}
+  $('clinicName').value=S.clinic.name||'';setLogo(S.clinic.logo);}
+function saveClinic(){try{localStorage.setItem('smilecard.clinic',JSON.stringify(S.clinic));}catch(_){}}
+function setLogo(url){if(!url){S.logoImg=null;$('logoPrev').hidden=true;return;}const im=new Image();im.onload=()=>{S.logoImg=im;$('logoPrev').src=url;$('logoPrev').hidden=false;};im.src=url;}
+$('clinicName').oninput=e=>{S.clinic.name=e.target.value;saveClinic();};
+
+$('logoFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{
+  const k=Math.min(1,400/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+  S.clinic.logo=c.toDataURL('image/png');saveClinic();setLogo(S.clinic.logo);};im.src=rd.result;};rd.readAsDataURL(f);e.target.value='';};
+$('logoClear').onclick=()=>{S.clinic.logo=null;saveClinic();setLogo(null);};
+
+/* ---------- sample photo (illustration) ---------- */
+function makeSample(){
+  const W=2000,H=2400,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const bg=x.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#CBD5DC');bg.addColorStop(1,'#A9B7C2');x.fillStyle=bg;x.fillRect(0,0,W,H);
+  const skin=(y0,y1)=>{const g=x.createRadialGradient(1000,1350,200,1000,1450,900);g.addColorStop(0,'#EBC3A8');g.addColorStop(1,'#C9957A');return g;};
+  x.fillStyle='#25384A';x.beginPath();x.ellipse(1000,2560,820,420,0,0,7);x.fill();
+  x.fillStyle='#D3A188';x.fillRect(800,1900,400,560);
+  x.fillStyle='#3B2A22';x.beginPath();x.ellipse(1000,1050,760,700,0,0,7);x.fill();
+  x.fillStyle='#CF9C82';for(const ex of[335,1665]){x.beginPath();x.ellipse(ex,1330,62,135,0,0,7);x.fill();}
+  x.fillStyle=skin();x.beginPath();x.ellipse(1000,1380,660,790,0,0,7);x.fill();
+  x.save();x.beginPath();x.ellipse(1000,1380,660,790,0,0,7);x.clip();x.fillStyle='#3B2A22';x.beginPath();x.ellipse(1010,690,760,330,-.05,0,7);x.fill();
+  const sh=x.createRadialGradient(1000,2250,40,1000,2250,420);sh.addColorStop(0,'rgba(150,90,70,.0)');sh.addColorStop(1,'rgba(150,90,70,.18)');x.restore();
+  x.strokeStyle='#4A352B';x.lineWidth=26;x.lineCap='round';
+  x.beginPath();x.moveTo(590,1075);x.quadraticCurveTo(720,1020,870,1065);x.stroke();x.beginPath();x.moveTo(1130,1065);x.quadraticCurveTo(1280,1020,1410,1075);x.stroke();
+  for(const ex of[720,1280]){x.fillStyle='#F7F3EE';x.beginPath();x.ellipse(ex,1150,118,50,0,0,7);x.fill();
+    x.fillStyle='#6B4A32';x.beginPath();x.arc(ex,1150,46,0,7);x.fill();x.fillStyle='#141414';x.beginPath();x.arc(ex,1150,19,0,7);x.fill();
+    x.fillStyle='rgba(255,255,255,.85)';x.beginPath();x.arc(ex+14,1136,8,0,7);x.fill();
+    x.strokeStyle='#5A4034';x.lineWidth=7;x.beginPath();x.ellipse(ex,1150,120,52,0,Math.PI*1.05,Math.PI*1.95);x.stroke();}
+  x.strokeStyle='rgba(150,95,75,.55)';x.lineWidth=7;x.beginPath();x.moveTo(955,1180);x.quadraticCurveTo(935,1380,925,1500);x.stroke();
+  x.fillStyle='rgba(255,235,220,.45)';x.beginPath();x.ellipse(1000,1510,70,50,0,0,7);x.fill();
+  x.fillStyle='#8A5A48';for(const nx of[935,1065]){x.beginPath();x.ellipse(nx,1552,34,17,nx<1000?.25:-.25,0,7);x.fill();}
+  x.strokeStyle='rgba(150,95,75,.4)';x.lineWidth=6;x.beginPath();x.moveTo(980,1580);x.lineTo(985,1640);x.moveTo(1020,1580);x.lineTo(1015,1640);x.stroke();
+  // mouth, teeth and gingiva drawn in the original 1400 x 900 mouth frame, scaled into the face
+  x.save();x.translate(1000,1750);x.scale(.6,.6);x.translate(-700,-470);
+  const mouth=()=>{x.beginPath();x.moveTo(230,440);x.bezierCurveTo(430,330,970,330,1170,440);x.bezierCurveTo(990,720,410,720,230,440);x.closePath();};
+  x.save();mouth();x.clip();x.fillStyle='#2A1215';x.fillRect(0,0,1400,900);
+  const gm=x.createLinearGradient(0,340,0,430);gm.addColorStop(0,'#C9707A');gm.addColorStop(1,'#E39B9E');x.fillStyle=gm;x.fillRect(0,300,1400,140);
+  const sd={mx:712,spanL:318,spanR:312,prop:'natural',lib:'natural',edits:{R1:[[0,0],[0,0],[0,0],[0,0],[0,-.04],[0,-.08],[0,-.1],[0,-.08],[0,-.05],[0,0],[0,0],[0,0]],L2:[[0,0],[0,0],[.06,0],[.08,0],[.06,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+    cerv:{L:[260,375],R:[1140,380],M:412},inc:{L:[260,440],R:[1140,445],M:534}};
+  const keep=S.d;S.d=sd;const g=geom();
+  g.list.forEach(t=>{const P=toothPts(t,g);crPath(x,P);const tg=x.createLinearGradient(0,400,0,540);tg.addColorStop(0,'#D8C08F');tg.addColorStop(1,'#EDE1C6');x.fillStyle=tg;x.fill();x.strokeStyle='rgba(80,40,30,.45)';x.lineWidth=2;x.stroke();});
+  S.d=keep;x.restore();
+  x.lineWidth=40;x.strokeStyle='#C77F82';mouth();x.stroke();x.lineWidth=3;x.strokeStyle='rgba(90,40,40,.5)';mouth();x.stroke();
+  x.restore();
+  const T=(px,py)=>[(px-700)*.6+1000,(py-470)*.6+1750];
+  initialDesign=()=>{const L=T(300,374),R=T(1100,374);return{mx:1000,real:T(712,0)[0],spanL:195,spanR:195,prop:'natural',lib:'natural',edits:{},ann:[],
+    cerv:{L,R,M:T(0,404)[1]},inc:{L:T(300,450),R:T(1100,450),M:T(0,536)[1]}};};
+  S.designs=[{name:'Design A',d:null,hist:[],hi:-1}];S.di=0;S.d=initialDesign();hist=[];hi=-1;commit();
+  loadImage(c,true,'smile');S.meas.mm=8.5;placeMeasure();
+  S.face.pts={pr:[720,1150],pl:[1280,1150],gl:[1000,1060],nt:[1000,1515],ph:[1000,1605],me:[1000,2165],cr:T(232,440),cl:T(1168,440)};syncUI();
+}
+addEventListener('resize',resize);
+if(matchMedia('(max-width:860px)').matches){$('layers').hidden=true;$('layersBtn').setAttribute('aria-expanded','false');}
+loadClinic();makeSample();resize();syncUI();listCases();
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+</script>
+</body>
+</html>

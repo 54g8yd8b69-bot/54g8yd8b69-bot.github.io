@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all seven apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all eight apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -25,4 +25,14 @@ run({name:'Landing page',fn:async()=>{
     await pg.evaluate(()=>{location.hash='#/qi'});await pg.waitForSelector('.qi-kpis',{timeout:10000});
     await pg.evaluate(()=>{location.hash='#/compare/aud_consent_c2'});await pg.waitForSelector('.cmp-table',{timeout:10000});
     await noErrors(pg)});
+  await test('Smile Card opens under the site CSP, designs, saves a case and exports',async()=>{const pg=await page('/smile-card/');
+    await pg.waitForFunction(()=>typeof S==='object'&&S.photos&&S.photos.length===1,null,{timeout:15000});
+    expect(!(await pg.locator('#patRef').count()),'patient reference box must not exist');
+    await pg.click('#styleGrid button[data-k="naturalst"]');await pg.click('#viewMode button[data-v="colour"]');
+    await pg.evaluate(()=>{analyse();applyAnalysis()});expect(await pg.evaluate(()=>S.an.found)>=8,'analysis found too few teeth');
+    await pg.click('.steps button[data-step="photo"]');await pg.fill('#caseNotes','Test case');await pg.click('#caseSave');
+    await pg.waitForFunction(()=>document.querySelectorAll('#caseList .prow').length===1,null,{timeout:5000});
+    await pg.click('#exportTop');await pg.click('#expView button[data-v="report"]');
+    const w=await pg.evaluate(()=>lastCanvas.width);expect(w===1240,'report not rendered');
+    expect((await pg.request.get(BASE+'/smile-card/manifest.webmanifest')).ok(),'Smile Card manifest missing');await noErrors(pg)});
 }});
