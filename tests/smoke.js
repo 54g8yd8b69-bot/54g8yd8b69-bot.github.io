@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all nine apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all ten apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -54,7 +54,12 @@ run({name:'Landing page',fn:async()=>{
     for(const f of ['src/vendor/zxing-0.21.3.min.js','src/vendor/tesseract/tesseract.min.js','src/vendor/tesseract/worker.min.js','src/vendor/tesseract/tesseract-core-simd-lstm.wasm.js','data/ocr/eng.traineddata.gz'])
       expect((await pg.request.get(BASE+'/implantref/'+f)).ok(),'missing '+f);
     expect(await pg.locator('#scanBtn').count()===1,'scan button missing');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef']])
+  await test('Guide Card opens under the site CSP with its catalogue and search',async()=>{const pg=await page('/guide-card/');
+    await pg.waitForFunction(()=>typeof REFS!=='undefined'&&document.querySelector('details.cat'),null,{timeout:15000});
+    expect(await pg.evaluate(()=>REFS.length)>=150,'catalogue incomplete');
+    await pg.fill('#q','girft tmd');await pg.waitForTimeout(300);expect(/TMD/.test(await pg.locator('#app').innerText()),'search broken');
+    expect((await pg.request.get(BASE+'/guide-card/manifest.webmanifest')).ok(),'Guide Card manifest missing');await noErrors(pg)});
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

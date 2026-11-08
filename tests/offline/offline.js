@@ -6,9 +6,9 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   await p.goto(file);
-  ok(await p.locator('#home a.app').count() === 9, 'launcher shows 9 apps');
+  ok(await p.locator('#home a.app').count() === 10, 'launcher shows 10 apps');
   const frameFor = async id => { await p.waitForTimeout(1500); return p.frames().find(f => f.parentFrame() && f.name() === '' && f !== p.mainFrame() && f._suiteId === undefined && true) };
-  const ids = ['notile','chart','set-app','chrome-card','ortho-card','dentmat','dentalaudit','smile-card','implantref'];
+  const ids = ['notile','chart','set-app','chrome-card','ortho-card','dentmat','dentalaudit','smile-card','implantref','guide-card'];
   for (const id of ids) {
     errs.length = 0;
     await p.evaluate(i => location.hash = i, id);
