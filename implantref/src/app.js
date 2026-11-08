@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.5";
+  const APP_VERSION = "3.6";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -521,12 +521,16 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
       : c.minNcm !== undefined && c.minNcm !== null
         ? `${esc(c.minNcm)}–${esc(c.maxNcm)} <small>Ncm</small>`
         : `${esc(c.valueNcm)} <small>Ncm</small>`;
-  const bindingNote = (c) =>
-    !c.curationRuleId
-      ? ""
-      : c.refPrintedInDocument
-        ? `<div class="secondary">REF ${esc(c.subject.articleNumber)} is printed in the cited document (${esc(c.refPrintedInDocument)}).</div>`
-        : `<div class="secondary">The source states this by product type and platform; ImplantRef matched it to REF ${esc(c.subject.articleNumber)} by catalogue name${c.refPrintedInDocument === false ? " (REF not printed in the cited document)" : ""}. Confirm the product is covered.</div>`;
+  const bindingNote = (c) => {
+    if (!c.curationRuleId) return "";
+    const ref = esc(c.subject.articleNumber);
+    const printed = c.refPrintedInDocument ? `REF ${ref} is printed in the cited document (${esc(c.refPrintedInDocument)}). ` : "";
+    const b = c.bindingCheck;
+    if (b?.status === "confirmed")
+      return `<div class="secondary binding ok">${printed}<b>REF identity checked:</b> ${esc(c.subject.manufacturer)}'s own FDA device listing describes REF ${ref} as “${esc(b.description)}”, which matches the product and connection of the cited statement.</div>`;
+    if (printed) return `<div class="secondary">${printed}</div>`;
+    return `<div class="secondary">The source states this by product type and platform; ImplantRef matched it to REF ${ref} by catalogue name${c.refPrintedInDocument === false ? " (REF not printed in the cited document)" : ""}${b?.status === "unlisted" ? "; this REF is not in the manufacturer's FDA device listing, so its identity could not be checked independently" : ""}. Confirm the product is covered.</div>`;
+  };
   function targetText(c) {
     const t = c.target || {};
     if (t.articleNumber) return `with REF ${esc(t.articleNumber)}${t.manufacturer ? " (" + esc(t.manufacturer) + ")" : ""}`;
