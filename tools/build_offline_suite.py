@@ -180,7 +180,9 @@ def main():
 
     style, head, nav, footer = launcher(APPS)
     built = date.today().isoformat()
-    J = lambda o: script_safe(json.dumps(o, ensure_ascii=False, separators=(',', ':')))
+    # U+FFFD (used literally by docx's UTF-8 decoder) is written as a JSON escape: same value at runtime,
+    # but the file stays free of replacement characters that upload checks treat as corruption.
+    J = lambda o: script_safe(json.dumps(o, ensure_ascii=False, separators=(',', ':')).replace('\ufffd', '\\ufffd'))
     out = f'''<!doctype html>
 <html lang="en-GB">
 <head>
