@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en-GB" data-sw="off">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="ImplantRef – Straumann and Nobel Biocare restorative implant component reference with evidence-linked compatibility and torque documentation">
+<meta name="theme-color" content="#142d38">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ImplantRef">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>ImplantRef – Implant Component Reference</title>
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<a class="skip" href="#screen">Skip to content</a>
+<div class="app">
+<aside class="sidebar" aria-label="Main navigation">
+ <a class="brand" href="/" title="Back to all apps" aria-label="ImplantRef: back to all Notile apps">Implant<span>Ref</span></a><div class="brand-sub">RESTORATIVE COMPONENT REFERENCE</div>
+ <div class="nav-label">WORKSPACE</div>
+ <button class="nav active" data-view="dashboard"><span class="ico" aria-hidden="true">▦</span>Dashboard</button>
+ <button class="nav" data-view="identify"><span class="ico" aria-hidden="true">◎</span>Identify &amp; find parts</button>
+ <button class="nav" data-view="catalogue"><span class="ico" aria-hidden="true">⌕</span>Component catalogue</button>
+ <button class="nav" data-view="systems"><span class="ico" aria-hidden="true">◫</span>Implant systems</button>
+ <button class="nav" data-view="compare"><span class="ico" aria-hidden="true">⇄</span>Compare components</button>
+ <div class="nav-label">EVIDENCE</div>
+ <button class="nav" data-view="evidence"><span class="ico" aria-hidden="true">✓</span>Evidence &amp; IFU registry</button>
+ <div class="nav-label">MY REFERENCE</div>
+ <button class="nav" data-view="saved"><span class="ico" aria-hidden="true">☆</span>Saved components</button>
+ <button class="nav" data-view="casebox"><span class="ico" aria-hidden="true">▤</span>Case component lists</button>
+ <button class="nav" data-view="data"><span class="ico" aria-hidden="true">⚙</span>Data &amp; export</button>
+ <div class="sidebar-foot">ImplantRef <span id="appVersion"></span> · part of Notile<br>Clinical reference prototype<br><br>3,961 imported catalogue-context records.<br>Catalogue rows are not IFU-verified.</div>
+</aside>
+<main class="main">
+ <div class="topbar">
+  <a class="mobile-brand" href="/" title="Back to all apps" aria-label="ImplantRef: back to all Notile apps">Implant<span>Ref</span></a>
+  <div class="crumb" id="crumb">ImplantRef / Dashboard</div>
+  <div class="top-actions"><span class="local-pill">● Local dataset</span><button class="btn small" id="globalSearchBtn">Search REF</button></div>
+ </div>
+ <section class="content" id="screen" tabindex="-1"></section>
+</main>
+</div>
+<nav class="tabbar" aria-label="Mobile navigation">
+ <button class="tab active" data-view="dashboard"><span aria-hidden="true">▦</span>Home</button>
+ <button class="tab" data-view="identify"><span aria-hidden="true">◎</span>Identify</button>
+ <button class="tab" data-view="catalogue"><span aria-hidden="true">⌕</span>Search</button>
+ <button class="tab" data-view="saved"><span aria-hidden="true">☆</span>Saved</button>
+ <button class="tab" id="moreTab" aria-haspopup="true" aria-expanded="false"><span aria-hidden="true">≡</span>More</button>
+</nav>
+<div class="more-menu hidden" id="moreMenu" role="menu">
+ <button class="nav" data-view="systems" role="menuitem">◫ Implant systems</button>
+ <button class="nav" data-view="compare" role="menuitem">⇄ Compare components</button>
+ <button class="nav" data-view="evidence" role="menuitem">✓ Evidence &amp; IFU registry</button>
+ <button class="nav" data-view="casebox" role="menuitem">▤ Case component lists</button>
+ <button class="nav" data-view="data" role="menuitem">⚙ Data &amp; export</button>
+</div>
+<div class="sheet-backdrop hidden" id="sheetBackdrop"></div>
+<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet-inner" id="sheetBody"></div></div>
+<div id="printArea" class="print-only"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<noscript><p style="padding:20px">ImplantRef needs JavaScript. Serve the folder over HTTP (python3 -m http.server) or use the deployed HTTPS version.</p></noscript>
+<script src="data/catalogue-data.js"></script>
+<script src="data/evidence-data.js"></script>
+<script src="src/core.js"></script>
+<script src="src/app.js"></script>
+</body></html>

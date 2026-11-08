@@ -1,0 +1,15 @@
+{
+  "name": "ImplantRef – Implant Component Reference",
+  "short_name": "ImplantRef",
+  "description": "Straumann and Nobel Biocare restorative component reference with evidence-linked compatibility and torque documentation.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f7f8",
+  "theme_color": "#142d38",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all eight apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all nine apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -37,7 +37,16 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#exportTop');await pg.click('#expView button[data-v="report"]');
     const w=await pg.evaluate(()=>lastCanvas.width);expect(w===1240,'report not rendered');
     expect((await pg.request.get(BASE+'/smile-card/manifest.webmanifest')).ok(),'Smile Card manifest missing');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card']])
+  await test('ImplantRef opens under its CSP with all 3,961 records, exact REF lookup and torque evidence',async()=>{const pg=await page('/implantref/');
+    await pg.waitForFunction(()=>window.IMPLANTREF_DATA&&window.ImplantRefCore&&document.querySelector('.page-head h1'),null,{timeout:15000});
+    expect(await pg.evaluate(()=>IMPLANTREF_DATA.records.length)===3961,'catalogue incomplete');
+    expect(await pg.evaluate(()=>ImplantRefCore.exactRefMatches(IMPLANTREF_DATA.records,'046.415').length)===4,'exact REF lookup broken');
+    expect(await pg.evaluate(()=>IMPLANTREF_EVIDENCE.claims.length)>=800,'evidence registry missing');
+    expect(await pg.evaluate(()=>document.documentElement.dataset.sw)==='off','ImplantRef must defer to the site service worker');
+    await pg.goto(BASE+'/implantref/#/catalogue');await pg.fill('#q','38878');await pg.waitForTimeout(400);
+    await pg.click('tbody tr.data-row');await pg.waitForSelector('#sheet:not(.hidden) .awaiting',{timeout:5000});
+    expect((await pg.request.get(BASE+'/implantref/manifest.webmanifest')).ok(),'ImplantRef manifest missing');await noErrors(pg)});
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});
