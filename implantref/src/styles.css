@@ -1568,3 +1568,4 @@ html.no-scan [data-scan-start] {
   margin: 6px 0 2px;
   line-height: 1.45;
 }
+.compat-val { font-size: 1.02rem; margin-bottom: 2px; }

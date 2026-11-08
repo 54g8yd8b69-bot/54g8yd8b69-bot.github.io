@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.6";
+  const APP_VERSION = "3.7";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -567,7 +567,7 @@ ${
 <div class="sub">For this catalogue context (${esc(r.implantSystem)} · ${esc(r.platform)}): ${statusChip(ctxComp)}</div>
 ${
   comp.claims.length
-    ? comp.claims.map((g) => `<div class="claim"><div class="claim-head"><b>${g.claim.assertion === "contraindicated" ? "Contraindicated" : "Compatible"} ${targetText(g.claim)}</b>${standingChip(g)}</div>${claimSourceHtml(g)}${g.claim.excerpt ? `<div class="excerpt">“${esc(g.claim.excerpt)}”</div>` : ""}${claimActions(g)}</div>`).join("")
+    ? comp.claims.slice().sort((a, b) => xcRank(a.claim) - xcRank(b.claim)).map((g) => `<div class="claim"><div class="claim-head"><b>${g.claim.assertion === "contraindicated" ? "Contraindicated" : "Compatible"} ${targetText(g.claim)}</b>${standingChip(g)}</div>${g.claim.caution ? `<div class="warning"><b>Manufacturer restriction:</b> ${esc(g.claim.caution)}</div>` : ""}${crossCheckHtml(g.claim)}${claimSourceHtml(g)}${g.claim.excerpt ? `<div class="excerpt">“${esc(g.claim.excerpt)}”</div>` : ""}${bindingNote(g.claim)}${claimActions(g)}</div>`).join("")
     : `<div class="empty small"><b>Not established.</b> No product-specific manufacturer source is linked to REF ${esc(r.articleNumber)}. The catalogue platform label is not evidence of compatibility.</div>`
 }
 </div>
@@ -834,7 +834,8 @@ ${otherPending.length ? `<details class="pending-claims"><summary>${otherPending
     const refList = refs
       .map((ref) => {
         const r = records.find((x) => x.manufacturer === c.subject.manufacturer && C.normalizeRef(x.articleNumber) === C.normalizeRef(ref));
-        return `<li><b>${esc(ref)}</b> — ${esc(r ? r.component : "not in catalogue")}</li>`;
+        const fda = claims.find((x) => x.subject.articleNumber === ref)?.bindingCheck?.description;
+        return `<li><b>${esc(ref)}</b> — ${esc(r ? r.component : "not in catalogue")}${fda ? `<br><span class="secondary">Manufacturer's FDA description: ${esc(fda)}</span>` : ""}</li>`;
       })
       .join("");
     box.innerHTML = `<div class="modal-inner"><h2>${many ? `Verify ${refs.length} REFs` : "Verify evidence"}</h2><p class="sub"><b>${esc(claimWhat(c))}</b>${many ? "" : ` for REF <b>${esc(c.subject.articleNumber)}</b>`}</p><div class="muted-box">${doc.sourceUrl ? `<a href="${esc(doc.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(doc.documentTitle || "?")}</a>` : esc(doc.documentTitle || "?")} · ${esc(doc.revisionOrDate || "?")} · <b>${esc(c.pageOrSection)}</b><br>${esc(doc.sourceType || "")} · ${esc(doc.territory || "")} · retrieved ${esc(doc.retrievedAt || "")}${c.curationRuleId ? `<br>REFs matched by catalogue name (rule ${esc(c.curationRuleId)}); ${claims.filter((x) => x.refPrintedInDocument).length} of ${claims.length} are printed in the cited document.` : ""}${c.conflictGroup ? `<br><b>Declared conflict:</b> this source also gives a different instruction for the same products — verify only the one that matches the product IFU.` : ""}</div>
@@ -916,11 +917,12 @@ ${many ? `<details class="mt" open><summary>${refs.length} REFs covered by this 
       const statuses = rows.map((r) => C.resolveCompatibility(r, ev, want, evOpts()).status);
       const nConfirmed = statuses.filter((s) => s === "manufacturer-confirmed").length;
       const nContra = statuses.filter((s) => s === "contraindicated" || s === "contradictory").length;
+      const nPending = statuses.filter((s) => s === "pending").length;
       if (w.confirmedOnly) rows = rows.filter((_, i) => statuses[i] === "manufacturer-confirmed");
       const exact = rows.filter((r) => r.platform === w.platform);
       const wide = rows.filter((r) => r.platform !== w.platform);
       body = `<div class="panel"><div class="panel-head"><h2>${esc(typeLabel(w.intent))}</h2><div class="seg" role="group" aria-label="Evidence filter"><button class="${!w.confirmedOnly ? "on" : ""}" data-wiz-confirmed="0">All catalogue associations</button><button class="${w.confirmedOnly ? "on" : ""}" data-wiz-confirmed="1">Manufacturer-confirmed only</button></div></div>
-<div class="notice">${esc(w.manufacturer)} · ${esc(w.system)} · ${esc(w.platform)} — <b>${nConfirmed}</b> of ${statuses.length} with manufacturer-confirmed evidence for this context${nContra ? `, <b>${nContra}</b> contraindicated/contradictory` : ""}. Rows without evidence are <b>catalogue associations only</b> (status: Not established).</div>
+<div class="notice">${esc(w.manufacturer)} · ${esc(w.system)} · ${esc(w.platform)} — <b>${nConfirmed}</b> of ${statuses.length} with manufacturer-confirmed evidence for this context${nPending ? `, <b>${nPending}</b> sourced from the manufacturer's compatibility IFU and awaiting clinician review` : ""}${nContra ? `, <b>${nContra}</b> contraindicated/contradictory` : ""}. Rows without evidence are <b>catalogue associations only</b> (status: Not established).</div>
 ${w.confirmedOnly && !rows.length ? `<div class="empty">No manufacturer-confirmed evidence recorded for this context yet. Switch to “All catalogue associations”, then use <b>Find current IFU</b> and <b>Record evidence</b> on a component.</div>` : ""}
 ${exact.length ? `<h3>Listed for ${esc(w.platform)} (${exact.length})</h3>${recordTable(exact, { compat: { ev, want } })}` : ""}
 ${wide.length ? `<h3 class="mt">Listed under “All platforms” for ${esc(w.system)} (${wide.length})</h3><div class="sub">System-wide catalogue listing — confirm platform applicability in the IFU.</div>${recordTable(wide, { compat: { ev, want } })}` : ""}
@@ -1163,7 +1165,7 @@ ${missing ? `<div class="warning">${missing} item(s) are not in the current cata
           .map(([rid, gs]) => {
             const c = gs[0].claim;
             const s0 = gs[0].source;
-            return `<div class="claim queue-row"><div class="claim-head"><div><div class="torque-val small-val">${torqueHtml(c)}</div><b>${esc(c.application)}</b><div class="secondary">${esc(s0.documentTitle)} · ${esc(s0.revisionOrDate)} · ${esc(c.pageOrSection)}</div><details><summary>${gs.length} REF${gs.length > 1 ? "s" : ""}</summary><div class="ref-chips">${gs.map((g) => { const r = recFor(g.claim); return r ? `<button class="chip" data-record="${r.recordId}">${esc(g.claim.subject.articleNumber)}</button>` : esc(g.claim.subject.articleNumber); }).join(" ")}</div></details></div><span class="btn-row"><span class="pill flag">${gs.length} pending</span>${c.crossCheck?.status === "agreed" ? '<span class="pill xc">Cross-checked</span>' : c.crossCheck?.status === "disagreed" ? '<span class="pill danger">Cross-check disagreed</span>' : ""}${c.conflictGroup ? '<span class="pill danger">Conflicting source</span>' : ""}${c.refPrintedInDocument !== undefined ? `<span class="pill neutral">${gs.filter((g) => g.claim.refPrintedInDocument).length}/${gs.length} REFs printed</span>` : ""}</span></div><div class="claim-actions"><a class="btn small" href="${esc(s0.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open IFU ↗</a><button class="btn small primary" data-group-verify="${esc(rid)}">Verify group…</button><button class="btn small" data-group-flag="${esc(rid)}">Doesn't match IFU</button></div></div>`;
+            return `<div class="claim queue-row"><div class="claim-head"><div>${c.claimType === "compatibility" ? `<div class="compat-val">Compatible with <b>${esc(c.target?.implantSystem || "")} · ${esc(c.target?.platform || "")}</b></div><b>${esc(c.excerpt && c.excerpt.startsWith("Listed") ? "Implant table row" : "Implant statement")}</b>` : `<div class="torque-val small-val">${torqueHtml(c)}</div><b>${esc(c.application)}</b>`}<div class="secondary">${esc(s0.documentTitle)} · ${esc(s0.revisionOrDate)} · ${esc(c.pageOrSection)}</div><details><summary>${gs.length} REF${gs.length > 1 ? "s" : ""}</summary><div class="ref-chips">${gs.map((g) => { const r = recFor(g.claim); return r ? `<button class="chip" data-record="${r.recordId}">${esc(g.claim.subject.articleNumber)}</button>` : esc(g.claim.subject.articleNumber); }).join(" ")}</div></details></div><span class="btn-row"><span class="pill flag">${gs.length} pending</span>${c.crossCheck?.status === "agreed" ? '<span class="pill xc">Cross-checked</span>' : c.crossCheck?.status === "disagreed" ? '<span class="pill danger">Cross-check disagreed</span>' : ""}${c.conflictGroup ? '<span class="pill danger">Conflicting source</span>' : ""}${c.refPrintedInDocument !== undefined ? `<span class="pill neutral">${gs.filter((g) => g.claim.refPrintedInDocument).length}/${gs.length} REFs printed</span>` : ""}</span></div><div class="claim-actions"><a class="btn small" href="${esc(s0.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open IFU ↗</a><button class="btn small primary" data-group-verify="${esc(rid)}">Verify group…</button><button class="btn small" data-group-flag="${esc(rid)}">Doesn't match IFU</button></div></div>`;
           })
           .join("")}</div>`
       : "";
