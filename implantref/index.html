@@ -40,7 +40,7 @@
  <div class="topbar">
   <a class="mobile-brand" href="/" title="Back to all apps" aria-label="ImplantRef: back to all Notile apps">Implant<span>Ref</span></a>
   <div class="crumb" id="crumb">ImplantRef / Dashboard</div>
-  <div class="top-actions"><span class="local-pill">● Local dataset</span><button class="btn small" id="globalSearchBtn">Search REF</button></div>
+  <div class="top-actions"><span class="local-pill">● Local dataset</span><button class="btn small primary" id="scanBtn" aria-label="Scan a product label">⌖ Scan label</button><button class="btn small" id="globalSearchBtn">Search REF</button></div>
  </div>
  <section class="content" id="screen" tabindex="-1"></section>
 </main>
@@ -66,6 +66,8 @@
 <noscript><p style="padding:20px">ImplantRef needs JavaScript. Serve the folder over HTTP (python3 -m http.server) or use the deployed HTTPS version.</p></noscript>
 <script src="data/catalogue-data.js"></script>
 <script src="data/evidence-data.js"></script>
+<script src="data/gtin-data.js"></script>
 <script src="src/core.js"></script>
+<script src="src/scan.js"></script>
 <script src="src/app.js"></script>
 </body></html>

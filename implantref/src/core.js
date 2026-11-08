@@ -356,6 +356,143 @@
     return "";
   }
 
+  /* ---------------------------------------------------------- label scanning
+   * Barcode payloads (GS1 / HIBC) and OCR text are turned into candidate catalogue REFs.
+   * A candidate is only ever a REF that exists in the catalogue; nothing is guessed. */
+  const GS = "\u001d";
+  const GS1_FIXED = { "00": 18, "01": 14, "02": 14, "11": 6, "12": 6, "13": 6, "15": 6, "16": 6, "17": 6, "20": 2 };
+  const GS1_VAR = ["10", "21", "22", "240", "241", "30", "37", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "235", "7240"];
+
+  function gs1Date(yymmdd) {
+    if (!/^\d{6}$/.test(yymmdd)) return null;
+    const yy = +yymmdd.slice(0, 2), mm = yymmdd.slice(2, 4), dd = yymmdd.slice(4, 6);
+    const yyyy = yy >= 51 ? 1900 + yy : 2000 + yy;
+    return `${yyyy}-${mm}-${dd === "00" ? "end" : dd}`;
+  }
+
+  /** Parse a GS1 element string: "(01)…(17)…(10)…", "]d2" + FNC1 (GS) form, or concatenated digits. */
+  function parseGS1(raw) {
+    let s = String(raw || "").replace(/^\]([dCQe][0-9])/, "").trim();
+    const out = {};
+    if (/^\(\d{2,4}\)/.test(s)) {
+      for (const m of s.matchAll(/\((\d{2,4})\)([^(]*)/g)) out[m[1]] = m[2].trim();
+    } else {
+      if (s.startsWith(GS)) s = s.slice(1);
+      let i = 0, guard = 0;
+      while (i < s.length && guard++ < 20) {
+        if (s[i] === GS) { i++; continue; }
+        const ai2 = s.slice(i, i + 2), ai3 = s.slice(i, i + 3), ai4 = s.slice(i, i + 4);
+        if (GS1_FIXED[ai2] !== undefined) {
+          out[ai2] = s.slice(i + 2, i + 2 + GS1_FIXED[ai2]);
+          i += 2 + GS1_FIXED[ai2];
+          continue;
+        }
+        const ai = GS1_VAR.find((a) => (a.length === 4 ? ai4 : a.length === 3 ? ai3 : ai2) === a);
+        if (!ai) break;
+        const start = i + ai.length;
+        let end = s.indexOf(GS, start);
+        if (end < 0) end = s.length;
+        out[ai] = s.slice(start, end);
+        i = end;
+      }
+    }
+    if (!out["01"] || !/^\d{14}$/.test(out["01"])) return null;
+    return { gtin: out["01"], lot: out["10"] || null, serial: out["21"] || null, expiry: out["17"] ? gs1Date(out["17"]) : null, made: out["11"] ? gs1Date(out["11"]) : null, ais: out };
+  }
+
+  /** Parse an HIBC primary (and optional concatenated secondary) data structure: +LIC(4) PCN UoM [/secondary] check. */
+  function parseHIBC(raw) {
+    const s = String(raw || "").trim().replace(/^\*|\*$/g, "");
+    if (!/^\+[A-Z][A-Z0-9]{3}/.test(s)) return null;
+    const primary = s.split("/")[0];
+    const lic = primary.slice(1, 5);
+    // primary: + LIC(4) + product code (1–18) + unit of measure (1 digit) [+ check char if not concatenated]
+    const body = primary.slice(5);
+    const candidates = [];
+    for (const cut of [2, 1]) if (body.length > cut) candidates.push(body.slice(0, body.length - cut));
+    candidates.push(body);
+    const lotMatch = s.match(/\/\$\$?\+?\d{0,7}([A-Z0-9-]{1,18})/);
+    return { lic, productCodes: [...new Set(candidates.filter(Boolean))], lot: lotMatch ? lotMatch[1] : null };
+  }
+
+  /** Index catalogue records by normalised REF → [{manufacturer, articleNumber}] (unique per manufacturer). */
+  function buildRefIndex(records) {
+    const idx = new Map();
+    for (const r of records) {
+      const k = normalizeRef(r.articleNumber);
+      const arr = idx.get(k) || [];
+      if (!arr.some((x) => x.manufacturer === r.manufacturer)) arr.push({ manufacturer: r.manufacturer, articleNumber: r.articleNumber });
+      idx.set(k, arr);
+    }
+    return idx;
+  }
+
+  const OCR_DIGIT_FIX = { O: "0", Q: "0", D: "0", I: "1", L: "1", "|": "1", Z: "2", B: "8", G: "6" };
+
+  /** Candidate REFs found in OCR text. Only tokens that resolve to a catalogue REF are returned, ranked. */
+  function refsFromText(text, refIndex) {
+    const src = String(text || "").toUpperCase().replace(/[‐-―]/g, "-");
+    const found = new Map();
+    const add = (norm, score, token) => {
+      const hits = refIndex.get(norm);
+      if (!hits) return;
+      for (const h of hits) {
+        const key = h.manufacturer + "|" + norm;
+        const prev = found.get(key);
+        if (!prev || prev.score < score) found.set(key, { ...h, score, token, via: "ocr" });
+      }
+    };
+    // tokens: digits/letters with dots, spaces or dashes inside, e.g. "046.415", "043.262S", "36543", "300 171"
+    const tokenRe = /(?:REF[\s:.]*)?([A-Z0-9|][A-Z0-9|.\- ]{2,14}[A-Z0-9|])/g;
+    for (const m of src.matchAll(tokenRe)) {
+      const afterRef = /^REF/.test(m[0]);
+      const raw = m[1].trim();
+      const pieces = new Set([raw, ...raw.split(/\s{2,}| (?=[A-Z]{2,})/)]);
+      for (const p of pieces) {
+        const plain = normalizeRef(p);
+        if (plain.length < 4) continue;
+        const bonus = (afterRef ? 3 : 0) + (/^\d{3}\.\d{3,4}/.test(p) ? 2 : 0);
+        add(plain, 10 + bonus, p);
+        // OCR confusions only on characters that sit among digits; keep a trailing S (Straumann sterile suffix)
+        const fixed = plain.replace(/[OQDILZBG|](?=.*\d)|(?<=\d)[OQDILZBG|]/gi, (ch) => OCR_DIGIT_FIX[ch.toUpperCase()] || ch);
+        if (fixed !== plain) add(fixed.toLowerCase(), 6 + bonus, p);
+        if (/S$/i.test(plain)) add(plain.slice(0, -1), 4 + bonus, p); // "S" misread or sterile variant not catalogued
+      }
+    }
+    return [...found.values()].sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Resolve a decoded barcode payload to candidate REFs.
+   * gtinMap: { [gtin14]: [manufacturerInitial, ref] } (see data/gtin-data.js).
+   */
+  function resolveBarcode(payload, gtinMap, refIndex) {
+    const res = { kind: "unknown", payload: String(payload || ""), candidates: [], info: {} };
+    const gs1 = parseGS1(payload);
+    if (gs1) {
+      res.kind = "gs1";
+      res.info = { gtin: gs1.gtin, lot: gs1.lot, expiry: gs1.expiry, serial: gs1.serial };
+      const hit = gtinMap && (gtinMap[gs1.gtin] || gtinMap[gs1.gtin.replace(/^0/, "0")]);
+      if (hit) {
+        const man = hit[0] === "S" ? "Straumann" : "Nobel Biocare";
+        const ok = (refIndex.get(normalizeRef(hit[1])) || []).find((x) => x.manufacturer === man);
+        if (ok) res.candidates.push({ ...ok, via: "gtin", score: 100 });
+      }
+      return res;
+    }
+    const hibc = parseHIBC(payload);
+    if (hibc) {
+      res.kind = "hibc";
+      res.info = { lot: hibc.lot, lic: hibc.lic };
+      for (const pc of hibc.productCodes) for (const h of refIndex.get(normalizeRef(pc)) || []) res.candidates.push({ ...h, via: "hibc", score: 90 });
+      return res;
+    }
+    // Plain barcode text (e.g. Code 128 of the REF itself) or a QR containing text.
+    res.kind = "text";
+    res.candidates = refsFromText(payload, refIndex).map((c) => ({ ...c, via: "barcode-text" }));
+    return res;
+  }
+
   /* ------------------------------------------------- privacy / identifiers
    * Heuristic guard for case-list references and notes. It blocks obvious identifiers;
    * it cannot prove text is non-identifiable. */
@@ -481,6 +618,11 @@
     pendingDisagreements,
     ifuPortalUrl,
     detectIdentifiers,
+    parseGS1,
+    parseHIBC,
+    buildRefIndex,
+    refsFromText,
+    resolveBarcode,
     emptyUserState,
     migrateUserState,
     parsePersonalBackup,

@@ -46,6 +46,14 @@ run({name:'Landing page',fn:async()=>{
     await pg.goto(BASE+'/implantref/#/catalogue');await pg.fill('#q','38878');await pg.waitForTimeout(400);
     await pg.click('tbody tr.data-row');await pg.waitForSelector('#sheet:not(.hidden) .awaiting',{timeout:5000});
     expect((await pg.request.get(BASE+'/implantref/manifest.webmanifest')).ok(),'ImplantRef manifest missing');await noErrors(pg)});
+  await test('ImplantRef label scanner: assets present and GTIN → REF resolution works under the CSP',async()=>{const pg=await page('/implantref/');
+    await pg.waitForFunction(()=>window.ImplantRefScan&&window.IMPLANTREF_GTIN,null,{timeout:15000});
+    expect(await pg.evaluate(()=>Object.keys(IMPLANTREF_GTIN).length)>3000,'GTIN table missing');
+    const ref=await pg.evaluate(()=>ImplantRefCore.resolveBarcode('(01)07630031708595(10)X',IMPLANTREF_GTIN,ImplantRefCore.buildRefIndex(IMPLANTREF_DATA.records)).candidates[0].articleNumber);
+    expect(ref==='022.4102','GTIN lookup gave '+ref);
+    for(const f of ['src/vendor/zxing-0.21.3.min.js','src/vendor/tesseract/tesseract.min.js','src/vendor/tesseract/worker.min.js','src/vendor/tesseract/tesseract-core-simd-lstm.wasm.js','data/ocr/eng.traineddata.gz'])
+      expect((await pg.request.get(BASE+'/implantref/'+f)).ok(),'missing '+f);
+    expect(await pg.locator('#scanBtn').count()===1,'scan button missing');await noErrors(pg)});
   for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});

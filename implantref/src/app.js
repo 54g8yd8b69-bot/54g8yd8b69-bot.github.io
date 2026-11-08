@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.2";
+  const APP_VERSION = "3.3";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -226,7 +226,7 @@
       pageHead("ImplantRef", "A mobile-first restorative component reference for Straumann and Nobel Biocare, with evidence-linked compatibility and torque documentation.") +
       (storageNotice ? `<div class="notice ok-notice">${esc(storageNotice)}</div>` : "") +
       `<div class="notice"><b>Data provenance:</b> catalogue records were imported from your workbook and have not been checked against current manufacturer IFUs. A shared system or platform label is a reference trail, <b>not</b> proof of compatibility. Compatibility and torque are shown only from reviewed, product-specific manufacturer sources; otherwise they read <b>Not established</b>.</div>
-<div class="dash-grid"><div class="panel"><h2>Quick REF lookup</h2><div class="sub">Type or paste the REF from the packaging label. Dots and spaces are ignored.</div><form class="search-hero" id="dashForm"><input id="dashQuery" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 046.415, 36543, Variobase…" aria-label="REF or component search"><button class="btn primary">Search</button></form><div class="footnote">An exact REF shows every catalogue context in which it appears.</div></div>
+<div class="dash-grid"><div class="panel"><h2>Quick REF lookup</h2><div class="sub">Type or paste the REF from the packaging label. Dots and spaces are ignored.</div><form class="search-hero" id="dashForm"><input id="dashQuery" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 046.415, 36543, Variobase…" aria-label="REF or component search"><button class="btn primary">Search</button></form><div class="quick-actions mt"><button class="btn primary" data-scan-start="lookup">⌖ Scan a label with the camera</button></div><div class="footnote">An exact REF shows every catalogue context in which it appears. Scanning reads the label barcode (UDI) or the printed REF on your device.</div></div>
 <div class="panel"><h2>Identify &amp; find parts</h2><div class="sub">Manufacturer → system → connection/platform → restorative intent.</div><div class="quick-actions"><button class="btn primary" data-view="identify">◎ Start the guided finder</button><button class="btn" data-view="catalogue">⌕ Browse the full catalogue</button><button class="btn" data-view="casebox">＋ Create a case component list</button></div></div></div>
 <div class="stats"><div class="stat"><div class="stat-label">CATALOGUE-CONTEXT RECORDS</div><div class="stat-value">${fmtN(records.length)}</div><div class="stat-note">No rows deduplicated</div></div><div class="stat"><div class="stat-label">IMPLANT SYSTEMS</div><div class="stat-value">${Object.keys(summary.implantSystems).length}</div><div class="stat-note">Straumann and Nobel Biocare</div></div><div class="stat"><div class="stat-label">REFS WITH VERIFIED EVIDENCE</div><div class="stat-value">${fmtN(effectiveRefs.size)}</div><div class="stat-note">of ${fmtN(uniqueRefs)} unique REFs</div></div><div class="stat"><div class="stat-label">EVIDENCE CLAIMS</div><div class="stat-value">${fmtN(ev.claims.length)}</div><div class="stat-note"><a href="#/evidence">Open registry →</a></div></div></div>
 ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewed</h2></div>${recent.map((r) => `<div class="list-row data-row" tabindex="0" data-record="${r.recordId}"><div><b class="ref">${esc(r.articleNumber)}</b> · ${esc(r.component)}<div class="secondary">${esc(r.manufacturer)} · ${esc(r.implantSystem)} · ${esc(r.platform)}</div></div><span class="pill">View</span></div>`).join("")}</div>` : ""}
@@ -241,6 +241,71 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
       Object.assign(ui, { query: $("#dashQuery").value, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "" });
       setView("catalogue");
     };
+  }
+
+  /* ============================================================ label scan */
+  const viaLabel = { gtin: "barcode (UDI)", gs1: "barcode (UDI)", hibc: "HIBC barcode", ocr: "printed REF", "barcode-text": "barcode", text: "barcode" };
+  function scanBannerHtml() {
+    const s = ui.scanInfo;
+    if (!s || C.normalizeRef(s.ref) !== C.normalizeRef(ui.query)) return "";
+    return `<div class="notice exact scan-note"><b>Scanned label:</b> REF ${esc(s.ref)} (${esc(s.manufacturer)}) read from the ${esc(viaLabel[s.via] || s.via)}${s.lot ? ` · LOT <b>${esc(s.lot)}</b> <button class="btn small" data-copy="${esc(s.lot)}">Copy LOT</button>` : ""}${s.expiry ? ` · Use by ${esc(s.expiry)}` : ""}. ${s.via === "ocr" ? "Check the REF matches the label." : ""} <button class="linkish" data-scan-start="lookup">Scan another</button></div>`;
+  }
+  function startScan(mode) {
+    if (!window.ImplantRefScan) return toast("Scanner unavailable");
+    window.ImplantRefScan.open({ onResult: (res) => handleScan(res, mode) });
+  }
+  function handleScan(res, mode) {
+    const cands = res.candidates || [];
+    if (!cands.length) {
+      return toast(res.info && res.info.gtin ? `GTIN ${res.info.gtin} isn't in ImplantRef — type the REF instead` : "No catalogue REF found on that label");
+    }
+    if (cands.length > 1) return chooseCandidate(cands, res, mode);
+    applyScan(cands[0], res, mode);
+  }
+  function chooseCandidate(cands, res, mode) {
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.innerHTML = `<div class="modal-inner"><h2>Which REF is on the label?</h2><p class="sub">The ${esc(viaLabel[res.via] || res.via)} matched more than one catalogue REF.</p>${cands
+      .map((c, i) => `<button class="option mt" data-pick="${i}"><b class="ref">${esc(c.articleNumber)}</b><span class="secondary">${esc(c.manufacturer)} · ${esc((records.find((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber)) || {}).component || "")}</span></button>`)
+      .join("")}<div class="detail-actions"><button class="btn" data-pick="cancel">Cancel</button></div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pick]");
+      if (!b) return;
+      box.remove();
+      if (b.dataset.pick !== "cancel") applyScan(cands[+b.dataset.pick], res, mode);
+    });
+  }
+  function applyScan(c, res, mode) {
+    const info = res.info || {};
+    ui.scanInfo = { ref: c.articleNumber, manufacturer: c.manufacturer, via: c.via || res.via, lot: info.lot || null, expiry: info.expiry || null, gtin: info.gtin || null };
+    const rows = records.filter((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber));
+    if (mode === "wizard") {
+      const implants = rows.filter((r) => typesOf.get(r.recordId)[0] === "implant");
+      if (implants.length === 1) {
+        Object.assign(ui.wiz, { manufacturer: implants[0].manufacturer, system: implants[0].implantSystem, platform: implants[0].platform, intent: "" });
+        toast("Implant " + c.articleNumber + " — choose what you need");
+        return ui.view === "identify" ? identify() : setView("identify");
+      }
+      if (implants.length > 1) {
+        ui.view === "identify" ? identify() : setView("identify");
+        setTimeout(() => {
+          const inp = $("#implantRef");
+          if (inp) {
+            inp.value = c.articleNumber;
+            $("#implantRefForm").requestSubmit();
+          }
+        }, 0);
+        return;
+      }
+    }
+    Object.assign(ui, { query: c.articleNumber, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+    toast(`REF ${c.articleNumber} — ${rows.length} catalogue context${rows.length === 1 ? "" : "s"}`);
+    if (rows.length === 1) return navigate("catalogue", rows[0].recordId);
+    if (ui.view === "catalogue") catalogue();
+    else setView("catalogue");
   }
 
   /* ============================================================== catalogue */
@@ -290,12 +355,12 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
         `Search ${fmtN(records.length)} catalogue-context records. Each row keeps its manufacturer, system, platform and family context.`,
         `<button class="btn" id="resetFilters">Reset</button>`,
       ) +
-      `<div class="search-sticky"><div class="field"><label for="q" class="sr-only">Search catalogue</label><input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="REF, component name, family, material…" value="${esc(ui.query)}"></div><button class="btn filter-toggle" id="filterToggle" aria-expanded="false" aria-controls="filters">Filters${nFilters ? ` (${nFilters})` : ""}</button></div>
+      `<div class="search-sticky"><div class="field"><label for="q" class="sr-only">Search catalogue</label><input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="REF, component name, family, material…" value="${esc(ui.query)}"></div><button class="btn" data-scan-start="lookup" aria-label="Scan a label">⌖</button><button class="btn filter-toggle" id="filterToggle" aria-expanded="false" aria-controls="filters">Filters${nFilters ? ` (${nFilters})` : ""}</button></div>
 <div class="chips" role="group" aria-label="Component type"><button class="chip ${!ui.ctype ? "on" : ""}" data-ctype="">All types</button>${C.COMPONENT_TYPES.filter((t) => t.id !== "other")
         .map((t) => `<button class="chip ${ui.ctype === t.id ? "on" : ""}" data-ctype="${t.id}">${esc(t.label)}</button>`)
         .join("")}</div>
 <div class="filters collapsed" id="filters">${selectField("Manufacturer", "manufacturer", unique("manufacturer"), ui.manufacturer)}${selectField("Implant system", "system", unique("implantSystem", ui.manufacturer ? records.filter((r) => r.manufacturer === ui.manufacturer) : records), ui.system)}${selectField("Platform", "platform", unique("platform", scope), ui.platform)}${selectField("Product family", "family", unique("productFamily", scope), ui.family)}${selectField("Material", "material", unique("material", scope), ui.material)}<div class="field"><label for="evidenceFilter">Evidence</label><select id="evidenceFilter"><option value="">Any (incl. not established)</option><option value="any">Has any evidence record</option><option value="manufacturer-confirmed">Compatibility: manufacturer-confirmed</option><option value="contraindicated">Compatibility: contraindicated</option><option value="pending">Compatibility: pending verification</option><option value="torque">Verified torque recorded</option><option value="torque-any">Torque sourced (verified or awaiting review)</option></select></div></div>
-<div id="exactBanner"></div>
+<div id="scanBanner">${scanBannerHtml()}</div><div id="exactBanner"></div>
 <div class="filter-actions"><span class="result-count" id="resultCount" aria-live="polite"></span><label class="secondary">Sort <select id="sort" class="inline-select"><option value="article">Article number</option><option value="name">Component name</option><option value="manufacturer">Manufacturer/system</option><option value="family">Product family</option></select></label><label class="secondary desktop-inline">Rows <select id="pageSize" class="inline-select"><option>25</option><option>50</option><option>100</option><option>200</option></select></label></div>
 <div id="tableBox"></div><div id="pagination" class="pagination"></div>
 <div class="footnote">Records are imported from your workbook and not independently IFU-verified. Component-type chips are a browsing aid derived from the family label, not a clinical classification.</div>`;
@@ -473,6 +538,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
 <div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(r.manufacturer)}</b></div><div class="kv"><small>IMPLANT SYSTEM</small><b>${esc(r.implantSystem)}</b></div><div class="kv"><small>PLATFORM / CONTEXT</small><b>${esc(r.platform)}</b></div><div class="kv"><small>PRODUCT FAMILY</small><b>${esc(r.productFamily)}</b></div><div class="kv"><small>MATERIAL</small><b>${esc(r.material || "Not specified in workbook")}</b></div><div class="kv"><small>PACK SIZE</small><b>${r.packSize ?? "Not specified"}</b></div>${dimensionRows(r)
       .map(([k, v]) => `<div class="kv"><small>${esc(k.toUpperCase())}</small><b>${esc(v)}</b></div>`)
       .join("")}</div>
+${ui.scanInfo && C.normalizeRef(ui.scanInfo.ref) === C.normalizeRef(r.articleNumber) && ui.scanInfo.manufacturer === r.manufacturer ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}${ui.scanInfo.expiry ? ` · Use by ${esc(ui.scanInfo.expiry)}` : ""}${ui.scanInfo.gtin ? ` · GTIN ${esc(ui.scanInfo.gtin)}` : ""}</div>` : ""}
 <div class="muted-box"><b>Catalogue page reference</b><br>${esc(r.cataloguePages || "No page reference supplied")}</div>
 ${
   contexts.length > 1
@@ -800,7 +866,7 @@ ${many ? `<details class="mt" open><summary>${refs.length} REFs covered by this 
     let body = "";
     const sysRows = (m) => records.filter((r) => r.manufacturer === m);
     if (stepIdx === 0) {
-      body = `<div class="dash-grid"><div class="panel"><h2>Start from an implant REF</h2><div class="sub">If you have the implant's REF (sticker, notes, lab ticket) enter it to set manufacturer, system and platform.</div><form class="search-hero" id="implantRefForm"><input id="implantRef" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Implant REF"><button class="btn primary">Look up</button></form><div id="implantRefOut"></div></div>
+      body = `<div class="dash-grid"><div class="panel"><h2>Start from an implant REF</h2><div class="sub">If you have the implant's REF (sticker, notes, lab ticket) enter it to set manufacturer, system and platform.</div><form class="search-hero" id="implantRefForm"><input id="implantRef" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Implant REF"><button class="btn primary">Look up</button></form><button class="btn mt" data-scan-start="wizard">⌖ Scan the implant label</button><div id="implantRefOut"></div></div>
 <div class="panel"><h2>1. Manufacturer</h2><div class="option-grid">${unique("manufacturer")
         .map((m) => `<button class="option" data-wiz-set="manufacturer" data-val="${esc(m)}"><b>${esc(m)}</b><span class="secondary">${fmtN(sysRows(m).length)} records · ${unique("implantSystem", sysRows(m)).length} systems</span></button>`)
         .join("")}</div></div></div>`;
@@ -1165,7 +1231,7 @@ ${queueHtml}
       `<div class="notice"><b>Imported dataset:</b> ${esc(DATA.source?.file || "User-supplied catalogue")} · ${esc(DATA.source?.sheet || "Catalogue")} · ${esc(DATA.source?.rowRange || "")}. All ${fmtN(records.length)} component-context rows are retained. Records are not independently IFU-verified.</div>
 <div class="dash-grid"><div class="panel"><h2>Export</h2><p class="sub">Full catalogue, or your personal data (saved, comparisons, notes, case lists, local evidence, settings).</p><div class="detail-actions"><button class="btn primary" id="exportUser">Export personal backup</button><button class="btn" id="exportJson">Full JSON dataset</button><button class="btn" id="exportAllCsv">All records as CSV</button>${hasV2 ? '<button class="btn" id="exportV2">Download retained 2.0 data</button>' : ""}</div></div>
 <div class="panel"><h2>Import personal backup</h2><p class="sub">Accepts ImplantRef 2.0 and 3.0 personal backups. Replaces current personal data after confirmation.</p><div class="field mt"><label for="userBackup">JSON backup</label><input type="file" id="userBackup" accept=".json,application/json"></div><button class="btn mt" id="importUser">Validate and restore</button></div></div>
-<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
+<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>Label scanning: UDI/GTIN → REF table</span><b>${fmtN(Object.keys(window.IMPLANTREF_GTIN || {}).length)} GTINs · FDA GUDID</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
 <div class="panel mt"><h2>Local storage</h2><p class="sub">Personal data lives in this browser only (schema v${user.schemaVersion}${user.migratedFrom ? `, migrated from ${esc(user.migratedFrom)}` : ""}). ${hasV2 ? "Your ImplantRef 2.0 data is retained unchanged as a rollback copy." : ""} Export a backup to move devices.</p><div class="list-row"><span>Saved</span><b>${user.saved.length}</b></div><div class="list-row"><span>Case lists</span><b>${user.cases.length}</b></div><div class="list-row"><span>Notes</span><b>${Object.keys(user.notes).length}</b></div><div class="list-row"><span>Local evidence claims</span><b>${user.evidence.claims.length}</b></div><div class="detail-actions"><button class="btn danger" id="clearPersonal">Clear personal data…</button></div></div>`;
     $("#exportJson").onclick = () => download("implantref-full-dataset.json", JSON.stringify(DATA, null, 2), "application/json");
     $("#exportUser").onclick = () => download("implantref-personal-backup-" + today() + ".json", JSON.stringify({ application: "ImplantRef", version: APP_VERSION + "-personal", exportedAt: new Date().toISOString(), ...user }, null, 2), "application/json");
@@ -1240,6 +1306,7 @@ ${queueHtml}
     moreMenu.classList.toggle("hidden", !open);
     $("#moreTab").setAttribute("aria-expanded", String(open));
   });
+  $("#scanBtn").onclick = () => startScan("lookup");
   $("#globalSearchBtn").onclick = () => {
     ui.query = "";
     if (ui.view === "catalogue") catalogue();
@@ -1285,6 +1352,8 @@ ${queueHtml}
       persist();
       return compare();
     }
+    if ((el = act("[data-scan-start]"))) return startScan(el.dataset.scanStart);
+    if ((el = act("[data-copy]"))) return copyText(el.dataset.copy);
     if ((el = act("[data-claim-act]"))) return claimAction(el.dataset.claim, el.dataset.claimAct);
     if ((el = act("[data-group-verify]"))) {
       const cl = evidence().claims.filter((c) => c.origin === "curated" && c.curationRuleId === el.dataset.groupVerify && c.verificationStatus === "pending");
