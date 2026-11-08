@@ -325,16 +325,38 @@
   }
 
   /**
+   * Fingerprint of what a reviewer checked: REF, scope, document + revision, page, application and value.
+   * A review only applies to a claim whose fingerprint still matches, so a changed value or a new document
+   * revision falls back to pending instead of inheriting an old verification.
+   * Must stay identical to claim_fingerprint() in scripts/review_fingerprint.py (tests compare them).
+   */
+  function claimFingerprint(claim, doc) {
+    if (!claim) return "";
+    const n = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const num = (v) => (v === null || v === undefined || v === "" ? "" : String(Number(v)));
+    const sc = claim.scope ? claim.scope.implantSystem + "/" + claim.scope.platform : "";
+    const parts = [n(claim.specificProductRef || claim.subject?.articleNumber), sc, claim.documentId || "", (doc && doc.revisionOrDate) || "",
+      claim.pageOrSection || "", n(claim.application), num(claim.valueNcm), num(claim.minNcm), num(claim.maxNcm), claim.handTight ? "H" : ""];
+    const bytes = new TextEncoder().encode(parts.join("|"));
+    let h = 0x811c9dc5;
+    for (const b of bytes) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+    return "v1:" + h.toString(16).padStart(8, "0");
+  }
+
+  /**
    * Combine curated (shipped) and local (user-entered) evidence, tagging origin.
-   * local.reviews is an on-device review overlay for curated claims: { [claimId]: {verificationStatus, reviewedBy, reviewedAt, history} }.
+   * local.reviews is an on-device review overlay for curated claims: { [claimId]: {verificationStatus, reviewedBy, reviewedAt, fingerprint, history} }.
    * The shipped registry is never modified; the overlay records this device's reviewer decisions.
    */
   function mergeEvidence(curated, local) {
     const tag = (arr, origin) => (arr || []).map((x) => ({ ...x, origin: x.origin || origin }));
     const reviews = (local && local.reviews) || {};
+    const docById = new Map((curated?.documents || []).map((d) => [d.documentId, d]));
     const curatedClaims = tag(curated?.claims, "curated").map((c) => {
       const r = reviews[c.claimId];
       if (!r || !VERIFICATION_STATUSES.includes(r.verificationStatus)) return c;
+      // A device review made against an older value/revision no longer applies.
+      if (r.fingerprint && r.fingerprint !== claimFingerprint(c, docById.get(c.documentId))) return { ...c, staleLocalReview: true };
       const out = { ...c, verificationStatus: r.verificationStatus, reviewOrigin: "local", shippedStatus: c.verificationStatus };
       if (r.verificationStatus === "verified") Object.assign(out, { reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt });
       else {
@@ -565,6 +587,7 @@
               verificationStatus: v.verificationStatus,
               reviewedBy: isStr(v.reviewedBy) ? v.reviewedBy.slice(0, 60) : undefined,
               reviewedAt: isStr(v.reviewedAt) ? v.reviewedAt.slice(0, 10) : undefined,
+              fingerprint: isStr(v.fingerprint) && /^v1:[0-9a-f]{8}$/.test(v.fingerprint) ? v.fingerprint : undefined,
               history: Array.isArray(v.history) ? v.history.slice(-50) : [],
             };
     }
@@ -613,6 +636,7 @@
     resolveCompatibility,
     resolveTorque,
     mergeEvidence,
+    claimFingerprint,
     torqueKey,
     torqueText,
     pendingDisagreements,

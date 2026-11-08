@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.3";
+  const APP_VERSION = "3.4";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -479,7 +479,9 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
 
   function claimSourceHtml(g) {
     const s = g.source;
-    return `<div class="src">${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(s.documentTitle || s.sourceUrl)}</a>` : esc(s.documentTitle || "No document")} · ${esc(s.revisionOrDate || "no revision")} · ${esc(g.claim.pageOrSection || "no page/section")}<br><span class="secondary">${esc(s.sourceType || "unknown type")} · ${esc(s.territory || "territory not stated")} · retrieved ${esc(s.retrievedAt || "?")}${g.claim.reviewedBy ? ` · reviewed by ${esc(g.claim.reviewedBy)} ${esc(g.claim.reviewedAt || "")}` : ""} · ${g.claim.origin === "curated" ? "curated registry" : "your local entry"}</span></div>`;
+    return `<div class="src">${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(s.documentTitle || s.sourceUrl)}</a>` : esc(s.documentTitle || "No document")} · ${esc(s.revisionOrDate || "no revision")} · ${esc(g.claim.pageOrSection || "no page/section")}<br><span class="secondary">${esc(s.sourceType || "unknown type")} · ${esc(s.territory || "territory not stated")} · retrieved ${esc(s.retrievedAt || "?")}${g.claim.reviewedBy ? ` · reviewed by ${esc(g.claim.reviewedBy)} ${esc(g.claim.reviewedAt || "")}` : ""} · ${g.claim.origin === "curated" ? (g.claim.reviewOrigin === "local" ? "curated registry, reviewed on this device" : g.claim.reviewSource ? "curated registry, review shipped with the app" : "curated registry") : "your local entry"}</span>${
+      g.claim.staleLocalReview ? `<br><span class="secondary"><b>Your earlier review no longer applies:</b> the value, page or document revision changed after you reviewed it. Please review it again.</span>` : ""
+    }</div>`;
   }
   const standingLabel = {
     effective: ["Verified & current", "ok"],
@@ -787,8 +789,11 @@ ${otherPending.length ? `<details class="pending-claims"><summary>${otherPending
   function setReview(claimId, status, by) {
     user.evidence.reviews ??= {};
     const prev = user.evidence.reviews[claimId] || { history: [] };
+    const claim = (CURATED.claims || []).find((x) => x.claimId === claimId);
+    const doc = claim && (CURATED.documents || []).find((d) => d.documentId === claim.documentId);
     user.evidence.reviews[claimId] = {
       verificationStatus: status,
+      fingerprint: C.claimFingerprint(claim, doc),
       reviewedBy: status === "verified" ? by : undefined,
       reviewedAt: status === "verified" ? today() : undefined,
       history: [...(prev.history || []), { at: new Date().toISOString(), action: "status → " + status, ...(by ? { by } : {}) }].slice(-50),
@@ -1180,7 +1185,7 @@ ${queueHtml}
         )
         .join("")}</div>
 <div class="dash-grid mt"><div class="panel"><h2>Settings</h2><div class="form-grid"><div class="field"><label for="staleDays">Re-verify after (days)</label><input id="staleDays" type="number" min="30" max="3650" value="${user.settings.staleDays}"></div><div class="field"><label for="territory">Default territory</label><input id="territory" value="${esc(user.settings.territory)}"></div></div><button class="btn mt" id="saveEvSettings">Save settings</button></div>
-<div class="panel"><h2>Exchange</h2><p class="sub">Export your local evidence in the curated-registry format for review and merge into <code>data/evidence.json</code>, or import a colleague's export (merged by ID; never overwrites).</p><div class="detail-actions"><button class="btn primary" id="exportEv">Export local evidence JSON</button></div><div class="field mt"><label for="evFile">Import evidence JSON</label><input type="file" id="evFile" accept=".json,application/json"></div><button class="btn mt" id="importEv">Validate and merge</button></div></div>`;
+<div class="panel"><h2>Exchange</h2><p class="sub">Export your local evidence and your reviews of shipped claims (${Object.keys(user.evidence.reviews || {}).length} on this device). Reviews in an export can be imported into the app's shipped data (<code>scripts/import_reviews.py</code>), so every device then starts from them. A shipped review only applies while the claim's value, page and document revision are unchanged. You can also import a colleague's export here (merged by ID, never overwrites; their verifications arrive as pending).</p><div class="detail-actions"><button class="btn primary" id="exportEv">Export evidence &amp; reviews JSON</button></div><div class="field mt"><label for="evFile">Import evidence JSON</label><input type="file" id="evFile" accept=".json,application/json"></div><button class="btn mt" id="importEv">Validate and merge</button></div></div>`;
     $("#saveEvSettings").onclick = () => {
       const sd = Number($("#staleDays").value);
       if (!(sd >= 30 && sd <= 3650)) return toast("Re-verify window must be 30–3650 days");
