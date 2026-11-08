@@ -59,6 +59,14 @@ run({name:'Landing page',fn:async()=>{
     expect(await pg.evaluate(()=>REFS.length)>=150,'catalogue incomplete');
     await pg.fill('#q','girft tmd');await pg.waitForTimeout(300);expect(/TMD/.test(await pg.locator('#app').innerText()),'search broken');
     expect((await pg.request.get(BASE+'/guide-card/manifest.webmanifest')).ok(),'Guide Card manifest missing');await noErrors(pg)});
+  await test('Guide Card: shared record link, quick links and suite links work on the site',async()=>{const pg=await page('/guide-card/#r/bsspd-pdd');await pg.waitForTimeout(300);
+    expect((await pg.$$eval('#list .entry',e=>e.map(x=>x.dataset.id))).join()==='bsspd-pdd','shared link did not open the record');
+    expect(await pg.$eval('.suite-l',a=>a.getAttribute('href'))==='/chrome-card/','Chrome Card link should stay on the site');
+    expect(await pg.evaluate(()=>SHARE_BASE)===BASE+'/guide-card/','share links should use this site');
+    await pg.goto(BASE+'/guide-card/#library');await pg.waitForTimeout(300);expect(await pg.locator('.pin-chip').count()>=1,'quick links missing');await noErrors(pg)});
+  await test('DentalAudit: a #/create?template= link starts an audit from that template',async()=>{const pg=await page('/dentalaudit/#/create?template=bpe');
+    await pg.waitForFunction(()=>document.querySelector('input[data-bind="title"]'),null,{timeout:15000});await pg.waitForTimeout(300);
+    expect(await pg.inputValue('input[data-bind="title"]')==='BPE recording at new patient examination','template not applied');await noErrors(pg)});
   for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});

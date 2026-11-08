@@ -19,9 +19,13 @@ jobs:
           npm init -y >/dev/null
           npm install playwright@1.63.0
           npx playwright install --with-deps chromium
+      - name: Check and build Guide Card from its data
+        run: python3 site/guide-card/tools/build.py
       - name: Serve the site
         run: |
           python3 -m http.server 8765 --directory site >/dev/null 2>&1 &
           for i in $(seq 30); do curl -sf http://localhost:8765/ >/dev/null && break; sleep 1; done
       - name: Run browser tests
         run: NODE_PATH=$PWD/node_modules BASE=http://localhost:8765 node site/tests/smoke.js
+      - name: Guide Card catalogue, search and feature tests
+        run: node site/guide-card/tests/check.mjs site/guide-card/index.html

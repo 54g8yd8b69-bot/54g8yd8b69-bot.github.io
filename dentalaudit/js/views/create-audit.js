@@ -3,6 +3,7 @@
  * Routes
  *   #/create        new audit (unsaved work is kept in memory and in sessionStorage)
  *   #/create/:id    resume a draft, or edit an existing live audit
+ *   #/create?template=bpe   new audit started from a template (used by links from Guide Card)
  *
  * The wizard edits a deep copy of the audit (session.data). Nothing reaches
  * localStorage until the user presses Save as Draft, Create Audit or Save changes.
@@ -598,6 +599,12 @@ DA.views.createAudit = (function () {
     el.addEventListener('change', onChange);
     el.addEventListener('focusout', onBlur);
     renderStep();
+    // #/create?template=<key> (e.g. a link from Guide Card) starts a new audit from that template, once per wizard run
+    const tk = params.query && params.query.template;
+    if (tk && session.mode === 'new' && session.fromLink !== tk) {
+      const t = DA.templates.find(function (x) { return x.key === tk; });
+      if (t) { session.fromLink = tk; applyTemplate(t, false); }
+    }
   }
 
   function renderStep() {

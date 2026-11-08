@@ -1,0 +1,6077 @@
+{
+ "_readme": "Guide Card catalogue. Edit records here, then run: python3 guide-card/tools/build.py (GitHub rebuilds it for you when you commit this file). See guide-card/data/README.md for every field.",
+ "recheckMonths": 12,
+ "vocab": {
+  "types": {
+   "guideline": "Clinical guideline",
+   "consensus": "Consensus / position statement",
+   "standard": "Professional standard",
+   "commissioning": "Commissioning / referral policy",
+   "classification": "Classification / index",
+   "tool": "Clinical tool",
+   "prom": "Patient-reported outcome measure",
+   "technical": "Technical / regulatory reference",
+   "training": "Training reference"
+  },
+  "jurisdictions": {
+   "UK": "UK professional guidance",
+   "ENG": "England only (NHS England / NICE)",
+   "SCO": "Scottish guidance",
+   "LOCAL": "Local service pathway",
+   "EUR": "European guidance",
+   "INTL": "International",
+   "US": "US professional body",
+   "GB": "Great Britain regulation",
+   "RES": "Original publication"
+  },
+  "statuses": {
+   "current": "Current",
+   "archived": "Archived",
+   "superseded": "Superseded",
+   "proposed": "Proposed / draft",
+   "historical": "Historical"
+  },
+  "measures": {
+   "screening": "Screening score",
+   "diagnosis": "Disease diagnosis / case definition",
+   "severity": "Severity grade",
+   "risk": "Risk or prognosis estimate",
+   "complexity": "Treatment-complexity tool",
+   "outcome": "Outcome measure",
+   "descriptive": "Descriptive classification",
+   "performance": "Objective performance test"
+  },
+  "specialties": {
+   "general": "General / referral",
+   "prevention": "Prevention & caries",
+   "operative": "Operative & tooth wear",
+   "perio": "Periodontology & peri-implant",
+   "endo": "Endodontics",
+   "trauma": "Dental trauma",
+   "prostho": "Prosthodontics",
+   "implant": "Implant dentistry",
+   "develop": "Developmental & MDT",
+   "paeds": "Paediatric",
+   "ortho": "Orthodontic",
+   "oncology": "Oncology & maxillofacial rehab",
+   "tmd": "TMD & orofacial pain",
+   "medical": "Prescribing & medically complex",
+   "special": "Special care & older adults",
+   "oralsurg": "Oral surgery",
+   "radiology": "Imaging",
+   "lab": "Laboratory & digital",
+   "training": "Training"
+  }
+ },
+ "sections": [
+  {
+   "id": "gen",
+   "label": "General, referral & training",
+   "specialties": [
+    "general",
+    "training"
+   ],
+   "groups": [
+    "Standards, curricula & practice",
+    "Referral & complexity",
+    "Acute & emergency care",
+    "Decontamination",
+    "Service improvement & coding"
+   ]
+  },
+  {
+   "id": "prev",
+   "label": "Prevention & caries",
+   "specialties": [
+    "prevention"
+   ]
+  },
+  {
+   "id": "oper",
+   "label": "Operative dentistry & tooth wear",
+   "specialties": [
+    "operative"
+   ],
+   "groups": [
+    "Caries & direct restorations",
+    "Restoration quality & restorability",
+    "Tooth wear & erosion"
+   ]
+  },
+  {
+   "id": "perio",
+   "label": "Periodontology",
+   "specialties": [
+    "perio"
+   ],
+   "groups": [
+    "Screening",
+    "Diagnosis & classification",
+    "Treatment & referral",
+    "Risk & prognosis",
+    "Recession & furcation",
+    "Plaque & gingival indices"
+   ]
+  },
+  {
+   "id": "impl",
+   "label": "Implants & peri-implant disease",
+   "specialties": [
+    "implant"
+   ],
+   "groups": [
+    "Eligibility & commissioning",
+    "Standards, training & workflow",
+    "Planning, complexity & loading",
+    "Peri-implant disease",
+    "Aesthetics & outcomes"
+   ]
+  },
+  {
+   "id": "endo",
+   "label": "Endodontics",
+   "specialties": [
+    "endo"
+   ],
+   "groups": [
+    "Diagnosis",
+    "Vital pulp & pulpal/apical disease",
+    "Standards & case difficulty",
+    "Restoring root-filled teeth",
+    "Surgery, transplantation & healing",
+    "Resorption",
+    "Canal anatomy & anomalies"
+   ]
+  },
+  {
+   "id": "trauma",
+   "label": "Dental trauma",
+   "specialties": [
+    "trauma"
+   ]
+  },
+  {
+   "id": "prosth",
+   "label": "Fixed & removable prosthodontics",
+   "specialties": [
+    "prostho"
+   ],
+   "groups": [
+    "Fixed & adhesive",
+    "Removable & general prosthodontics",
+    "Complexity & ridge assessment",
+    "Hypodontia & head and neck pathways",
+    "Patient-reported outcomes"
+   ]
+  },
+  {
+   "id": "dev",
+   "label": "Paediatric, orthodontic & developmental",
+   "specialties": [
+    "paeds",
+    "ortho",
+    "develop"
+   ],
+   "groups": [
+    "Orthodontic & orthognathic need",
+    "Erupting, ectopic & traumatised teeth",
+    "Paediatric caries & MIH",
+    "Hypodontia & developmental anomalies",
+    "Cleft alveolar bone grafts",
+    "Historical"
+   ]
+  },
+  {
+   "id": "onc",
+   "label": "Oncology & maxillofacial rehabilitation",
+   "specialties": [
+    "oncology"
+   ],
+   "groups": [
+    "Cancer therapy & MDT care",
+    "Osteoradionecrosis",
+    "Xerostomia",
+    "Defects & obturators"
+   ]
+  },
+  {
+   "id": "tmd",
+   "label": "TMD & orofacial pain",
+   "specialties": [
+    "tmd"
+   ]
+  },
+  {
+   "id": "med",
+   "label": "Prescribing, medically complex, surgery & imaging",
+   "specialties": [
+    "medical",
+    "radiology",
+    "oralsurg"
+   ],
+   "groups": [
+    "Prescribing & antimicrobials",
+    "Bleeding risk & infective endocarditis",
+    "MRONJ",
+    "Imaging",
+    "Oral surgery & services"
+   ]
+  },
+  {
+   "id": "spec",
+   "label": "Special care & older adults",
+   "specialties": [
+    "special"
+   ]
+  },
+  {
+   "id": "lab",
+   "label": "Laboratory & digital workflows",
+   "specialties": [
+    "lab"
+   ]
+  }
+ ],
+ "defaultPins": [
+  "r:bsp-bpe",
+  "t:bsp",
+  "t:mronj",
+  "t:anticoag"
+ ],
+ "refs": [
+  {
+   "id": "cgdent-sid",
+   "title": "Standards in Dentistry",
+   "short": "CGDent Standards in Dentistry",
+   "publisher": "College of General Dentistry (CGDent)",
+   "edition": "3rd edition (year not stated on publisher page)",
+   "type": "standard",
+   "specialties": [
+    "general",
+    "operative",
+    "prostho",
+    "endo",
+    "perio",
+    "implant"
+   ],
+   "topic": "Standards for primary dental care",
+   "aliases": [
+    "direct restorations",
+    "composite",
+    "amalgam",
+    "crowns",
+    "bridges",
+    "veneers",
+    "onlays",
+    "indirect restorations",
+    "endodontics",
+    "implants",
+    "periodontics",
+    "complete dentures",
+    "partial dentures",
+    "removable partial denture",
+    "digital dentistry",
+    "aesthetic dentistry",
+    "referral standards",
+    "record keeping"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want the expected standard of care for a routine primary-care procedure — direct or indirect restorations, endodontics, periodontics, implants or dentures.",
+   "url": "https://cgdent.uk/standards-in-dentistry/",
+   "parts": [
+    {
+     "label": "Consultation & diagnosis"
+    },
+    {
+     "label": "Making & receiving referrals"
+    },
+    {
+     "label": "Periodontics"
+    },
+    {
+     "label": "Direct (plastic), coronal & root surface restorations"
+    },
+    {
+     "label": "Indirect coronal restorations — crowns, bridges, onlays, veneers"
+    },
+    {
+     "label": "Endodontics"
+    },
+    {
+     "label": "Removable partial dentures"
+    },
+    {
+     "label": "Complete dentures"
+    },
+    {
+     "label": "Implant dentistry"
+    },
+    {
+     "label": "Management of dental trauma"
+    },
+    {
+     "label": "Aesthetic dentistry"
+    },
+    {
+     "label": "Digital dentistry"
+    }
+   ],
+   "note": "Chapter list from the publisher page; individual chapter links are not published, so open the main page.",
+   "group": "Standards, curricula & practice",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nhse-rd-standard",
+   "title": "Clinical standard for restorative dentistry",
+   "short": "NHS England restorative levels of care (L1–3)",
+   "publisher": "NHS England",
+   "year": 2022,
+   "edition": "Version 2, 28 October 2022 (PR1640)",
+   "type": "commissioning",
+   "specialties": [
+    "general",
+    "perio",
+    "endo",
+    "prostho"
+   ],
+   "topic": "Commissioning levels of complexity",
+   "aliases": [
+    "levels of care",
+    "level 1",
+    "level 2",
+    "level 3",
+    "complexity assessment",
+    "endodontic complexity levels",
+    "periodontal complexity levels",
+    "prosthodontic complexity levels",
+    "managed clinical network",
+    "mcn",
+    "commissioning standard",
+    "referral",
+    "nhs england levels"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "England-only commissioning framework; other UK nations use their own pathways.",
+   "useWhen": "you need to know whether a case is Level 1, 2 or 3 for NHS commissioning and referral in England.",
+   "url": "https://www.england.nhs.uk/publication/commissioning-standard-for-restorative-dentistry/",
+   "links": [
+    {
+     "label": "PDF (v2, Oct 2022)",
+     "url": "https://www.england.nhs.uk/wp-content/uploads/2022/10/B1640-clinical-standard-restorative-dentistry.pdf"
+    }
+   ],
+   "parts": [
+    {
+     "label": "Complexity assessment: levels of periodontal care"
+    },
+    {
+     "label": "Complexity assessment: levels of endodontic care (section 2.2.5)"
+    },
+    {
+     "label": "Complexity assessment: levels of prosthodontic care (section 2.2.6)"
+    }
+   ],
+   "related": [
+    "bes-endoapp",
+    "aae-cda",
+    "bsp-referral",
+    "rcs-rdiotn"
+   ],
+   "keyPoints": [
+    "Level 1: skills expected of all dentists after foundation training.",
+    "Level 2: enhanced skills, delivered on referral with a formal link to a consultant-led managed clinical network.",
+    "Level 3: specialist / consultant-led care."
+   ],
+   "group": "Referral & complexity",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nhse-care-pathways",
+   "title": "NHS dentistry: care pathways guidance",
+   "short": "NHS England complex care pathways",
+   "publisher": "NHS England",
+   "year": 2026,
+   "type": "commissioning",
+   "specialties": [
+    "general",
+    "prevention",
+    "perio"
+   ],
+   "topic": "English primary-care contract pathways",
+   "aliases": [
+    "complex care pathways",
+    "care pathway 1",
+    "care pathway 2",
+    "care pathway 3",
+    "dental contract 2026",
+    "6 month care package",
+    "12 month care package",
+    "banded course"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "English primary-care service guidance under the June 2026 contract changes; not applicable in Scotland, Wales or Northern Ireland.",
+   "useWhen": "you are planning a 6- or 12-month NHS care package for a patient with extensive caries or periodontal disease in English general practice.",
+   "url": "https://www.england.nhs.uk/long-read/nhs-dentistry-care-pathways-guidance/",
+   "links": [
+    {
+     "label": "Summary tables (PDF)",
+     "url": "https://www.england.nhs.uk/wp-content/uploads/2026/03/prn02513-i-complex-care-pathways-clinical-guidance-tables.pdf"
+    }
+   ],
+   "keyPoints": [
+    "Care pathways introduced 23 June 2026 for patients with complex dental needs.",
+    "Pathways 1–2 require care to at least 5 carious teeth; pathways 2–3 require minimum periodontal treatment steps."
+   ],
+   "group": "Referral & complexity",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "gdc-rd-curriculum",
+   "title": "Restorative Dentistry Specialty Training Curriculum",
+   "short": "Restorative dentistry specialty curriculum",
+   "publisher": "GDC (written by the Restorative Dentistry SAC)",
+   "year": 2024,
+   "edition": "Approved 15 Dec 2022; for trainees from September 2024",
+   "type": "training",
+   "specialties": [
+    "training"
+   ],
+   "topic": "Specialty training",
+   "aliases": [
+    "curriculum",
+    "syllabus",
+    "specialty training",
+    "stR",
+    "sac",
+    "ccst",
+    "isfe"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you need the competences expected for specialty training and the Specialist List in restorative dentistry.",
+   "url": "https://www.gdc-uk.org/docs/default-source/education-and-cpd/dental-specialty-training/specialty-curricula/restorative-dentistry-specialty-training-curriculum-2024_a.pdf",
+   "related": [
+    "rcs-rd-syllabus"
+   ],
+   "group": "Standards, curricula & practice",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-rd-syllabus",
+   "title": "Syllabus for Higher Specialist Training in Restorative Dentistry",
+   "short": "Restorative dentistry clinical syllabus",
+   "publisher": "RCS England FDS — Specialist Advisory Committee for Restorative Dentistry",
+   "year": 2024,
+   "type": "training",
+   "specialties": [
+    "training"
+   ],
+   "topic": "Specialty training",
+   "aliases": [
+    "syllabus",
+    "curriculum",
+    "isfe",
+    "specialty training"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want the clinical syllabus that accompanies the 2024 GDC restorative curriculum.",
+   "url": "https://rcseng.ac.uk/-/media/Files/RCS/FDS/Dental-curricula/Rest-Dent-SAC-Final--Restorative-Syllabus-2024-for-SAC_.pdf",
+   "related": [
+    "gdc-rd-curriculum"
+   ],
+   "group": "Standards, curricula & practice",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-rdiotn",
+   "title": "Restorative dentistry: Index of treatment need – complexity assessment",
+   "short": "RD-IOTN complexity assessment",
+   "publisher": "RCS England FDS (Falcon et al.)",
+   "year": 2001,
+   "type": "tool",
+   "measure": "complexity",
+   "specialties": [
+    "general",
+    "perio",
+    "endo",
+    "prostho"
+   ],
+   "topic": "Restorative treatment complexity",
+   "aliases": [
+    "rdiotn",
+    "rd-iotn",
+    "rIOTN",
+    "restorative index of treatment need",
+    "complexity code",
+    "modifying factor"
+   ],
+   "jurisdiction": "UK",
+   "status": "archived",
+   "useWhen": "you want a structured complexity code (1–3) across periodontal, endodontic, fixed and removable domains — note the RCS lists it as archived.",
+   "url": "https://www.rcseng.ac.uk/-/media/files/rcs/fds/publications/complexityassessment.pdf",
+   "links": [
+    {
+     "label": "Falcon et al. BDJ 2001 (PubMed)",
+     "url": "https://pubmed.ncbi.nlm.nih.gov/11384021/"
+    }
+   ],
+   "related": [
+    "nhse-rd-standard"
+   ],
+   "keyPoints": [
+    "Complexity 1: any graduate · 2: experienced practitioner · 3: specialist.",
+    "A modifying factor raises a domain by one; the overall code is the highest domain."
+   ],
+   "tool": "rdiotn",
+   "group": "Referral & complexity",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "tayside-rd",
+   "title": "Dundee Dental Hospital specialist services: restorative dentistry — who to refer / making a referral",
+   "short": "NHS Tayside restorative referral criteria",
+   "publisher": "NHS Tayside (Dundee Dental Hospital)",
+   "type": "commissioning",
+   "specialties": [
+    "general",
+    "implant"
+   ],
+   "topic": "Local referral criteria",
+   "aliases": [
+    "dundee",
+    "tayside",
+    "referral criteria",
+    "acceptance criteria",
+    "implant funding",
+    "implant eligibility",
+    "nhs implants",
+    "scotland referral"
+   ],
+   "jurisdiction": "LOCAL",
+   "nation": "Scotland",
+   "ukRelevance": "Local Health Board criteria for Tayside — not national eligibility rules.",
+   "useWhen": "you are referring a patient in Tayside or NE Fife for specialist restorative care or NHS implants.",
+   "url": "https://www.rightdecisions.scot.nhs.uk/nhs-tayside-refguide/dental-service/dundee-dental-hospital/dundee-dental-hospital-specialist-services/restorative-dentistry/dundee-dental-hospital-specialist-services-restorative-dentistry-who-to-refer",
+   "links": [
+    {
+     "label": "Making a referral",
+     "url": "https://www.rightdecisions.scot.nhs.uk/nhs-tayside-refguide/dental-service/dundee-dental-hospital/dundee-dental-hospital-specialist-services/restorative-dentistry/dundee-dental-hospital-specialist-services-restorative-dentistry-making-a-referral"
+    }
+   ],
+   "group": "Referral & complexity",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "lothian-edi-implants",
+   "title": "Implant acceptance criteria — Edinburgh Dental Institute",
+   "short": "NHS Lothian (EDI) implant acceptance criteria",
+   "publisher": "NHS Lothian — Edinburgh Dental Institute",
+   "year": 2021,
+   "edition": "v1, 6 April 2021",
+   "type": "commissioning",
+   "specialties": [
+    "implant",
+    "general"
+   ],
+   "topic": "Local implant eligibility",
+   "aliases": [
+    "implant funding",
+    "nhs implants",
+    "implant eligibility",
+    "edinburgh",
+    "lothian",
+    "scotland implants",
+    "acceptance criteria"
+   ],
+   "jurisdiction": "LOCAL",
+   "nation": "Scotland",
+   "ukRelevance": "Local criteria for one Scottish service — not national eligibility.",
+   "useWhen": "you are considering referral for NHS-funded implants to the Edinburgh Dental Institute.",
+   "url": "https://apps.nhslothian.scot/files/sites/2/Implant-acceptance-criteria-Edinburgh-Dental-Insitute-v1.pdf",
+   "related": [
+    "rcs-nhs-implants"
+   ],
+   "group": "Eligibility & commissioning",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "belfast-rd",
+   "title": "Referral guidelines for hospital dental services — restorative dentistry referral criteria",
+   "short": "Belfast Trust restorative referral criteria",
+   "publisher": "HSC Business Services Organisation (Belfast Trust services)",
+   "type": "commissioning",
+   "specialties": [
+    "general",
+    "implant",
+    "perio"
+   ],
+   "topic": "Local referral criteria",
+   "aliases": [
+    "belfast",
+    "northern ireland",
+    "referral criteria",
+    "restorative referral",
+    "implant referral",
+    "periodontal referral proforma"
+   ],
+   "jurisdiction": "LOCAL",
+   "nation": "Northern Ireland",
+   "ukRelevance": "Local criteria for Belfast Trust services — not national eligibility.",
+   "useWhen": "you are referring to restorative dentistry, periodontics or implants at the Belfast Dental Hospital.",
+   "url": "https://bso.hscni.net/directorates/operations/family-practitioner-services/dental-services/contractor-information/referral-guidelines-for-hospital-dental-services/",
+   "note": "The page lists Restorative Dentistry Referral Criteria (March 2016), referral pro formas and dental implant criteria.",
+   "group": "Referral & complexity",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "dboh",
+   "title": "Delivering better oral health: an evidence-based toolkit for prevention",
+   "short": "Delivering Better Oral Health (DBOH)",
+   "publisher": "Department of Health and Social Care; NHS England",
+   "year": 2014,
+   "edition": "First published 12 June 2014; last updated 10 September 2025",
+   "type": "guideline",
+   "specialties": [
+    "prevention",
+    "operative",
+    "perio"
+   ],
+   "topic": "Prevention",
+   "aliases": [
+    "dboh",
+    "prevention toolkit",
+    "fluoride",
+    "fluoride varnish",
+    "toothpaste",
+    "diet advice",
+    "smoking cessation",
+    "tooth wear prevention",
+    "erosive wear",
+    "summary guidance tables"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "Published by DHSC/NHS England. The GOV.UK page gives no explicit statement of which UK nations it applies to; it describes a UK-wide expert collaboration.",
+   "useWhen": "you want evidence-graded prevention advice (fluoride, diet, oral hygiene, tooth wear, smoking) to give patients.",
+   "url": "https://www.gov.uk/government/publications/delivering-better-oral-health-an-evidence-based-toolkit-for-prevention",
+   "parts": [
+    {
+     "label": "Chapter 2: summary guidance tables",
+     "url": "https://www.gov.uk/government/publications/delivering-better-oral-health-an-evidence-based-toolkit-for-prevention/chapter-2-summary-guidance-tables-for-dental-teams"
+    },
+    {
+     "label": "Chapter 7: tooth wear",
+     "url": "https://www.gov.uk/government/publications/delivering-better-oral-health-an-evidence-based-toolkit-for-prevention/chapter-7-tooth-wear"
+    },
+    {
+     "label": "Chapter 9: fluoride",
+     "url": "https://www.gov.uk/government/publications/delivering-better-oral-health-an-evidence-based-toolkit-for-prevention/chapter-9-fluoride"
+    }
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nice-cg19",
+   "title": "Dental checks: intervals between oral health reviews (CG19)",
+   "short": "NICE recall intervals",
+   "publisher": "NICE",
+   "year": 2004,
+   "edition": "Published 27 October 2004; last reviewed 31 March 2020",
+   "type": "guideline",
+   "specialties": [
+    "prevention",
+    "general"
+   ],
+   "topic": "Recall intervals",
+   "aliases": [
+    "recall interval",
+    "recall",
+    "oral health review",
+    "3 to 24 months",
+    "check-up frequency"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "NICE guidance for England; widely referenced across the UK.",
+   "useWhen": "you are setting a risk-based recall interval for a patient.",
+   "url": "https://www.nice.org.uk/guidance/cg19",
+   "keyPoints": [
+    "Shortest interval 3 months for all.",
+    "Longest 12 months under 18; 24 months for adults."
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-caries",
+   "title": "Prevention and Management of Dental Caries in Children",
+   "short": "SDCEP caries in children",
+   "publisher": "SDCEP",
+   "year": 2025,
+   "edition": "3rd edition, 27 February 2025",
+   "type": "guideline",
+   "specialties": [
+    "prevention",
+    "paeds"
+   ],
+   "topic": "Caries in children",
+   "population": "Children",
+   "aliases": [
+    "caries in children",
+    "hall technique",
+    "fluoride varnish",
+    "fissure sealant",
+    "primary teeth caries",
+    "sealing in"
+   ],
+   "jurisdiction": "SCO",
+   "ukRelevance": "Scottish guidance; recommended by the RCS England FDS.",
+   "useWhen": "you are planning prevention and caries management for a child.",
+   "url": "https://www.childcaries.sdcep.org.uk/",
+   "links": [
+    {
+     "label": "SDCEP page",
+     "url": "https://www.sdcep.org.uk/published-guidance/caries-in-children/"
+    }
+   ],
+   "related": [
+    "eapd-deep-primary"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iccms",
+   "title": "The International Caries Classification and Management System (ICCMS™)",
+   "short": "ICCMS caries management system",
+   "publisher": "Ismail AI, Pitts NB, Tellez M et al. (BMC Oral Health)",
+   "year": 2015,
+   "type": "consensus",
+   "specialties": [
+    "prevention",
+    "operative"
+   ],
+   "topic": "Caries management pathway",
+   "aliases": [
+    "iccms",
+    "caries staging",
+    "caries risk",
+    "icdas",
+    "caries management pathway"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you want an internationally agreed caries detection, staging, risk and management pathway.",
+   "url": "https://doi.org/10.1186/1472-6831-15-S1-S9",
+   "links": [
+    {
+     "label": "ICCMS Guide for Practitioners and Educators (Zenodo)",
+     "url": "https://doi.org/10.5281/zenodo.853106"
+    }
+   ],
+   "related": [
+    "cls-icdas",
+    "cls-iccms",
+    "cariescare"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cariescare",
+   "title": "CariesCare practice guide: consensus on evidence into practice",
+   "short": "CariesCare International 4D guide",
+   "publisher": "Martignon S, Pitts NB et al. (BDJ)",
+   "year": 2019,
+   "type": "consensus",
+   "specialties": [
+    "prevention",
+    "operative"
+   ],
+   "topic": "Caries management in practice",
+   "aliases": [
+    "cariescare",
+    "cci",
+    "4d cycle",
+    "caries risk",
+    "icdas",
+    "iccms"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you want a practice-friendly 4D caries pathway (determine risk, detect, decide, do) derived from ICCMS.",
+   "url": "https://doi.org/10.1038/s41415-019-0678-8",
+   "related": [
+    "iccms"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "s3-deep-caries",
+   "title": "Deep Caries Management: EFCD-ESE-ORCA S3-Level Clinical Practice Guideline",
+   "short": "S3 guideline: deep & extremely deep caries (permanent teeth)",
+   "publisher": "EFCD, ESE, ORCA and DGZ (Schwendicke F et al.)",
+   "year": 2026,
+   "edition": "Int Endod J 2026;59:1298–1315 (also Caries Res and Clin Oral Investig)",
+   "type": "guideline",
+   "specialties": [
+    "operative",
+    "endo"
+   ],
+   "topic": "Deep caries, vital permanent teeth",
+   "population": "Vital permanent teeth, all ages",
+   "aliases": [
+    "extremely deep caries",
+    "deep caries",
+    "selective caries removal",
+    "stepwise excavation",
+    "pulp exposure",
+    "vital pulp therapy",
+    "pulpotomy",
+    "cavity liner",
+    "permanent teeth caries"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are managing deep or extremely deep caries in a vital PERMANENT tooth and deciding on selective vs stepwise removal or pulpotomy.",
+   "url": "https://doi.org/10.1111/iej.70132",
+   "links": [
+    {
+     "label": "Caries Research version",
+     "url": "https://doi.org/10.1159/000551659"
+    },
+    {
+     "label": "Clin Oral Investig version",
+     "url": "https://doi.org/10.1007/s00784-025-06727-1"
+    }
+   ],
+   "related": [
+    "ese-deep-caries",
+    "ese-s3",
+    "eapd-deep-primary"
+   ],
+   "note": "Jointly developed by EFCD, ESE, ORCA and the German Society of Conservative Dentistry (DGZ) per the PubMed abstract.",
+   "group": "Caries & direct restorations",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "efcd-proximal",
+   "title": "How to intervene in the caries process in adults: proximal and secondary caries? An EFCD-ORCA-DGZ expert Delphi consensus statement",
+   "short": "EFCD-ORCA-DGZ consensus: adult proximal & secondary caries",
+   "publisher": "Schwendicke F et al. (Clin Oral Investig)",
+   "year": 2020,
+   "type": "consensus",
+   "specialties": [
+    "operative",
+    "prevention"
+   ],
+   "topic": "Proximal and secondary caries in adults",
+   "population": "Adults",
+   "aliases": [
+    "proximal caries",
+    "interproximal caries",
+    "secondary caries",
+    "recurrent caries",
+    "resin infiltration",
+    "repair vs replace",
+    "bitewing"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are deciding whether to monitor, seal, infiltrate, repair or restore an adult proximal or secondary lesion.",
+   "url": "https://doi.org/10.1007/s00784-020-03431-0",
+   "group": "Caries & direct restorations",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "eapd-deep-primary",
+   "title": "Best clinical practice guidance for treating deep carious lesions in primary teeth: an EAPD policy document",
+   "short": "EAPD deep caries in PRIMARY teeth",
+   "publisher": "European Academy of Paediatric Dentistry (Duggal M et al.)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "paeds",
+    "operative"
+   ],
+   "topic": "Deep caries, primary dentition",
+   "population": "Primary teeth (children)",
+   "aliases": [
+    "deep caries primary teeth",
+    "primary molar pulpotomy",
+    "indirect pulp capping",
+    "silver diamine fluoride",
+    "hall technique",
+    "primary dentition caries"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are managing a deep carious lesion in a PRIMARY tooth (for permanent teeth use the 2026 S3 guideline).",
+   "url": "https://doi.org/10.1007/s40368-022-00718-6",
+   "related": [
+    "s3-deep-caries",
+    "sdcep-caries"
+   ],
+   "group": "Paediatric caries & MIH",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "fdi-criteria",
+   "title": "Revised FDI criteria for evaluating direct and indirect dental restorations — recommendations for its clinical use, interpretation, and reporting",
+   "short": "Revised FDI restoration criteria",
+   "publisher": "Hickel R et al. (Clin Oral Investig)",
+   "year": 2023,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "operative",
+    "prostho"
+   ],
+   "topic": "Restoration quality",
+   "aliases": [
+    "fdi criteria",
+    "restoration evaluation",
+    "repair or replace",
+    "marginal adaptation",
+    "failed restoration",
+    "usphs"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need a standard way to grade an existing restoration and decide whether to review, refurbish, repair or replace.",
+   "url": "https://doi.org/10.1007/s00784-022-04814-1",
+   "related": [
+    "cls-usphs"
+   ],
+   "group": "Restoration quality & restorability",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsrd-toothwear",
+   "title": "Tooth Wear Guidelines for the BSRD",
+   "short": "BSRD tooth wear guidelines (3 parts)",
+   "publisher": "British Society for Restorative Dentistry (Hemmings K, Truman A, Shah S, Chauhan R)",
+   "year": 2018,
+   "edition": "Dent Update 2018, three parts",
+   "type": "guideline",
+   "specialties": [
+    "operative",
+    "prostho"
+   ],
+   "topic": "Tooth wear",
+   "aliases": [
+    "tsl",
+    "tooth surface loss",
+    "tooth wear",
+    "erosive wear",
+    "erosion",
+    "attrition",
+    "abrasion",
+    "dahl",
+    "worn dentition",
+    "overdenture tooth wear"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are diagnosing tooth wear or planning fixed or removable management of a worn dentition.",
+   "url": "https://www.bsrd.org.uk/File.ashx?id=15192",
+   "links": [
+    {
+     "label": "BSRD guidelines page",
+     "url": "https://www.bsrd.org.uk/Guidelines.aspx"
+    }
+   ],
+   "parts": [
+    {
+     "label": "Part 1: aetiology, diagnosis and prevention"
+    },
+    {
+     "label": "Part 2: fixed management of tooth wear"
+    },
+    {
+     "label": "Part 3: removable management of tooth wear"
+    }
+   ],
+   "related": [
+    "cls-bewe",
+    "rcs-erosion",
+    "tw-consensus"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-erosion",
+   "title": "Clinical guidelines for dental erosion",
+   "short": "RCS dental erosion guidelines",
+   "publisher": "RCS England FDS (O'Sullivan E, Toor I, Brown L, Watkins S)",
+   "year": 2021,
+   "type": "guideline",
+   "specialties": [
+    "operative",
+    "paeds"
+   ],
+   "topic": "Dental erosion",
+   "aliases": [
+    "erosion",
+    "erosive wear",
+    "tsl",
+    "acid erosion",
+    "tooth wear"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are assessing or preventing dental erosion.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Guidelines/Erosion-Guidelines_2021_V4_MJ.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "bsrd-toothwear",
+    "cls-bewe"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "tw-consensus",
+   "title": "Severe Tooth Wear: European Consensus Statement on Management Guidelines",
+   "short": "European consensus: severe tooth wear",
+   "publisher": "Loomans B et al. (J Adhes Dent)",
+   "year": 2017,
+   "type": "consensus",
+   "specialties": [
+    "operative",
+    "prostho"
+   ],
+   "topic": "Severe tooth wear",
+   "aliases": [
+    "severe tooth wear",
+    "tsl",
+    "tooth surface loss",
+    "pathological wear",
+    "minimally invasive rehabilitation",
+    "increased ovd"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are deciding when and how to restore severe or pathological tooth wear.",
+   "url": "https://doi.org/10.3290/j.jad.a38102",
+   "related": [
+    "bsrd-toothwear",
+    "cls-twes"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsp-bpe",
+   "title": "Basic Periodontal Examination (BPE)",
+   "short": "BSP BPE guidance (adults)",
+   "publisher": "British Society of Periodontology and Implant Dentistry",
+   "year": 2019,
+   "type": "classification",
+   "measure": "screening",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Periodontal screening",
+   "population": "Adults (18+)",
+   "aliases": [
+    "bpe",
+    "basic periodontal examination",
+    "perio screening",
+    "who probe",
+    "pocket chart",
+    "code 3",
+    "code 4",
+    "furcation"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are screening an adult's periodontal status and deciding what charting and treatment follow.",
+   "url": "https://www.bsperio.org.uk/assets/downloads/BSP_BPE_Guidelines_2019.pdf",
+   "related": [
+    "bsp-sbpe",
+    "bsp-2017"
+   ],
+   "tool": "bpe",
+   "group": "Screening",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Audit BPE recording in DentalAudit",
+     "path": "/dentalaudit/#/create?template=bpe"
+    }
+   ]
+  },
+  {
+   "id": "bsp-sbpe",
+   "title": "Guidelines for periodontal screening and management of children and adolescents under 18 years of age (simplified BPE)",
+   "short": "BSP/BSPD simplified BPE (under 18s)",
+   "publisher": "BSP and BSPD",
+   "year": 2021,
+   "edition": "Updated 2021",
+   "type": "classification",
+   "measure": "screening",
+   "specialties": [
+    "perio",
+    "paeds"
+   ],
+   "topic": "Periodontal screening",
+   "population": "Children & adolescents 7–17",
+   "aliases": [
+    "sbpe",
+    "simplified bpe",
+    "children bpe",
+    "under 18",
+    "index teeth"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are screening a child or adolescent (7–17) periodontally, including before orthodontics.",
+   "url": "https://www.bsperio.org.uk/assets/downloads/Executive_Summary_Simplified_BPE_for_the_Under_18s__BSP_BSPD_updated_2021_FINAL_PDF_version_130721.pdf",
+   "related": [
+    "bsp-bpe"
+   ],
+   "tool": "bpe",
+   "group": "Screening",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ww2017",
+   "title": "A new classification scheme for periodontal and peri-implant diseases and conditions — Introduction and key changes from the 1999 classification",
+   "short": "2017 World Workshop classification",
+   "publisher": "Caton JG et al. (AAP/EFP World Workshop)",
+   "year": 2018,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "perio",
+    "implant"
+   ],
+   "topic": "Periodontal & peri-implant classification",
+   "aliases": [
+    "2017 classification",
+    "2018 classification",
+    "world workshop",
+    "staging and grading",
+    "peri-implantitis case definition",
+    "aggressive periodontitis"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need the source international classification of periodontal and peri-implant diseases.",
+   "url": "https://doi.org/10.1111/jcpe.12935",
+   "related": [
+    "bsp-2017",
+    "cls-perimplant-def",
+    "cls-endoperio"
+   ],
+   "group": "Diagnosis & classification",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsp-2017",
+   "title": "Periodontal diagnosis in the context of the 2017 classification system — implementation in clinical practice",
+   "short": "BSP UK implementation of the 2017 classification",
+   "publisher": "Dietrich T et al. for the BSP (BDJ)",
+   "year": 2019,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Periodontal diagnosis",
+   "aliases": [
+    "staging",
+    "grading",
+    "stage grade",
+    "bsp flowchart",
+    "periodontitis diagnosis",
+    "currently stable",
+    "in remission",
+    "unstable",
+    "gingivitis diagnosis"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are writing a periodontal diagnosis (extent, stage, grade, current status, risk factors) in UK practice.",
+   "url": "https://doi.org/10.1038/sj.bdj.2019.3",
+   "links": [
+    {
+     "label": "BSP diagnostic flowchart (PDF)",
+     "url": "https://www.bsperio.org.uk/assets/downloads/111_153050_bsp-flowchart-implementing-the-2017-classification.pdf"
+    }
+   ],
+   "related": [
+    "ww2017",
+    "bsp-s3",
+    "sdcep-perio"
+   ],
+   "tool": "bsp",
+   "group": "Diagnosis & classification",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsp-s3",
+   "title": "BSP implementation of European S3-level evidence-based treatment guidelines for stage I–III periodontitis in UK clinical practice",
+   "short": "BSP UK S3 treatment guideline (stage I–III)",
+   "publisher": "West N et al. for the BSP (J Dent)",
+   "year": 2021,
+   "type": "guideline",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Periodontitis treatment",
+   "aliases": [
+    "s3 guideline",
+    "stepwise therapy",
+    "step 1",
+    "step 2",
+    "subgingival instrumentation",
+    "rsd",
+    "supportive periodontal care",
+    "efp s3"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning stepwise treatment of stage I–III periodontitis.",
+   "url": "https://doi.org/10.1016/j.jdent.2020.103562",
+   "links": [
+    {
+     "label": "BSP S3 resources page",
+     "url": "https://www.bsperio.org.uk/professionals/bsp-uk-clinical-practice-guidelines-for-the-treatment-of-periodontitis"
+    }
+   ],
+   "related": [
+    "efp-stage4",
+    "bsp-2017"
+   ],
+   "group": "Treatment & referral",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "efp-stage4",
+   "title": "Treatment of stage IV periodontitis: The EFP S3 level clinical practice guideline",
+   "short": "EFP S3 guideline: stage IV periodontitis",
+   "publisher": "Herrera D et al. (EFP; J Clin Periodontol)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "perio",
+    "prostho",
+    "ortho",
+    "implant"
+   ],
+   "topic": "Stage IV periodontitis rehabilitation",
+   "aliases": [
+    "stage iv",
+    "stage 4 periodontitis",
+    "perio-prosthodontic",
+    "pathological tooth migration",
+    "flaring",
+    "bite collapse",
+    "splinting",
+    "rehabilitation case types"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are planning interdisciplinary rehabilitation (orthodontics, splinting, prostheses, implants) for stage IV periodontitis.",
+   "url": "https://doi.org/10.1111/jcpe.13639",
+   "related": [
+    "bsp-s3",
+    "cls-stage4-types"
+   ],
+   "group": "Treatment & referral",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "efp-perimplant",
+   "title": "Prevention and treatment of peri-implant diseases — The EFP S3 level clinical practice guideline",
+   "short": "EFP S3 guideline: peri-implant diseases",
+   "publisher": "Herrera D et al. (EFP; J Clin Periodontol)",
+   "year": 2023,
+   "type": "guideline",
+   "specialties": [
+    "implant",
+    "perio"
+   ],
+   "topic": "Peri-implant mucositis & peri-implantitis",
+   "aliases": [
+    "peri-implantitis",
+    "peri-implant mucositis",
+    "bleeding around implant",
+    "implant bleeding",
+    "bleeding implant",
+    "implant bone loss",
+    "supportive peri-implant care",
+    "failing implant"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are preventing or treating peri-implant mucositis or peri-implantitis.",
+   "url": "https://doi.org/10.1111/jcpe.13823",
+   "related": [
+    "bsp-perimplant",
+    "cls-perimplant-def",
+    "cls-idra"
+   ],
+   "group": "Peri-implant disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsp-perimplant",
+   "title": "BSP Implementation of Prevention and Treatment of Peri-implant Diseases — The EFP S3 Level Clinical Practice Guideline",
+   "short": "BSP UK peri-implant disease guideline",
+   "publisher": "West N et al. for the BSP (J Dent)",
+   "year": 2024,
+   "type": "guideline",
+   "specialties": [
+    "implant",
+    "perio"
+   ],
+   "topic": "Peri-implant diseases (UK)",
+   "aliases": [
+    "peri-implantitis",
+    "peri-implant mucositis",
+    "bleeding around implant",
+    "implant bleeding",
+    "implant maintenance",
+    "uk peri-implant"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want the UK-adapted recommendations for preventing and treating peri-implant disease.",
+   "url": "https://doi.org/10.1016/j.jdent.2024.104980",
+   "links": [
+    {
+     "label": "BSP resources page",
+     "url": "https://www.bsperio.org.uk/news/bsp-implementation-of-prevention-and-treatment-of-peri-implant-diseases-the-efp-s3-level-clinical-practice-guideline"
+    }
+   ],
+   "related": [
+    "efp-perimplant",
+    "cls-perimplant-def"
+   ],
+   "group": "Peri-implant disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-perio",
+   "title": "Prevention and Treatment of Periodontal Diseases in Primary Care",
+   "short": "SDCEP periodontal care",
+   "publisher": "SDCEP",
+   "year": 2024,
+   "edition": "2nd edition, February 2024 · NICE-accredited process",
+   "type": "guideline",
+   "specialties": [
+    "perio",
+    "prevention"
+   ],
+   "topic": "Periodontal care in primary care",
+   "aliases": [
+    "periodontal care",
+    "gum disease",
+    "periodontitis",
+    "gingivitis",
+    "pmpr",
+    "furcation",
+    "perio referral"
+   ],
+   "jurisdiction": "SCO",
+   "ukRelevance": "Endorsed by the dental faculties of RCSEd, RCPSG and RCS England and by the BSP.",
+   "useWhen": "you are assessing, diagnosing and treating periodontal disease in primary care.",
+   "url": "https://www.periodontalcare.sdcep.org.uk/",
+   "links": [
+    {
+     "label": "SDCEP page",
+     "url": "https://www.sdcep.org.uk/published-guidance/periodontal-care/"
+    }
+   ],
+   "related": [
+    "bsp-2017",
+    "bsp-s3",
+    "bsp-referral"
+   ],
+   "group": "Treatment & referral",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsp-referral",
+   "title": "BSP Guidelines for Periodontal Patient Referral",
+   "short": "BSP periodontal referral guidelines",
+   "publisher": "British Society of Periodontology and Implant Dentistry",
+   "year": 2020,
+   "type": "commissioning",
+   "specialties": [
+    "perio",
+    "general"
+   ],
+   "topic": "Periodontal referral complexity",
+   "aliases": [
+    "perio referral",
+    "periodontal referral",
+    "level 1 complexity",
+    "level 2",
+    "level 3",
+    "referral criteria"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are deciding whether a periodontal patient should be referred and at what complexity level.",
+   "url": "https://www.bsperio.org.uk/assets/downloads/BSP_Guidelines_for_Patient_Referral_2020.pdf",
+   "related": [
+    "nhse-rd-standard",
+    "sdcep-perio"
+   ],
+   "group": "Treatment & referral",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bes-gep",
+   "title": "A Guide to Good Endodontic Practice",
+   "short": "BES Guide to Good Endodontic Practice",
+   "publisher": "British Endodontic Society (ed. Tomson P)",
+   "year": 2022,
+   "edition": "1st edition",
+   "type": "standard",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Endodontic standards",
+   "aliases": [
+    "good endodontic practice",
+    "rct standards",
+    "root canal treatment",
+    "hypochlorite accident",
+    "endodontic emergencies",
+    "record keeping"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want UK reference standards for endodontic assessment, treatment, records and emergencies.",
+   "url": "https://britishendodonticsociety.org.uk/news/39/a_guide_to_good_endodontic_practice",
+   "links": [
+    {
+     "label": "PDF",
+     "url": "https://britishendodonticsociety.org.uk/_userfiles/pages/files/a4_bes_guidelines_2022_hyperlinked_final.pdf"
+    }
+   ],
+   "related": [
+    "bes-endoapp",
+    "ese-s3"
+   ],
+   "group": "Standards & case difficulty",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bes-endoapp",
+   "title": "BES Case Assessment Tool (EndoApp)",
+   "short": "BES EndoApp case difficulty tool",
+   "publisher": "British Endodontic Society (Shah PK, Chong BS)",
+   "year": 2018,
+   "type": "tool",
+   "measure": "complexity",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Endodontic case difficulty",
+   "aliases": [
+    "endoapp",
+    "endo difficulty",
+    "endodontic difficulty",
+    "case difficulty",
+    "retreatment complexity",
+    "endo complexity",
+    "case assessment",
+    "rct referral"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want to score endodontic case difficulty before treating or referring.",
+   "url": "https://britishendodonticsociety.org.uk/professionals/bes_case_assessment_tool.aspx",
+   "links": [
+    {
+     "label": "Shah & Chong 2018 (development paper)",
+     "url": "https://doi.org/10.1007/s00784-018-2341-1"
+    }
+   ],
+   "related": [
+    "aae-cda",
+    "nhse-rd-standard"
+   ],
+   "note": "Separate from the AAE form and from NHS England commissioning levels.",
+   "group": "Standards & case difficulty",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "aae-cda",
+   "title": "AAE Endodontic Case Difficulty Assessment Form and Guidelines",
+   "short": "AAE case difficulty form",
+   "publisher": "American Association of Endodontists",
+   "year": 2022,
+   "type": "tool",
+   "measure": "complexity",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Endodontic case difficulty",
+   "aliases": [
+    "aae form",
+    "endo difficulty",
+    "case difficulty",
+    "retreatment complexity",
+    "endodontic difficulty",
+    "referral decision"
+   ],
+   "jurisdiction": "US",
+   "ukRelevance": "US tool, also used in UK teaching.",
+   "useWhen": "you want the AAE minimal/moderate/high difficulty checklist.",
+   "url": "https://www.aae.org/specialty/wp-content/uploads/sites/2/2022/01/CaseDifficultyAssessmentFormFINAL2022.pdf",
+   "related": [
+    "bes-endoapp",
+    "nhse-rd-standard"
+   ],
+   "group": "Standards & case difficulty",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bes-trauma-guide",
+   "title": "A Guide to Traumatic Dental Injuries",
+   "short": "BES guide to traumatic dental injuries",
+   "publisher": "British Endodontic Society",
+   "type": "guideline",
+   "specialties": [
+    "trauma",
+    "endo"
+   ],
+   "topic": "Dental trauma",
+   "aliases": [
+    "dental trauma",
+    "avulsion",
+    "luxation",
+    "crown fracture",
+    "splinting"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want a UK society summary of trauma management alongside IADT.",
+   "url": "https://britishendodonticsociety.org.uk/_userfiles/pages/files/BES_A%20Guide%20to%20Traumatic%20Dental%20Injuries.pdf",
+   "related": [
+    "iadt-2020",
+    "bes-trauma-proforma"
+   ],
+   "note": "Year not stated on the BES page.",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bes-trauma-proforma",
+   "title": "Dental Trauma History & Examination Proforma",
+   "short": "BES trauma history & examination proforma",
+   "publisher": "British Endodontic Society",
+   "type": "tool",
+   "specialties": [
+    "trauma"
+   ],
+   "topic": "Trauma records",
+   "aliases": [
+    "trauma proforma",
+    "trauma record",
+    "trauma form",
+    "dental trauma history"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you need a structured record for a trauma assessment.",
+   "url": "https://britishendodonticsociety.org.uk/_userfiles/pages/files/bes_dental_trauma_history_and_examination_proforma_1.pdf",
+   "related": [
+    "bes-trauma-guide",
+    "iadt-2020"
+   ],
+   "note": "Year not stated on the BES page.",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-s3",
+   "title": "Treatment of pulpal and apical disease: The European Society of Endodontology (ESE) S3-level clinical practice guideline",
+   "short": "ESE S3 guideline: pulpal & apical disease",
+   "publisher": "Duncan HF et al. (ESE; Int Endod J)",
+   "year": 2023,
+   "type": "guideline",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Pulpitis & apical periodontitis",
+   "aliases": [
+    "pulpitis",
+    "apical periodontitis",
+    "vital pulp treatment",
+    "pulpotomy",
+    "root canal treatment",
+    "endodontic surgery",
+    "regenerative endodontics"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are choosing treatment for pulpitis or apical periodontitis.",
+   "url": "https://doi.org/10.1111/iej.13974",
+   "related": [
+    "s3-deep-caries",
+    "ese-deep-caries",
+    "bes-gep"
+   ],
+   "group": "Vital pulp & pulpal/apical disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-deep-caries",
+   "title": "European Society of Endodontology position statement: Management of deep caries and the exposed pulp",
+   "short": "ESE position: deep caries & exposed pulp",
+   "publisher": "ESE (Int Endod J)",
+   "year": 2019,
+   "type": "consensus",
+   "specialties": [
+    "endo",
+    "operative"
+   ],
+   "topic": "Deep caries & pulp exposure",
+   "aliases": [
+    "pulp exposure",
+    "deep caries",
+    "pulp capping",
+    "pulpotomy",
+    "vital pulp"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are managing a deep lesion or an exposed pulp.",
+   "url": "https://doi.org/10.1111/iej.13080",
+   "related": [
+    "s3-deep-caries",
+    "ese-s3"
+   ],
+   "group": "Vital pulp & pulpal/apical disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-rft",
+   "title": "European Society of Endodontology position statement: The restoration of root filled teeth",
+   "short": "ESE position: restoring root-filled teeth",
+   "publisher": "ESE (Mannocci F et al.; Int Endod J)",
+   "year": 2021,
+   "type": "consensus",
+   "specialties": [
+    "endo",
+    "operative",
+    "prostho"
+   ],
+   "topic": "Restoring root-filled teeth",
+   "aliases": [
+    "root filled tooth",
+    "post and core",
+    "cuspal coverage",
+    "ferrule",
+    "onlay after rct",
+    "crown after root canal"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are planning the restoration of a root-filled tooth (post, ferrule, cuspal coverage).",
+   "url": "https://doi.org/10.1111/iej.13607",
+   "group": "Restoring root-filled teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-cbct",
+   "title": "European Society of Endodontology position statement: Use of cone beam computed tomography in Endodontics",
+   "short": "ESE position: CBCT in endodontics",
+   "publisher": "ESE (Patel S et al.; Int Endod J)",
+   "year": 2019,
+   "type": "consensus",
+   "specialties": [
+    "endo",
+    "radiology"
+   ],
+   "topic": "CBCT",
+   "aliases": [
+    "cbct",
+    "cone beam",
+    "3d imaging",
+    "endodontic imaging"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are deciding whether CBCT is justified for an endodontic problem.",
+   "url": "https://doi.org/10.1111/iej.13187",
+   "related": [
+    "cgdent-scdr"
+   ],
+   "group": "Diagnosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-resorption",
+   "title": "ESE Position Statement: Root Resorption",
+   "short": "ESE position: root resorption",
+   "publisher": "European Society of Endodontology",
+   "year": 2023,
+   "type": "consensus",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Root resorption",
+   "aliases": [
+    "resorption",
+    "internal resorption",
+    "external resorption",
+    "external cervical resorption",
+    "ecr",
+    "replacement resorption",
+    "inflammatory resorption"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are diagnosing or managing internal or external root resorption.",
+   "url": "https://www.e-s-e.eu/fileadmin/user_upload/ESE_Position_Statement_-_Root_Resorption_2023_Final.pdf",
+   "related": [
+    "ese-ecr",
+    "cls-heithersay",
+    "cls-patel-ecr"
+   ],
+   "group": "Resorption",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-ecr",
+   "title": "European Society of Endodontology position statement: External Cervical Resorption",
+   "short": "ESE position: external cervical resorption",
+   "publisher": "European Society of Endodontology (Int Endod J)",
+   "year": 2018,
+   "type": "consensus",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "External cervical resorption",
+   "aliases": [
+    "ecr",
+    "external cervical resorption",
+    "invasive cervical resorption"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are managing external cervical resorption.",
+   "url": "https://doi.org/10.1111/iej.13008",
+   "related": [
+    "ese-resorption",
+    "cls-heithersay",
+    "cls-patel-ecr"
+   ],
+   "group": "Resorption",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-cracks",
+   "title": "Position statement on longitudinal cracks and fractures of teeth",
+   "short": "ESE position: cracked teeth & vertical root fracture",
+   "publisher": "European Society of Endodontology (Int Endod J)",
+   "year": 2025,
+   "type": "consensus",
+   "specialties": [
+    "endo",
+    "operative"
+   ],
+   "topic": "Cracked teeth",
+   "aliases": [
+    "cracked tooth",
+    "cracked tooth syndrome",
+    "crack",
+    "vertical root fracture",
+    "vrf",
+    "split tooth",
+    "craze line",
+    "fractured cusp"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you suspect a cracked tooth, split tooth or vertical root fracture.",
+   "url": "https://doi.org/10.1111/iej.14186",
+   "related": [
+    "cls-cracks"
+   ],
+   "group": "Diagnosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-trauma",
+   "title": "European Society of Endodontology position statement: endodontic management of traumatized permanent teeth",
+   "short": "ESE position: endodontics in traumatised teeth",
+   "publisher": "ESE (Krastl G et al.; Int Endod J 54:1473–1481)",
+   "year": 2021,
+   "type": "consensus",
+   "specialties": [
+    "trauma",
+    "endo"
+   ],
+   "topic": "Trauma endodontics",
+   "aliases": [
+    "trauma endodontics",
+    "avulsion",
+    "luxation",
+    "pulp necrosis after trauma"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are choosing an endodontic approach for a traumatised permanent tooth.",
+   "url": "https://doi.org/10.1111/iej.13543",
+   "related": [
+    "iadt-2020"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ese-autotransplant",
+   "title": "European Society of Endodontology position statement: Surgical extrusion, intentional replantation and tooth autotransplantation",
+   "short": "ESE position: autotransplantation & intentional replantation",
+   "publisher": "European Society of Endodontology (Plotino G et al.; Int Endod J)",
+   "year": 2021,
+   "type": "consensus",
+   "specialties": [
+    "endo",
+    "trauma",
+    "develop"
+   ],
+   "topic": "Autotransplantation",
+   "aliases": [
+    "autotransplantation",
+    "autotransplant",
+    "tooth transplant",
+    "intentional replantation",
+    "surgical extrusion"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are considering autotransplantation, surgical extrusion or intentional replantation.",
+   "url": "https://doi.org/10.1111/iej.13456",
+   "group": "Surgery, transplantation & healing",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-periradicular",
+   "title": "Guidelines for periradicular surgery",
+   "short": "RCS/BES periradicular surgery guidelines",
+   "publisher": "RCS England FDS with the British Endodontic Society (Qualtrough A et al.)",
+   "year": 2020,
+   "type": "guideline",
+   "specialties": [
+    "endo",
+    "oralsurg"
+   ],
+   "topic": "Periradicular surgery",
+   "aliases": [
+    "apicectomy",
+    "apicoectomy",
+    "apical surgery",
+    "root end surgery",
+    "endodontic surgery",
+    "retrograde filling",
+    "root-end filling"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are considering periradicular (apical) surgery.",
+   "url": "https://britishendodonticsociety.org.uk/_userfiles/pages/files/periradicular_surgery_guidelines_2020.pdf",
+   "links": [
+    {
+     "label": "RCS PDF",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/Periradicular_Surgery_Guidelines_2020.pdf"
+    },
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "cls-rud-molven"
+   ],
+   "group": "Surgery, transplantation & healing",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iadt-2020",
+   "title": "International Association of Dental Traumatology guidelines for the management of traumatic dental injuries (2020)",
+   "short": "IADT dental trauma guidelines",
+   "publisher": "International Association of Dental Traumatology",
+   "year": 2020,
+   "type": "guideline",
+   "specialties": [
+    "trauma"
+   ],
+   "topic": "Traumatic dental injuries",
+   "aliases": [
+    "dental trauma",
+    "avulsion",
+    "knocked out tooth",
+    "luxation",
+    "intrusion",
+    "crown fracture",
+    "root fracture",
+    "primary tooth trauma",
+    "splint"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are managing a traumatic dental injury.",
+   "url": "https://iadt-dentaltrauma.org/guidelines-and-resources/current-guidelines-2/",
+   "parts": [
+    {
+     "label": "General introduction",
+     "url": "https://doi.org/10.1111/edt.12574"
+    },
+    {
+     "label": "Fractures and luxations of permanent teeth",
+     "url": "https://doi.org/10.1111/edt.12578"
+    },
+    {
+     "label": "Avulsion of permanent teeth",
+     "url": "https://doi.org/10.1111/edt.12573"
+    },
+    {
+     "label": "Injuries in the primary dentition",
+     "url": "https://doi.org/10.1111/edt.12576"
+    }
+   ],
+   "related": [
+    "bes-trauma-guide",
+    "ese-trauma",
+    "bos-trauma"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nvi-1998",
+   "title": "UK National Clinical Guidelines in Paediatric Dentistry: Management and root canal treatment of non-vital immature permanent incisor teeth",
+   "short": "Non-vital immature incisors (1998 UK guideline)",
+   "publisher": "Mackie IC — RCS England FDS paediatric dentistry clinical guidelines (Int J Paed Dent 1998)",
+   "year": 1998,
+   "type": "guideline",
+   "specialties": [
+    "paeds",
+    "endo",
+    "trauma"
+   ],
+   "topic": "Non-vital immature incisors",
+   "population": "Children",
+   "aliases": [
+    "non-vital immature incisor",
+    "open apex",
+    "apexification",
+    "calcium hydroxide",
+    "mta apical plug",
+    "regenerative endodontics"
+   ],
+   "jurisdiction": "UK",
+   "status": "archived",
+   "useWhen": "you want the historical UK guideline — check the 2017 EAPD guidance, the 2020 IADT and 2023 ESE S3 guidelines for contemporary practice.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/pd1.pdf",
+   "links": [
+    {
+     "label": "EAPD guidance on non-vital immature anterior teeth (2017)",
+     "url": "https://doi.org/10.1007/s40368-017-0289-5"
+    }
+   ],
+   "related": [
+    "iadt-2020",
+    "ese-s3"
+   ],
+   "note": "Published 1998 within the RCS 'Paediatric Dentistry UK National Clinical Guidelines 1999 — Part A', which the RCS lists as archived.",
+   "group": "Erupting, ectopic & traumatised teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bos-trauma",
+   "title": "Guidelines for the orthodontic management of the traumatised tooth",
+   "short": "Orthodontic management of traumatised teeth",
+   "publisher": "Sandler C et al. (J Orthod 2021;48:74–81)",
+   "year": 2021,
+   "type": "guideline",
+   "specialties": [
+    "ortho",
+    "trauma"
+   ],
+   "topic": "Orthodontics after trauma",
+   "aliases": [
+    "trauma orthodontics",
+    "traumatised teeth orthodontics",
+    "orthodontic extrusion",
+    "root resorption"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning orthodontic movement of previously traumatised teeth.",
+   "url": "https://doi.org/10.1177/1465312520977498",
+   "related": [
+    "iadt-2020"
+   ],
+   "group": "Erupting, ectopic & traumatised teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-madp",
+   "title": "Management of Acute Dental Problems",
+   "short": "SDCEP acute dental problems (MADP)",
+   "publisher": "SDCEP",
+   "year": 2026,
+   "edition": "2nd edition, March 2026",
+   "type": "guideline",
+   "specialties": [
+    "general",
+    "endo",
+    "trauma",
+    "medical"
+   ],
+   "topic": "Acute dental problems",
+   "aliases": [
+    "madp",
+    "toothache",
+    "dental pain",
+    "swelling",
+    "dental abscess",
+    "post-extraction bleeding",
+    "triage",
+    "emergency dental",
+    "dry socket"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are triaging or managing an acute dental presentation.",
+   "url": "https://www.acutedentalproblems.sdcep.org.uk",
+   "links": [
+    {
+     "label": "SDCEP page",
+     "url": "https://www.sdcep.org.uk/published-guidance/acute-dental-problems/"
+    }
+   ],
+   "group": "Acute & emergency care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "aae-ese-terms",
+   "title": "Updating Diagnostic Terminology in Endodontics — a collaborative proposal by the AAE and ESE",
+   "short": "AAE/ESE diagnostic terminology update (PROPOSAL)",
+   "publisher": "American Association of Endodontists and European Society of Endodontology",
+   "year": 2026,
+   "type": "consensus",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Endodontic diagnostic terms",
+   "aliases": [
+    "pulpal diagnosis",
+    "apical diagnosis",
+    "diagnostic terminology",
+    "irreversible pulpitis",
+    "new endodontic terms"
+   ],
+   "jurisdiction": "INTL",
+   "status": "proposed",
+   "useWhen": "you want to see the PROPOSED replacement pulpal and periapical diagnostic tables — they are not an adopted standard.",
+   "url": "https://www.aae.org/specialty/diagnostic-terminology-stakeholder-input/",
+   "links": [
+    {
+     "label": "ESE page",
+     "url": "https://www.e-s-e.eu/for-professionals/resources-for-clinicians/updating-diagnostic-terminology-in-endodontics/"
+    }
+   ],
+   "related": [
+    "cls-pulpal-apical"
+   ],
+   "note": "As checked: stakeholder feedback stage (hearings Sept 2025 and April 2026); final terminology is subject to AAE and ESE Board votes.",
+   "group": "Diagnosis",
+   "checked": "2026-11-08",
+   "reviewNote": "Proposal at the stakeholder-feedback stage; final terminology depends on AAE and ESE Board votes."
+  },
+  {
+   "id": "bsrd-crowns",
+   "title": "Crowns, Fixed Bridges and Dental Implants Guidelines",
+   "short": "BSRD crowns, bridges & implants guidelines",
+   "publisher": "British Society for Restorative Dentistry (Ibbetson R, Hemmings K, Harris I)",
+   "year": 2017,
+   "edition": "Published in Dent Update May 2017",
+   "type": "guideline",
+   "specialties": [
+    "prostho",
+    "implant"
+   ],
+   "topic": "Fixed prosthodontics",
+   "aliases": [
+    "crowns",
+    "bridges",
+    "fixed bridge",
+    "indirect restoration",
+    "implant crown",
+    "conventional bridge"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning crowns, conventional bridges or implant restorations.",
+   "url": "https://www.bsrd.org.uk/File.ashx?id=15191",
+   "group": "Fixed & adhesive",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsspd-rbb",
+   "title": "Guidance Document: Resin Bonded Bridges (RBBs)",
+   "short": "BSSPD resin-bonded bridges",
+   "publisher": "British Society of Prosthodontics (King S)",
+   "year": 2025,
+   "edition": "Version 1, March 2025",
+   "type": "guideline",
+   "specialties": [
+    "prostho",
+    "develop"
+   ],
+   "topic": "Resin-bonded bridges",
+   "aliases": [
+    "rbb",
+    "resin bonded bridge",
+    "resin-bonded bridge",
+    "maryland bridge",
+    "maryland",
+    "resin-retained bridge",
+    "resin retained",
+    "adhesive bridge",
+    "adhesive bridgework",
+    "cantilever bridge",
+    "missing lateral incisor",
+    "bristol bridge"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are designing or reviewing a resin-bonded bridge, e.g. for a missing lateral incisor.",
+   "url": "https://www.bsspd.org/File.ashx?id=16308",
+   "related": [
+    "bsspd-hypodontia"
+   ],
+   "group": "Fixed & adhesive",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsspd-pdd",
+   "title": "Removable Partial Denture Design",
+   "short": "BSSPD partial denture design",
+   "publisher": "British Society of Prosthodontics (Stilwell C)",
+   "year": 2026,
+   "edition": "Version 1, March 2026",
+   "type": "guideline",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Partial denture design",
+   "aliases": [
+    "partial denture",
+    "rpd",
+    "chrome denture",
+    "cobalt chrome",
+    "cocr",
+    "cobalt chromium",
+    "free-end saddle",
+    "free end saddle",
+    "denture design",
+    "kennedy class",
+    "lab card"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are designing a removable partial denture, including cobalt-chrome and free-end saddle cases.",
+   "url": "https://www.bsspd.org/File.ashx?id=16508",
+   "related": [
+    "bsspd-standards",
+    "cls-acp-pdi"
+   ],
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Design the denture in Chrome Card",
+     "path": "/chrome-card/"
+    }
+   ]
+  },
+  {
+   "id": "bsspd-hypodontia",
+   "title": "Hypodontia",
+   "short": "BSSPD hypodontia guidance",
+   "publisher": "British Society of Prosthodontics (Locke M, Owens J)",
+   "year": 2026,
+   "edition": "Version 1, March 2026",
+   "type": "guideline",
+   "specialties": [
+    "prostho",
+    "develop",
+    "ortho"
+   ],
+   "topic": "Hypodontia",
+   "aliases": [
+    "hypodontia",
+    "missing teeth",
+    "missing lateral incisor",
+    "oligodontia",
+    "agenesis",
+    "space closure",
+    "space opening",
+    "multidisciplinary hypodontia"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning restorative management of hypodontia, including missing lateral incisors.",
+   "url": "https://www.bsspd.org/File.ashx?id=16509",
+   "related": [
+    "bsspd-rbb",
+    "cls-hypodontia-sev",
+    "cls-tac",
+    "iotn-dhc"
+   ],
+   "group": "Hypodontia & head and neck pathways",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsspd-hnc",
+   "title": "Prosthodontic Pathways for Head and Neck Cancer Patients",
+   "short": "BSSPD prosthodontic pathways in head & neck cancer",
+   "publisher": "British Society of Prosthodontics",
+   "year": 2025,
+   "type": "guideline",
+   "specialties": [
+    "prostho",
+    "oncology"
+   ],
+   "topic": "H&N cancer prosthodontics",
+   "aliases": [
+    "obturator",
+    "head and neck cancer",
+    "maxillectomy prosthesis",
+    "oncology prosthodontics",
+    "rehabilitation"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning prosthodontic care around head and neck cancer treatment.",
+   "url": "https://www.bsspd.org/File.ashx?id=16309",
+   "related": [
+    "rdukhnc",
+    "cls-aramany"
+   ],
+   "group": "Hypodontia & head and neck pathways",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsspd-standards",
+   "title": "Guides to Standards in Prosthetic Dentistry — Complete and Partial Dentures",
+   "short": "BSSPD standards: complete & partial dentures",
+   "publisher": "British Society of Prosthodontics",
+   "year": 2005,
+   "edition": "Updated 2005",
+   "type": "standard",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Denture standards",
+   "aliases": [
+    "complete denture",
+    "full denture",
+    "partial denture",
+    "denture standards",
+    "denture quality"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want BSSPD reference standards for complete or partial dentures.",
+   "url": "https://www.bsspd.org/File.ashx?id=16311",
+   "related": [
+    "bsspd-pdd"
+   ],
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Design the denture in Chrome Card",
+     "path": "/chrome-card/"
+    }
+   ]
+  },
+  {
+   "id": "bsspd-guidelines",
+   "title": "Guidelines in Prosthetic and Implant Dentistry",
+   "short": "BSSPD guidelines in prosthetic & implant dentistry",
+   "publisher": "British Society of Prosthodontics",
+   "year": 1996,
+   "edition": "Published 1996; edited 2005",
+   "type": "guideline",
+   "specialties": [
+    "prostho",
+    "implant"
+   ],
+   "topic": "Prosthodontics",
+   "aliases": [
+    "prosthodontic guidelines",
+    "implant guidelines",
+    "dentures"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want the historical BSSPD guideline text (check newer documents first).",
+   "url": "https://www.bsspd.org/File.ashx?id=16313",
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsspd-baoms-implants",
+   "title": "Guidelines on Standards for the Treatment of Patients using Endosseous Implants",
+   "short": "BSSPD/BAOMS implant treatment standards",
+   "publisher": "BSSPD and BAOMS (joint)",
+   "type": "standard",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant treatment standards",
+   "aliases": [
+    "implant standards",
+    "endosseous implants",
+    "implant treatment"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want the joint BSSPD/BAOMS standards for implant treatment.",
+   "url": "https://www.bsspd.org/File.ashx?id=16319",
+   "note": "Year not stated on the BSSPD page.",
+   "group": "Standards, training & workflow",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-nhs-implants",
+   "title": "Guidance on the standards of care for NHS-funded dental implant treatment",
+   "short": "RCS standards for NHS-funded implants (2019)",
+   "publisher": "RCS England FDS and Restorative Dentistry-UK",
+   "year": 2019,
+   "type": "commissioning",
+   "specialties": [
+    "implant",
+    "general"
+   ],
+   "topic": "NHS implant eligibility",
+   "aliases": [
+    "nhs implants",
+    "implant eligibility",
+    "implant funding",
+    "nhs-funded implants",
+    "priority groups"
+   ],
+   "jurisdiction": "UK",
+   "ukRelevance": "UK professional guidance; individual services apply their own local criteria.",
+   "useWhen": "you need the professional standards and eligibility groups for NHS-funded implant treatment (distinct from the archived 2012 priorities document).",
+   "url": "https://rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/Implant-guidelines.pdf",
+   "related": [
+    "rcs-implants-2012",
+    "tayside-rd",
+    "lothian-edi-implants"
+   ],
+   "group": "Eligibility & commissioning",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-implants-2012",
+   "title": "Guidelines for Selecting Appropriate Patients to Receive Treatment with Dental Implants: Priorities for the NHS",
+   "short": "RCS NHS implant priorities (2012, archived)",
+   "publisher": "RCS England FDS (Alani A, Bishop K, Djemal S et al.)",
+   "year": 2012,
+   "type": "commissioning",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "NHS implant priorities",
+   "aliases": [
+    "nhs implants",
+    "implant priorities",
+    "implant eligibility"
+   ],
+   "jurisdiction": "UK",
+   "status": "archived",
+   "useWhen": "you need the historical 2012 priorities — use the 2019 standards of care for current practice.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/Implant-Guidelines-20121009_FINAL.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    },
+    {
+     "label": "BDJ summary",
+     "url": "https://doi.org/10.1038/sj.bdj.2014.701"
+    }
+   ],
+   "related": [
+    "rcs-nhs-implants"
+   ],
+   "group": "Eligibility & commissioning",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cgdent-tsid",
+   "title": "Training Standards in Implant Dentistry",
+   "short": "CGDent training standards in implant dentistry",
+   "publisher": "College of General Dentistry (formerly FGDP)",
+   "type": "training",
+   "specialties": [
+    "implant",
+    "training"
+   ],
+   "topic": "Implant training",
+   "aliases": [
+    "tsid",
+    "implant training",
+    "implant course standards"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are checking the training expected before practising implant dentistry.",
+   "url": "https://cgdent.uk/standards-guidance/",
+   "related": [
+    "cgdent-mentoring"
+   ],
+   "note": "Opens the CGDent standards & guidance index; the current edition year was not verified.",
+   "group": "Standards, training & workflow",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cgdent-mentoring",
+   "title": "Mentoring in Implant Dentistry: Good Practice Guidelines",
+   "short": "CGDent/ADI mentoring in implant dentistry",
+   "publisher": "College of General Dentistry with the Association of Dental Implantology",
+   "year": 2022,
+   "type": "standard",
+   "specialties": [
+    "implant",
+    "training"
+   ],
+   "topic": "Implant mentoring",
+   "aliases": [
+    "implant mentor",
+    "mentoring",
+    "implant training"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are arranging or acting as an implant mentor.",
+   "url": "https://cgdent.uk/mentoring-in-implant-dentistry",
+   "related": [
+    "cgdent-tsid"
+   ],
+   "group": "Standards, training & workflow",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "adi-placement",
+   "title": "ADI Dental Implant Placement Guidelines",
+   "short": "ADI implant placement guidelines",
+   "publisher": "Association of Dental Implantology",
+   "type": "guideline",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant treatment workflow",
+   "aliases": [
+    "implant consent",
+    "implant treatment plan",
+    "implant records",
+    "implant letters"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you want record templates and advisory notes from consultation to implant placement.",
+   "url": "https://www.adi.org.uk/_userfiles/pages/files/dental_implant_placement_guidelines_mar_23.pdf",
+   "note": "Editions © 1998, 2005, 2009, 2015; file dated March 2023.",
+   "group": "Standards, training & workflow",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iti-sac",
+   "title": "ITI SAC Classification and Assessment Tool",
+   "short": "ITI SAC classification",
+   "publisher": "International Team for Implantology",
+   "type": "tool",
+   "measure": "complexity",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant case complexity",
+   "aliases": [
+    "sac",
+    "straightforward advanced complex",
+    "implant complexity",
+    "implant risk assessment"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you want to classify implant case difficulty as straightforward, advanced or complex.",
+   "url": "https://www.iti.org/resources/sac-classification/",
+   "note": "Based on 'The SAC Classification in Implant Dentistry', 2nd edition (ITI/Quintessence).",
+   "group": "Planning, complexity & loading",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iti-loading",
+   "title": "Group 5 ITI Consensus Report: Implant placement and loading protocols",
+   "short": "ITI consensus: placement & loading protocols",
+   "publisher": "Morton D et al. (Clin Oral Implants Res 2023;34 Suppl 26)",
+   "year": 2023,
+   "type": "consensus",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Placement & loading timing",
+   "aliases": [
+    "immediate implant",
+    "immediate loading",
+    "type 1a",
+    "early placement",
+    "implant timing",
+    "loading protocol"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are choosing implant placement and loading timing for a single anterior maxillary tooth.",
+   "url": "https://doi.org/10.1111/clr.14137",
+   "group": "Planning, complexity & loading",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "york",
+   "title": "Mandibular two implant-supported overdentures as the first choice standard of care for edentulous patients — the York Consensus Statement",
+   "short": "York Consensus: two-implant mandibular overdenture",
+   "publisher": "Thomason JM et al. (BSSPD conference; BDJ 2009)",
+   "year": 2009,
+   "type": "consensus",
+   "specialties": [
+    "implant",
+    "prostho"
+   ],
+   "topic": "Implant overdentures",
+   "aliases": [
+    "implant overdenture",
+    "two implant overdenture",
+    "mandibular overdenture",
+    "edentulous mandible",
+    "mcgill consensus"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are discussing implant-retained lower dentures for an edentulous patient (funding criteria are separate).",
+   "url": "https://doi.org/10.1038/sj.bdj.2009.728",
+   "related": [
+    "rcs-nhs-implants"
+   ],
+   "group": "Planning, complexity & loading",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ohf-adhesive",
+   "title": "Denture adhesives guidelines",
+   "short": "OHF denture adhesive guidance",
+   "publisher": "Oral Health Foundation",
+   "year": 2026,
+   "edition": "Updated 23 October 2026",
+   "type": "consensus",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Denture aftercare",
+   "aliases": [
+    "denture adhesive",
+    "fixative",
+    "denture cream",
+    "denture aftercare",
+    "partial denture adhesive",
+    "complete denture"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are advising a complete or partial denture wearer on adhesive use.",
+   "url": "https://www.dentalhealth.org/dentureadhesives",
+   "related": [
+    "ohf-cleaning"
+   ],
+   "note": "Includes a section for partial denture wearers.",
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "ohf-cleaning",
+   "title": "Denture cleaning guidelines",
+   "short": "OHF denture cleaning guidance",
+   "publisher": "Oral Health Foundation",
+   "type": "consensus",
+   "specialties": [
+    "prostho",
+    "special"
+   ],
+   "topic": "Denture aftercare",
+   "aliases": [
+    "denture cleaning",
+    "clean dentures",
+    "denture hygiene",
+    "denture stomatitis",
+    "denture aftercare",
+    "partial denture care"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are advising on how to clean complete or partial dentures.",
+   "url": "https://www.dentalhealth.org/denturecareguidelines",
+   "related": [
+    "ohf-adhesive"
+   ],
+   "note": "Linked from the OHF adhesive page as covering full and partial dentures; the cleaning page's own update date was not verified.",
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-fpm",
+   "title": "Guideline for the extraction of first permanent molars in children",
+   "short": "RCS first permanent molar extraction",
+   "publisher": "RCS England FDS (Noar J et al.)",
+   "year": 2023,
+   "type": "guideline",
+   "specialties": [
+    "paeds",
+    "ortho",
+    "develop"
+   ],
+   "topic": "First permanent molars",
+   "population": "Children",
+   "aliases": [
+    "fpm",
+    "first permanent molar",
+    "compensating extraction",
+    "balancing extraction",
+    "mih molar"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning extraction of poor-prognosis first permanent molars in a child.",
+   "url": "https://www.rcseng.ac.uk/-/media/FDS/Guidance-for-the-extraction-of-first-permanent-molars-in-children.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "eapd-mih"
+   ],
+   "group": "Erupting, ectopic & traumatised teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-pec",
+   "title": "Management of the palatally ectopic maxillary canine",
+   "short": "RCS palatally ectopic canine",
+   "publisher": "RCS England FDS (Husain J et al.)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "ortho",
+    "develop",
+    "paeds"
+   ],
+   "topic": "Ectopic canines",
+   "aliases": [
+    "ectopic canine",
+    "impacted canine",
+    "palatal canine",
+    "unerupted canine"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you suspect or are managing a palatally ectopic canine.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Guidelines/Management-of-the-Palatally-Ectopic-Maxillary-Canine--revised-with-edits-25-Jan-2023.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "group": "Erupting, ectopic & traumatised teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-incisors",
+   "title": "Management of Unerupted Maxillary Incisors",
+   "short": "RCS unerupted maxillary incisors",
+   "publisher": "RCS England FDS (Yaqoob O et al.)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "ortho",
+    "develop",
+    "paeds"
+   ],
+   "topic": "Unerupted incisors",
+   "aliases": [
+    "unerupted incisor",
+    "delayed eruption",
+    "supernumerary",
+    "dilaceration"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you have a child with a delayed or unerupted maxillary incisor.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Management-of-Unerupted-Maxillary-Incisors-2022-update.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "group": "Erupting, ectopic & traumatised teeth",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "eapd-mih",
+   "title": "Best clinical practice guidance for clinicians dealing with children presenting with molar-incisor-hypomineralisation (MIH): an updated EAPD policy document",
+   "short": "EAPD MIH guidance",
+   "publisher": "European Academy of Paediatric Dentistry (Lygidakis NA et al.)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "paeds",
+    "develop",
+    "operative"
+   ],
+   "topic": "Molar-incisor hypomineralisation",
+   "population": "Children",
+   "aliases": [
+    "mih",
+    "molar incisor hypomineralisation",
+    "hypomineralization",
+    "chalky teeth",
+    "enamel defect"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are managing MIH-affected molars or incisors.",
+   "url": "https://doi.org/10.1007/s40368-021-00668-5",
+   "related": [
+    "cls-mih",
+    "rcs-fpm"
+   ],
+   "group": "Paediatric caries & MIH",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-cancer",
+   "title": "The oral and dental management of patients before, during and after cancer therapy",
+   "short": "RCS oral care in cancer therapy",
+   "publisher": "RCS England FDS (Kumar N et al.)",
+   "year": 2025,
+   "type": "guideline",
+   "specialties": [
+    "oncology",
+    "special"
+   ],
+   "topic": "Cancer therapy",
+   "aliases": [
+    "cancer",
+    "radiotherapy",
+    "chemotherapy",
+    "pre-radiotherapy extractions",
+    "dental assessment before cancer",
+    "oncology"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are assessing or treating a patient before, during or after cancer therapy.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/The-oral-and-dental-management-of-patients-before-during-and-after-cancer-therapy.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "rcs-cyp-cancer",
+    "rdukhnc",
+    "isoo-orn"
+   ],
+   "group": "Cancer therapy & MDT care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-cyp-cancer",
+   "title": "Oral health for children and young people with cancer",
+   "short": "Oral health in children & young people with cancer",
+   "publisher": "CCLG, RCS England and BSPD",
+   "year": 2026,
+   "type": "guideline",
+   "specialties": [
+    "oncology",
+    "paeds"
+   ],
+   "topic": "Paediatric oncology",
+   "population": "Children & young people",
+   "aliases": [
+    "childhood cancer",
+    "paediatric oncology",
+    "cclg"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are caring for a child or young person having cancer treatment.",
+   "url": "https://www.cclg.org.uk/about-cancer/information-resources/publications/all-publications/oral-health",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "rcs-cancer"
+   ],
+   "group": "Cancer therapy & MDT care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "hnc-uk6",
+   "title": "Head and Neck Cancer: United Kingdom National Multidisciplinary Guidelines, Sixth Edition",
+   "short": "UK head & neck cancer guidelines (6th ed)",
+   "publisher": "Homer JJ, Winter SC (eds.) — J Laryngol Otol 2024;138(S1)",
+   "year": 2024,
+   "edition": "6th edition",
+   "type": "guideline",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Head & neck cancer MDT",
+   "aliases": [
+    "head and neck cancer",
+    "hnc",
+    "oral cancer",
+    "mdt",
+    "oral rehabilitation"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you need the national MDT guideline for head and neck cancer care.",
+   "url": "https://www.cambridge.org/core/journals/journal-of-laryngology-and-otology/article/head-and-neck-cancer-united-kingdom-national-multidisciplinary-guidelines-sixth-edition/81BBBF470F5F55A75935F78A88B15422",
+   "links": [
+    {
+     "label": "Restorative dentistry & oral rehabilitation chapter (5th edition, 2016)",
+     "url": "https://doi.org/10.1017/S0022215116000414"
+    }
+   ],
+   "related": [
+    "rdukhnc"
+   ],
+   "note": "Endorsed by RD-UK. A restorative chapter deep link for the 6th edition was not verified; the 5th-edition chapter is linked for reference.",
+   "group": "Cancer therapy & MDT care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rdukhnc",
+   "title": "Predicting and Managing Oral and Dental Complications of Surgical and Non-Surgical Treatment for Head and Neck Cancer: A Clinical Guideline",
+   "short": "RD-UK oral complications of H&N cancer treatment",
+   "publisher": "Restorative Dentistry UK",
+   "year": 2016,
+   "edition": "November 2016",
+   "type": "guideline",
+   "specialties": [
+    "oncology",
+    "prostho"
+   ],
+   "topic": "H&N cancer complications",
+   "aliases": [
+    "head and neck cancer",
+    "radiotherapy",
+    "osteoradionecrosis",
+    "trismus",
+    "xerostomia",
+    "obturator",
+    "pre-radiotherapy assessment"
+   ],
+   "jurisdiction": "UK",
+   "ukRelevance": "Endorsed by the RCS England FDS.",
+   "useWhen": "you are predicting or managing oral complications of head and neck cancer treatment.",
+   "url": "https://www.restdent.org.uk/uploads/RD-UK%20H%20and%20N%20guideline.pdf",
+   "related": [
+    "hnc-uk6",
+    "isoo-orn",
+    "isoo-xero"
+   ],
+   "group": "Cancer therapy & MDT care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "isoo-orn",
+   "title": "Prevention and Management of Osteoradionecrosis in Patients With Head and Neck Cancer Treated With Radiation Therapy: ISOO-MASCC-ASCO Guideline",
+   "short": "ISOO-MASCC-ASCO osteoradionecrosis guideline",
+   "publisher": "Peterson DE et al. (J Clin Oncol 2024;42:1975–1996)",
+   "year": 2024,
+   "type": "guideline",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Osteoradionecrosis",
+   "aliases": [
+    "orn",
+    "osteoradionecrosis",
+    "radiotherapy jaw necrosis",
+    "extraction after radiotherapy",
+    "hyperbaric oxygen",
+    "pentoxifylline"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are preventing or managing jaw osteoradionecrosis after head and neck radiotherapy (drug-related jaw necrosis has separate guidance).",
+   "url": "https://doi.org/10.1200/JCO.23.02750",
+   "related": [
+    "cls-clinrad",
+    "cls-notani",
+    "rdukhnc"
+   ],
+   "group": "Osteoradionecrosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "isoo-xero",
+   "title": "Salivary Gland Hypofunction and/or Xerostomia Induced by Nonsurgical Cancer Therapies: ISOO/MASCC/ASCO Guideline",
+   "short": "ISOO-MASCC-ASCO xerostomia guideline",
+   "publisher": "Mercadante V et al. (J Clin Oncol 2021;39:2825–2843)",
+   "year": 2021,
+   "type": "guideline",
+   "specialties": [
+    "oncology",
+    "special"
+   ],
+   "topic": "Xerostomia",
+   "aliases": [
+    "dry mouth",
+    "dry mouth after radiotherapy",
+    "xerostomia",
+    "salivary gland hypofunction",
+    "pilocarpine",
+    "saliva substitute"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are preventing or managing dry mouth after radiotherapy or other non-surgical cancer therapy.",
+   "url": "https://doi.org/10.1200/JCO.21.01208",
+   "related": [
+    "mascc-xero-assess"
+   ],
+   "group": "Xerostomia",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "mascc-xero-assess",
+   "title": "MASCC/ISOO Clinical Practice Statement: Clinical assessment of salivary gland hypofunction and xerostomia in cancer patients",
+   "short": "MASCC/ISOO statement: assessing dry mouth",
+   "publisher": "Hong C et al. (Support Care Cancer 2024)",
+   "year": 2024,
+   "type": "consensus",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Xerostomia assessment",
+   "aliases": [
+    "dry mouth",
+    "xerostomia assessment",
+    "salivary flow",
+    "dry mouth after radiotherapy"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need practical tools to assess salivary hypofunction and xerostomia.",
+   "url": "https://doi.org/10.1007/s00520-024-08691-0",
+   "related": [
+    "isoo-xero"
+   ],
+   "group": "Xerostomia",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-tmd",
+   "title": "Management of painful temporomandibular disorder in adults",
+   "short": "GIRFT/RCS painful TMD guideline",
+   "publisher": "NHS England GIRFT and RCS England FDS (Beecroft E, Durham J et al.)",
+   "year": 2024,
+   "edition": "Clinician summary v1.1 and ultra-brief guide v1.1, August 2025",
+   "type": "guideline",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "Painful TMD",
+   "population": "Adults",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "girft tmd",
+    "tmd",
+    "tmj",
+    "jaw pain",
+    "jaw clicking",
+    "temporomandibular",
+    "myofascial pain",
+    "bruxism pain",
+    "3q/tmd",
+    "phq-4",
+    "splint"
+   ],
+   "jurisdiction": "UK",
+   "ukRelevance": "Joint NHS England GIRFT and RCS England FDS guideline; UK professional guidance.",
+   "useWhen": "you are screening, diagnosing and managing painful TMD in an adult.",
+   "url": "https://www.rcseng.ac.uk/-/media/FDS/TMD-Clinician-summary-document.pdf",
+   "parts": [
+    {
+     "label": "Comprehensive guideline",
+     "url": "https://www.rcseng.ac.uk/-/media/FDS/Comprehensive-guideline-Management-of-painful-Temporomandibular-disorder-in-adults.pdf"
+    },
+    {
+     "label": "Professionals' ultra-brief guide",
+     "url": "https://rcseng.ac.uk/-/media/FDS/Prof-ultrabrief-guide-TMD.pdf"
+    },
+    {
+     "label": "Online calculator & screening tool (PHQ-4, CPI)",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/tmd-guidelines-online-calculator"
+    }
+   ],
+   "related": [
+    "cls-3qtmd",
+    "cls-phq4",
+    "cls-cpi",
+    "cls-dctmd",
+    "girft-hd-report"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-anticoag",
+   "title": "Management of Dental Patients Taking Anticoagulants or Antiplatelet Drugs",
+   "short": "SDCEP anticoagulants & antiplatelets",
+   "publisher": "SDCEP",
+   "year": 2022,
+   "edition": "2nd edition, March 2022 · NICE-accredited process",
+   "type": "guideline",
+   "specialties": [
+    "medical"
+   ],
+   "topic": "Bleeding risk",
+   "aliases": [
+    "anticoagulant",
+    "doac",
+    "apixaban",
+    "rivaroxaban",
+    "dabigatran",
+    "edoxaban",
+    "warfarin",
+    "inr",
+    "antiplatelet",
+    "clopidogrel",
+    "bleeding risk"
+   ],
+   "jurisdiction": "SCO",
+   "ukRelevance": "Endorsed by the dental faculties of the Royal Colleges and CGDent.",
+   "useWhen": "you are treating a patient on an anticoagulant or antiplatelet.",
+   "url": "https://www.sdcep.org.uk/published-guidance/anticoagulants-and-antiplatelets/",
+   "tool": "anticoag",
+   "group": "Bleeding risk & infective endocarditis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-prescribing",
+   "title": "Drug Prescribing for Dentistry",
+   "short": "SDCEP dental prescribing",
+   "publisher": "SDCEP",
+   "year": 2016,
+   "edition": "3rd edition (Jan 2016); website aligned to BNF 91 (Mar–Sep 2026) and BNFC 2025–26",
+   "type": "guideline",
+   "specialties": [
+    "medical"
+   ],
+   "topic": "Prescribing",
+   "aliases": [
+    "prescribing",
+    "antibiotics",
+    "analgesia",
+    "amoxicillin",
+    "metronidazole",
+    "bnf",
+    "dental prescribing"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you need a dose or indication for a dental prescription.",
+   "url": "https://www.sdcepdentalprescribing.nhs.scot/",
+   "links": [
+    {
+     "label": "SDCEP page",
+     "url": "https://www.sdcep.org.uk/published-guidance/drug-prescribing/"
+    }
+   ],
+   "related": [
+    "rcs-amp"
+   ],
+   "group": "Prescribing & antimicrobials",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Audit antimicrobial prescribing in DentalAudit",
+     "path": "/dentalaudit/#/create?template=antimicrobial"
+    }
+   ]
+  },
+  {
+   "id": "sdcep-mronj",
+   "title": "Oral Health Management of Patients at Risk of Medication-related Osteonecrosis of the Jaw",
+   "short": "SDCEP MRONJ",
+   "publisher": "SDCEP",
+   "year": 2017,
+   "edition": "March 2017; reviewed and extant March 2024 (with supplement)",
+   "type": "guideline",
+   "specialties": [
+    "medical",
+    "oralsurg"
+   ],
+   "topic": "MRONJ",
+   "aliases": [
+    "mronj",
+    "bronj",
+    "bisphosphonate",
+    "denosumab",
+    "antiresorptive",
+    "anti-angiogenic",
+    "osteonecrosis"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are treating a patient on antiresorptive or anti-angiogenic drugs (radiotherapy-related jaw necrosis has separate guidance).",
+   "url": "https://www.sdcep.org.uk/published-guidance/medication-related-osteonecrosis-of-the-jaw/",
+   "related": [
+    "cls-aaoms"
+   ],
+   "tool": "mronj",
+   "group": "MRONJ",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nice-cg64",
+   "title": "Prophylaxis against infective endocarditis: antimicrobial prophylaxis against infective endocarditis in adults and children undergoing interventional procedures (CG64)",
+   "short": "NICE CG64 infective endocarditis",
+   "publisher": "NICE",
+   "year": 2008,
+   "edition": "Updated 2015/2016; 2024 surveillance proposed updating rec 1.1.3",
+   "type": "guideline",
+   "specialties": [
+    "medical"
+   ],
+   "topic": "Infective endocarditis",
+   "aliases": [
+    "infective endocarditis",
+    "antibiotic prophylaxis",
+    "endocarditis",
+    "heart valve",
+    "cardiac risk"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "NICE directs users to the SDCEP implementation advice for dental procedures in people at high risk.",
+   "useWhen": "you need the NICE position on antibiotic prophylaxis for infective endocarditis.",
+   "url": "https://www.nice.org.uk/guidance/cg64",
+   "related": [
+    "sdcep-abx"
+   ],
+   "group": "Bleeding risk & infective endocarditis",
+   "checked": "2026-11-08",
+   "reviewNote": "NICE's 2024 surveillance proposed updating recommendation 1.1.3; check the NICE page for changes."
+  },
+  {
+   "id": "sdcep-abx",
+   "title": "Antibiotic Prophylaxis Against Infective Endocarditis — implementation advice",
+   "short": "SDCEP antibiotic prophylaxis (IE) advice",
+   "publisher": "SDCEP",
+   "year": 2026,
+   "edition": "2nd edition, March 2026",
+   "type": "guideline",
+   "specialties": [
+    "medical"
+   ],
+   "topic": "Infective endocarditis",
+   "aliases": [
+    "infective endocarditis",
+    "antibiotic prophylaxis",
+    "endocarditis",
+    "cardiac patient",
+    "shared decision making"
+   ],
+   "jurisdiction": "SCO",
+   "ukRelevance": "Supported by the Chief Dental Officers of all four UK nations; referenced by NICE CG64.",
+   "useWhen": "you are identifying patients for whom antibiotic prophylaxis is recommended or should be considered before dental procedures.",
+   "url": "https://www.antibioticprophylaxis.sdcep.org.uk",
+   "links": [
+    {
+     "label": "SDCEP page",
+     "url": "https://www.sdcep.org.uk/published-guidance/antibiotic-prophylaxis/"
+    }
+   ],
+   "related": [
+    "nice-cg64"
+   ],
+   "group": "Bleeding risk & infective endocarditis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-amp",
+   "title": "Antimicrobial prescribing in dentistry: good practice guidelines",
+   "short": "FDS/FGDP antimicrobial prescribing",
+   "publisher": "FGDP (now CGDent) and RCS England FDS (ed. Palmer NO)",
+   "year": 2020,
+   "edition": "3rd edition",
+   "type": "guideline",
+   "specialties": [
+    "medical"
+   ],
+   "topic": "Antimicrobial stewardship",
+   "aliases": [
+    "antibiotics",
+    "antimicrobial",
+    "stewardship",
+    "antifungal",
+    "antiviral"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are deciding whether an antimicrobial is indicated.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/FDS-AMP-2020.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "related": [
+    "sdcep-prescribing"
+   ],
+   "group": "Prescribing & antimicrobials",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Audit antimicrobial prescribing in DentalAudit",
+     "path": "/dentalaudit/#/create?template=antimicrobial"
+    }
+   ]
+  },
+  {
+   "id": "cgdent-scdr",
+   "title": "Selection Criteria for Dental Radiography",
+   "short": "CGDent selection criteria for radiography",
+   "publisher": "College of General Dentistry (formerly FGDP; eds. Horner K, Eaton KA)",
+   "year": 2018,
+   "edition": "3rd edition (updated 2018)",
+   "type": "guideline",
+   "specialties": [
+    "radiology"
+   ],
+   "topic": "Radiograph selection",
+   "aliases": [
+    "radiograph",
+    "x-ray",
+    "bitewing",
+    "periapical",
+    "opg",
+    "panoramic",
+    "cbct",
+    "radiography justification"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are justifying which radiograph to take and when.",
+   "url": "https://cgdent.uk/selection-criteria-for-dental-radiography/",
+   "related": [
+    "ese-cbct"
+   ],
+   "group": "Imaging",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Audit radiograph justification, grading and reporting in DentalAudit",
+     "path": "/dentalaudit/#/create?template=radiographs"
+    }
+   ]
+  },
+  {
+   "id": "iacsd",
+   "title": "Standards for Conscious Sedation in the Provision of Dental Care (IACSD report)",
+   "short": "IACSD sedation standards",
+   "publisher": "Intercollegiate Advisory Committee for Sedation in Dentistry",
+   "year": 2015,
+   "edition": "Published April 2015; updated March 2020 (V1.1); review started 2023",
+   "type": "standard",
+   "specialties": [
+    "special"
+   ],
+   "topic": "Conscious sedation",
+   "aliases": [
+    "sedation",
+    "iv sedation",
+    "midazolam",
+    "inhalation sedation",
+    "remimazolam",
+    "iacsd"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you need the UK standard for providing conscious sedation in dentistry.",
+   "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/standards-for-conscious-sedation-in-the-provision-of-dental-care-and-accreditation/",
+   "related": [
+    "sdcep-sedation",
+    "girft-sedation"
+   ],
+   "checked": "2026-11-08",
+   "reviewNote": "The publisher records that a review of these standards started in 2023; check for a newer edition before relying on it."
+  },
+  {
+   "id": "sdcep-sedation",
+   "title": "Conscious Sedation in Dentistry",
+   "short": "SDCEP conscious sedation",
+   "publisher": "SDCEP",
+   "year": 2017,
+   "edition": "3rd edition, June 2017; reviewed and unchanged December 2022",
+   "type": "guideline",
+   "specialties": [
+    "special"
+   ],
+   "topic": "Conscious sedation",
+   "aliases": [
+    "sedation",
+    "iv sedation",
+    "inhalation sedation",
+    "midazolam"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are providing conscious sedation in Scotland.",
+   "url": "https://www.sdcep.org.uk/published-guidance/conscious-sedation/",
+   "related": [
+    "iacsd"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "bsdh-ga",
+   "title": "The use of general anaesthesia in special care dentistry: A clinical guideline from the British Society for Disability and Oral Health",
+   "short": "BSDH general anaesthesia in special care",
+   "publisher": "Geddis-Regan AR et al. for BSDH (Spec Care Dentist 2022)",
+   "year": 2022,
+   "type": "guideline",
+   "specialties": [
+    "special"
+   ],
+   "topic": "General anaesthesia",
+   "population": "Adults in special care dentistry",
+   "aliases": [
+    "ga",
+    "general anaesthesia",
+    "general anesthesia",
+    "special care",
+    "learning disability",
+    "dental phobia"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are planning dental treatment under GA for an adult in special care services.",
+   "url": "https://doi.org/10.1111/scd.12652",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-older",
+   "title": "Clinical guidelines to support oral health care for older adults",
+   "short": "RCS oral health care for older adults",
+   "publisher": "RCS England FDS",
+   "year": 2026,
+   "edition": "September 2026",
+   "type": "guideline",
+   "specialties": [
+    "special"
+   ],
+   "topic": "Older adults",
+   "population": "Older adults",
+   "aliases": [
+    "older people",
+    "elderly",
+    "frailty",
+    "domiciliary",
+    "care home",
+    "dementia",
+    "end of life",
+    "palliative"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are caring for an older adult, including frailty, dementia, domiciliary or end-of-life care.",
+   "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/supporting-oral-health-care-for-older-adults/",
+   "related": [
+    "cgdent-dementia",
+    "nice-ng48"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cgdent-dementia",
+   "title": "Dementia-Friendly Dentistry: Good Practice Guidelines",
+   "short": "CGDent dementia-friendly dentistry",
+   "publisher": "College of General Dentistry (formerly FGDP; ed. Batchelor P)",
+   "type": "guideline",
+   "specialties": [
+    "special"
+   ],
+   "topic": "Dementia",
+   "aliases": [
+    "dementia",
+    "capacity",
+    "consent",
+    "care home",
+    "domiciliary"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are adapting care for a patient living with dementia.",
+   "url": "https://cgdent.uk/dementia-friendly-dentistry/",
+   "related": [
+    "rcs-older"
+   ],
+   "note": "Publication year not stated on the page.",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "nice-ng48",
+   "title": "Oral health for adults in care homes (NG48)",
+   "short": "NICE NG48 care homes",
+   "publisher": "NICE",
+   "year": 2016,
+   "edition": "Published 5 July 2016",
+   "type": "guideline",
+   "specialties": [
+    "special"
+   ],
+   "topic": "Care homes",
+   "aliases": [
+    "care home",
+    "nursing home",
+    "mouth care",
+    "residential care"
+   ],
+   "jurisdiction": "ENG",
+   "useWhen": "you are supporting oral care in a care home.",
+   "url": "https://www.nice.org.uk/guidance/ng48",
+   "related": [
+    "rcs-older"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "mhra-cmd",
+   "title": "Custom-made devices in Great Britain",
+   "short": "MHRA custom-made devices (GB)",
+   "publisher": "Medicines and Healthcare products Regulatory Agency",
+   "year": 2020,
+   "edition": "First published 31 December 2020; updated 20 July 2026",
+   "type": "technical",
+   "specialties": [
+    "lab",
+    "prostho"
+   ],
+   "topic": "Custom-made device regulation",
+   "aliases": [
+    "lab docket",
+    "lab prescription",
+    "laboratory prescription",
+    "statement of manufacture",
+    "custom-made device",
+    "crown",
+    "bridge",
+    "denture",
+    "traceability",
+    "dental appliance"
+   ],
+   "jurisdiction": "GB",
+   "ukRelevance": "Applies in Great Britain (England, Scotland, Wales); Northern Ireland follows different rules.",
+   "useWhen": "you are writing a laboratory prescription or need the custom-made device statement requirements for crowns, bridges or dentures.",
+   "url": "https://www.gov.uk/government/publications/custom-made-medical-devices/custom-made-devices-in-great-britain",
+   "links": [
+    {
+     "label": "Custom-made medical devices collection",
+     "url": "https://www.gov.uk/government/publications/custom-made-medical-devices"
+    }
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iso-20896",
+   "title": "ISO 20896-1:2019 Dentistry — Digital impression devices — Part 1: Methods for assessing accuracy",
+   "short": "ISO 20896-1 intraoral scanner accuracy",
+   "publisher": "ISO/TC 106/SC 9",
+   "year": 2019,
+   "type": "technical",
+   "specialties": [
+    "lab"
+   ],
+   "topic": "Digital impressions",
+   "aliases": [
+    "intraoral scanner",
+    "ios",
+    "digital impression",
+    "scan accuracy",
+    "trueness",
+    "precision",
+    "bs en iso 20896-1"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need the test methods used to assess intraoral scanner accuracy — it gives no chairside scan-rejection threshold.",
+   "url": "https://scc-ccn.ca/standardsdb/standards/8167324",
+   "related": [
+    "iso-12836"
+   ],
+   "access": "restricted",
+   "note": "Paid standard (restricted full text). Adopted as EN ISO 20896-1:2019; a revision (ISO/CD 20896-1) is in development. BS adoption not separately verified.",
+   "checked": "2026-11-08",
+   "reviewNote": "A revision (ISO/CD 20896-1) is in development; check the current edition."
+  },
+  {
+   "id": "iso-12836",
+   "title": "ISO 12836:2015 Dentistry — Digitizing devices for CAD/CAM systems for indirect dental restorations — Test methods for assessing accuracy",
+   "short": "ISO 12836 CAD/CAM digitiser accuracy",
+   "publisher": "ISO (BS EN ISO 12836:2015)",
+   "year": 2015,
+   "type": "technical",
+   "specialties": [
+    "lab"
+   ],
+   "topic": "Lab scanners",
+   "aliases": [
+    "lab scanner",
+    "model scanner",
+    "cad/cam",
+    "digitizing device",
+    "bs en iso 12836"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need the accuracy test methods for fixed or mechanically guided (lab) scanners — not hand-held scanners and not a clinical threshold.",
+   "url": "https://shop.standards.ie/en-ie/standards/bs-en-iso-12836-2015-273481_saig_bsi_bsi_630171",
+   "related": [
+    "iso-20896"
+   ],
+   "access": "restricted",
+   "note": "Paid standard (restricted full text).",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "girft-hd-report",
+   "title": "Hospital Dentistry: GIRFT Programme National Specialty Report",
+   "short": "GIRFT hospital dentistry national report",
+   "publisher": "Getting It Right First Time (GIRFT), NHS England — Jones E (clinical lead)",
+   "year": 2021,
+   "edition": "Report dated February 2021; published September 2021",
+   "type": "commissioning",
+   "specialties": [
+    "general",
+    "paeds",
+    "oralsurg",
+    "ortho"
+   ],
+   "topic": "Hospital dentistry service improvement",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "getting it right the first time",
+    "hospital dentistry",
+    "national specialty report",
+    "21 recommendations",
+    "variation",
+    "waiting lists"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "England-only national service review (21 recommendations); useful context elsewhere.",
+   "useWhen": "you want the national review of hospital dental services in England — variation, waiting times, coding and its 21 recommendations.",
+   "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2021/09/HospitalDentistryReport-Sept21j-1.pdf",
+   "links": [
+    {
+     "label": "GIRFT hospital dentistry page",
+     "url": "https://gettingitrightfirsttime.co.uk/medical_specialties/hospital-dentistry/"
+    }
+   ],
+   "related": [
+    "girft-coding",
+    "girft-cds",
+    "girft-sedation",
+    "girft-omfs-report",
+    "rcs-tmd"
+   ],
+   "group": "Service improvement & coding",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "girft-cds",
+   "title": "GIRFT Community Dental Services supplementary report",
+   "short": "GIRFT community dental services report",
+   "publisher": "Getting It Right First Time (GIRFT), NHS England",
+   "year": 2025,
+   "edition": "January 2025",
+   "type": "commissioning",
+   "specialties": [
+    "special",
+    "paeds",
+    "general"
+   ],
+   "topic": "Community dental services",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "community dental services",
+    "cds",
+    "special care",
+    "salaried services"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "England-only national service review.",
+   "useWhen": "you want the national review of community (salaried) dental services in England, supplementing the hospital dentistry report.",
+   "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2025/01/GIRFT-Community-Dental-Services-supplementary-report-FINAL-January-2025.pdf",
+   "links": [
+    {
+     "label": "GIRFT hospital dentistry page",
+     "url": "https://gettingitrightfirsttime.co.uk/medical_specialties/hospital-dentistry/"
+    }
+   ],
+   "related": [
+    "girft-hd-report"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "girft-sedation",
+   "title": "GIRFT hospital dentistry sedation pathway — guidance and conscious sedation pathway",
+   "short": "GIRFT dental sedation pathway",
+   "publisher": "Getting It Right First Time (GIRFT), NHS England",
+   "year": 2023,
+   "edition": "Guidance January 2023; pathway February 2023",
+   "type": "commissioning",
+   "specialties": [
+    "special",
+    "paeds"
+   ],
+   "topic": "Sedation pathway",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "sedation pathway",
+    "conscious sedation",
+    "iv sedation",
+    "inhalation sedation",
+    "referral for sedation"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "England-only service pathway; clinical standards come from IACSD (and SDCEP in Scotland).",
+   "useWhen": "you are designing or following a referral pathway for dental treatment under conscious sedation in English hospital services.",
+   "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2023/01/20230124_Hospital-dentistry_Guidance_Sedation-pathway.pdf",
+   "parts": [
+    {
+     "label": "Sedation pathway guidance (Jan 2023)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2023/01/20230124_Hospital-dentistry_Guidance_Sedation-pathway.pdf"
+    },
+    {
+     "label": "Conscious sedation pathway (Feb 2023)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2023/02/Hospital_dentistry_Pathway_Conscious-sedation.pdf"
+    }
+   ],
+   "related": [
+    "iacsd",
+    "sdcep-sedation",
+    "girft-hd-report"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "girft-omfs-report",
+   "title": "Oral and Maxillofacial Surgery: GIRFT Programme National Specialty Report",
+   "short": "GIRFT oral & maxillofacial surgery national report",
+   "publisher": "Getting It Right First Time (GIRFT) — Morton M (clinical lead)",
+   "year": 2018,
+   "edition": "November 2018",
+   "type": "commissioning",
+   "specialties": [
+    "oralsurg",
+    "oncology"
+   ],
+   "topic": "OMFS service improvement",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "omfs",
+    "oral and maxillofacial surgery",
+    "third molar",
+    "hub and spoke",
+    "national specialty report"
+   ],
+   "jurisdiction": "ENG",
+   "ukRelevance": "England-only national service review (15 recommendations).",
+   "useWhen": "you want the national review of OMFS services in England, including where third molar and dentoalveolar surgery should happen.",
+   "url": "https://www.baoms.org.uk/_userfiles/pages/files/professionals/girft/omfsreportfeb19h.pdf",
+   "related": [
+    "girft-hd-report",
+    "rcs-m3m"
+   ],
+   "note": "Hosted by BAOMS.",
+   "group": "Oral surgery & services",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "girft-coding",
+   "title": "Outpatient activity coding in hospital dentistry — GIRFT coding guides (OPCS-4.11)",
+   "short": "GIRFT outpatient coding guides (hospital dentistry)",
+   "publisher": "GIRFT with RCS England FDS, BOS, BSPD, RD-UK, BAOS and ABAOMS",
+   "year": 2026,
+   "edition": "First issued June 2023; updated for OPCS-4.11 April 2026; special care dentistry guide added July 2026",
+   "type": "technical",
+   "specialties": [
+    "general",
+    "training"
+   ],
+   "topic": "Clinical coding",
+   "aliases": [
+    "girft",
+    "getting it right first time",
+    "coding",
+    "clinical coding",
+    "opcs",
+    "opcs-4",
+    "opcs-4.11",
+    "procedure codes",
+    "outpatient coding",
+    "activity coding",
+    "restorative coding"
+   ],
+   "jurisdiction": "ENG",
+   "status": "current",
+   "useWhen": "you need the agreed OPCS-4 outpatient procedure codes for restorative dentistry, orthodontics, paediatric dentistry, oral surgery or special care dentistry.",
+   "url": "https://gettingitrightfirsttime.co.uk/outpatient-coding-guidance-for-special-care-dentistry-added-to-girft-resources/",
+   "links": [
+    {
+     "label": "GIRFT hospital dentistry page (all coding guides)",
+     "url": "https://gettingitrightfirsttime.co.uk/medical_specialties/hospital-dentistry/"
+    },
+    {
+     "label": "Original restorative guide (June 2023)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2023/06/Outpatient-activity-coding-in-Restorative-Dentistry.pdf"
+    }
+   ],
+   "parts": [
+    {
+     "label": "Restorative dentistry (OPCS-4.11, April 2026)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2026/05/Outpatient-activity-coding-in-Restorative-Dentistry-OPCS-4.11-FINAL-April-2026.pdf"
+    },
+    {
+     "label": "Orthodontics (OPCS-4.11, April 2026)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2026/05/Outpatient-activity-coding-in-Orthodontics-OPCS-4.11-FINAL-April-2026.pdf"
+    },
+    {
+     "label": "Paediatric dentistry (OPCS-4.11, April 2026)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2026/05/Outpatient-activity-coding-in-Paedatric-Dentistry-OPCS411-FINAL-April-2026.pdf"
+    },
+    {
+     "label": "Oral surgery (OPCS-4.11, April 2026)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2026/05/Outpatient-activity-coding-in-Oral-Surgery-OPCS-4.11-FINAL-April-2026.pdf"
+    },
+    {
+     "label": "Special care dentistry (July 2026)",
+     "url": "https://gettingitrightfirsttime.co.uk/wp-content/uploads/2026/07/Outpatient-activity-coding-in-Special-Care-Dentistry-July-2026.pdf"
+    }
+   ],
+   "related": [
+    "girft-hd-report"
+   ],
+   "note": "The April 2026 and July 2026 versions supersede the 2023 booklets.",
+   "group": "Service improvement & coding",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-oha",
+   "title": "Oral Health Assessment and Review",
+   "short": "SDCEP oral health assessment",
+   "publisher": "SDCEP",
+   "year": 2011,
+   "type": "guideline",
+   "specialties": [
+    "prevention",
+    "general"
+   ],
+   "topic": "Assessment & recall",
+   "aliases": [
+    "oral health assessment",
+    "recall",
+    "risk assessment",
+    "examination"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are structuring a comprehensive oral health assessment with risk-based review.",
+   "url": "https://www.sdcep.org.uk/published-guidance/oral-health-assessment/",
+   "related": [
+    "nice-cg19"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-decon",
+   "title": "Decontamination (guidance series)",
+   "short": "SDCEP decontamination",
+   "publisher": "SDCEP",
+   "type": "guideline",
+   "specialties": [
+    "general"
+   ],
+   "topic": "Decontamination",
+   "aliases": [
+    "decontamination",
+    "sterilisation",
+    "autoclave",
+    "waterlines",
+    "instrument cleaning"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you need practical decontamination guidance.",
+   "url": "https://www.sdcep.org.uk/published-guidance/decontamination/",
+   "group": "Decontamination",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-amalgam",
+   "title": "Restricting the Use of Dental Amalgam in Specific Patient Groups — implementation advice",
+   "short": "SDCEP amalgam restrictions",
+   "publisher": "SDCEP",
+   "year": 2018,
+   "type": "guideline",
+   "specialties": [
+    "operative",
+    "paeds"
+   ],
+   "topic": "Amalgam",
+   "aliases": [
+    "amalgam",
+    "mercury",
+    "minamata",
+    "pregnancy amalgam"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are deciding whether amalgam can be used in a child, or a pregnant or breastfeeding patient.",
+   "url": "https://www.sdcep.org.uk/published-guidance/dental-amalgam/",
+   "group": "Caries & direct restorations",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-emergency",
+   "title": "Emergency Dental Care",
+   "short": "SDCEP emergency dental care",
+   "publisher": "SDCEP",
+   "type": "guideline",
+   "specialties": [
+    "general"
+   ],
+   "topic": "Emergency dental care",
+   "aliases": [
+    "emergency dental care",
+    "urgent care",
+    "out of hours"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you are organising or delivering emergency dental care in Scotland.",
+   "url": "https://www.sdcep.org.uk/published-guidance/emergency-dental-care/",
+   "related": [
+    "sdcep-madp"
+   ],
+   "note": "Edition not shown on the SDCEP list page.",
+   "group": "Acute & emergency care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-practice",
+   "title": "Practice Support Manual",
+   "short": "SDCEP Practice Support Manual",
+   "publisher": "SDCEP",
+   "type": "standard",
+   "specialties": [
+    "general"
+   ],
+   "topic": "Practice management",
+   "aliases": [
+    "practice management",
+    "practice support manual",
+    "compliance",
+    "sustainability",
+    "nitrous oxide waste"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you need practice management, regulation or compliance guidance.",
+   "url": "https://www.sdcep.org.uk/published-guidance/practice-management/",
+   "group": "Standards, curricula & practice",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "sdcep-companion",
+   "title": "SDCEP Dental Companion",
+   "short": "SDCEP Dental Companion",
+   "publisher": "SDCEP",
+   "type": "tool",
+   "specialties": [
+    "general"
+   ],
+   "topic": "Quick access to SDCEP guidance",
+   "aliases": [
+    "sdcep app",
+    "dental companion"
+   ],
+   "jurisdiction": "SCO",
+   "useWhen": "you want quick access to SDCEP guidance content.",
+   "url": "https://www.sdcep.org.uk/published-guidance/sdcep-dental-companion/",
+   "group": "Acute & emergency care",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-m3m",
+   "title": "Parameters of care for patients undergoing mandibular third molar surgery",
+   "short": "RCS mandibular third molar surgery",
+   "publisher": "RCS England FDS (Renton T et al.)",
+   "year": 2020,
+   "type": "guideline",
+   "specialties": [
+    "oralsurg"
+   ],
+   "topic": "Third molars",
+   "aliases": [
+    "wisdom tooth",
+    "third molar",
+    "coronectomy",
+    "ian injury",
+    "nice ta1"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are assessing or consenting for mandibular third molar surgery.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Guidelines/3rd-molar-guidelines--April-2021-v4.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "group": "Oral surgery & services",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-tn",
+   "title": "Guidelines for the management of trigeminal neuralgia",
+   "short": "RCS trigeminal neuralgia",
+   "publisher": "RCS England FDS (McMillan R, Zakrzewska J et al.)",
+   "year": 2021,
+   "type": "guideline",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "Trigeminal neuralgia",
+   "aliases": [
+    "trigeminal neuralgia",
+    "facial pain",
+    "neuropathic pain"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you suspect trigeminal neuralgia.",
+   "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Guidelines/Trigemina-Neuralgia-Guidelines_2021_V4.pdf",
+   "links": [
+    {
+     "label": "RCS clinical guidelines index",
+     "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/"
+    }
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "rcs-archive",
+   "title": "Archived RCS England FDS guidelines (paediatric and others, 1997–2008)",
+   "short": "Archived RCS guidelines",
+   "publisher": "RCS England FDS",
+   "type": "guideline",
+   "specialties": [
+    "paeds",
+    "general"
+   ],
+   "topic": "Historical guidelines",
+   "aliases": [
+    "archived guidelines",
+    "pulp therapy primary molars",
+    "extraction of primary teeth",
+    "balance and compensation"
+   ],
+   "jurisdiction": "UK",
+   "status": "archived",
+   "useWhen": "you are looking for an older RCS guideline kept for reference.",
+   "url": "https://www.rcseng.ac.uk/dental-faculties/fds/publications-guidelines/clinical-guidelines/",
+   "parts": [
+    {
+     "label": "Consent and physical intervention in children (2008)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/paed_dent_intervention.pdf"
+    },
+    {
+     "label": "General anaesthesia in paediatric dentistry (2008)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/Guideline-for-the-use-of-GA-in-Paediatric-Dentistry-May-2008-Final.pdf"
+    },
+    {
+     "label": "Pulp therapy for primary molars (2006)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/pulptherapy.pdf"
+    },
+    {
+     "label": "Extraction of primary teeth — balance and compensation (2006)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/extractp.pdf"
+    },
+    {
+     "label": "Intrinsic discoloration in permanent anterior teeth (2004)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/discolor.pdf"
+    },
+    {
+     "label": "Conscious sedation in paediatric dentistry (2002)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/paed_sedation.pdf"
+    },
+    {
+     "label": "Non-pharmacological behaviour management (2002)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/non_ph_behaviour_mgmt.pdf"
+    },
+    {
+     "label": "Paediatric dentistry UK national clinical guidelines 1999 (Part A)",
+     "url": "https://www.rcseng.ac.uk/-/media/Files/RCS/FDS/Publications/pd1.pdf"
+    }
+   ],
+   "note": "Parent record for the RCS archive table; each child links to its own document.",
+   "group": "Historical",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iotn-dhc",
+   "title": "The development of an index of orthodontic treatment priority (IOTN Dental Health Component)",
+   "short": "IOTN Dental Health Component",
+   "publisher": "Brook PH, Shaw WC (Eur J Orthod)",
+   "year": 1989,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "ortho",
+    "develop"
+   ],
+   "topic": "Orthodontic treatment need",
+   "aliases": [
+    "iotn",
+    "dhc",
+    "orthodontic need",
+    "mocdo",
+    "hypodontia 5h",
+    "hypodontia 4h",
+    "nhs orthodontic eligibility",
+    "iotn 3.6"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are grading orthodontic treatment need, including hypodontia descriptors (4h/5h).",
+   "url": "https://doi.org/10.1093/oxfordjournals.ejo.a035999",
+   "related": [
+    "iotn-ac",
+    "cls-ioftn",
+    "bsspd-hypodontia"
+   ],
+   "keyPoints": [
+    "Usual NHS threshold: DHC 4 or 5, or DHC 3 with AC 6 or more (\"IOTN 3.6\") — confirm current rules for your health board or region.",
+    "Use the MOCDO hierarchy: Missing, Overjet, Crossbite, Displacement, Overbite."
+   ],
+   "tool": "iotn",
+   "group": "Orthodontic & orthognathic need",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "iotn-ac",
+   "title": "IOTN Aesthetic Component",
+   "short": "IOTN Aesthetic Component",
+   "publisher": "Evans R, Shaw W (Eur J Orthod) — illustrated scale for dental attractiveness",
+   "year": 1987,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "ortho"
+   ],
+   "topic": "Orthodontic aesthetics",
+   "aliases": [
+    "iotn ac",
+    "aesthetic component",
+    "iotn"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are scoring dental attractiveness 1–10 alongside the DHC.",
+   "url": "https://doi.org/10.1093/ejo/9.4.314",
+   "related": [
+    "iotn-dhc"
+   ],
+   "tool": "iotn",
+   "group": "Orthodontic & orthognathic need",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-icdas",
+   "title": "The International Caries Detection and Assessment System (ICDAS): an integrated system for measuring dental caries",
+   "short": "ICDAS II",
+   "publisher": "Ismail AI et al. (Community Dent Oral Epidemiol 2007)",
+   "year": 2007,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "prevention",
+    "operative"
+   ],
+   "topic": "Caries detection",
+   "aliases": [
+    "icdas",
+    "caries detection",
+    "caries codes",
+    "non-cavitated lesion"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are recording visual caries severity (codes 0–6) on a tooth surface.",
+   "url": "https://doi.org/10.1111/j.1600-0528.2007.00347.x",
+   "related": [
+    "iccms"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-iccms",
+   "title": "ICCMS caries staging",
+   "short": "ICCMS staging (initial / moderate / extensive)",
+   "publisher": "Ismail AI et al. (BMC Oral Health 2015)",
+   "year": 2015,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "prevention",
+    "operative"
+   ],
+   "topic": "Caries staging",
+   "aliases": [
+    "iccms",
+    "caries staging",
+    "initial moderate extensive"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are staging lesions to choose a management option within ICCMS.",
+   "url": "https://doi.org/10.1186/1472-6831-15-S1-S9",
+   "related": [
+    "iccms",
+    "cariescare"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-nyvad",
+   "title": "Reliability of a new caries diagnostic system differentiating between active and inactive caries lesions",
+   "short": "Nyvad caries activity criteria",
+   "publisher": "Nyvad B, Machiulskiene V, Baelum V (Caries Res 1999)",
+   "year": 1999,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "prevention",
+    "operative"
+   ],
+   "topic": "Caries activity",
+   "aliases": [
+    "nyvad",
+    "caries activity",
+    "active lesion",
+    "inactive lesion",
+    "arrested caries"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you need to decide whether a lesion is active or arrested.",
+   "url": "https://doi.org/10.1159/000016526",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-mounthume",
+   "title": "A new cavity classification",
+   "short": "Mount & Hume site-and-size classification",
+   "publisher": "Mount GJ, Hume WR (Aust Dent J 1998)",
+   "year": 1998,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "operative"
+   ],
+   "topic": "Cavity classification",
+   "aliases": [
+    "mount hume",
+    "site and size",
+    "si/sta",
+    "cavity classification",
+    "minimal intervention"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing a lesion by site (pit/fissure, contact, cervical) and size.",
+   "url": "https://doi.org/10.1111/j.1834-7819.1998.tb00156.x",
+   "group": "Caries & direct restorations",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-usphs",
+   "title": "Clinical criteria (Ryge / USPHS criteria)",
+   "short": "USPHS / Ryge criteria (historical)",
+   "publisher": "Ryge G (Int Dent J 1980)",
+   "year": 1980,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "operative"
+   ],
+   "topic": "Restoration evaluation",
+   "aliases": [
+    "usphs",
+    "ryge",
+    "alpha bravo charlie",
+    "restoration evaluation"
+   ],
+   "jurisdiction": "RES",
+   "status": "historical",
+   "useWhen": "you are reading older restoration studies — the revised FDI criteria are now more widely used.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/6935165/",
+   "related": [
+    "fdi-criteria"
+   ],
+   "group": "Restoration quality & restorability",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-dpi",
+   "title": "The Dental Practicality Index — assessing the restorability of teeth",
+   "short": "Dental Practicality Index (DPI)",
+   "publisher": "Dawood A, Patel S (BDJ 2017)",
+   "year": 2017,
+   "type": "tool",
+   "measure": "complexity",
+   "specialties": [
+    "operative",
+    "endo",
+    "perio"
+   ],
+   "topic": "Restorability",
+   "aliases": [
+    "dpi",
+    "restorability",
+    "practicality",
+    "to treat or extract",
+    "tooth prognosis"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are judging whether a compromised tooth is practical to restore.",
+   "url": "https://doi.org/10.1038/sj.bdj.2017.447",
+   "group": "Restoration quality & restorability",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-bewe",
+   "title": "Basic Erosive Wear Examination (BEWE): a new scoring system for scientific and clinical needs",
+   "short": "BEWE",
+   "publisher": "Bartlett D, Ganss C, Lussi A (Clin Oral Investig 2008)",
+   "year": 2008,
+   "type": "classification",
+   "measure": "screening",
+   "specialties": [
+    "operative"
+   ],
+   "topic": "Erosive tooth wear",
+   "aliases": [
+    "bewe",
+    "tsl",
+    "tooth surface loss",
+    "erosive wear",
+    "erosion",
+    "tooth wear screening",
+    "sextant score"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are screening for erosive tooth wear and deciding on monitoring or management.",
+   "url": "https://doi.org/10.1007/s00784-007-0181-5",
+   "links": [
+    {
+     "label": "BEWE 2.0 (2026, adds a level for more severe wear)",
+     "url": "https://doi.org/10.1016/j.jdent.2026.106514"
+    }
+   ],
+   "related": [
+    "bsrd-toothwear",
+    "rcs-erosion"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-smithknight",
+   "title": "An index for measuring the wear of teeth",
+   "short": "Smith & Knight Tooth Wear Index",
+   "publisher": "Smith BG, Knight JK (BDJ 1984)",
+   "year": 1984,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "operative"
+   ],
+   "topic": "Tooth wear",
+   "aliases": [
+    "twi",
+    "tooth wear index",
+    "smith and knight",
+    "tsl"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you want a surface-by-surface tooth wear severity score.",
+   "url": "https://doi.org/10.1038/sj.bdj.4805394",
+   "related": [
+    "bsrd-toothwear"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-twes",
+   "title": "Diagnosing tooth wear, a new taxonomy based on the revised version of the Tooth Wear Evaluation System (TWES 2.0)",
+   "short": "TWES 2.0",
+   "publisher": "Wetselaar P et al. (J Oral Rehabil 2020)",
+   "year": 2020,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "operative"
+   ],
+   "topic": "Tooth wear diagnosis",
+   "aliases": [
+    "twes",
+    "tooth wear evaluation system",
+    "tsl",
+    "tooth wear diagnosis"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you need a modular tooth wear diagnosis and grading system.",
+   "url": "https://doi.org/10.1111/joor.12972",
+   "links": [
+    {
+     "label": "Original TWES (2016)",
+     "url": "https://doi.org/10.1111/joor.12340"
+    }
+   ],
+   "related": [
+    "tw-consensus"
+   ],
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-turner",
+   "title": "Restoration of the extremely worn dentition",
+   "short": "Turner & Missirlian classification",
+   "publisher": "Turner KA, Missirlian DM (J Prosthet Dent 1984)",
+   "year": 1984,
+   "type": "classification",
+   "measure": "complexity",
+   "specialties": [
+    "operative",
+    "prostho"
+   ],
+   "topic": "Worn dentition planning",
+   "aliases": [
+    "turner missirlian",
+    "worn dentition",
+    "vertical dimension",
+    "ovd",
+    "tsl"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are planning rehabilitation of a worn dentition by space and vertical dimension category.",
+   "url": "https://doi.org/10.1016/0022-3913(84)90326-3",
+   "group": "Tooth wear & erosion",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-stage4-types",
+   "title": "Stage IV periodontitis rehabilitation case types (EFP S3 guideline)",
+   "short": "Stage IV case types",
+   "publisher": "Herrera D et al. (EFP 2022)",
+   "year": 2022,
+   "type": "classification",
+   "measure": "complexity",
+   "specialties": [
+    "perio",
+    "prostho"
+   ],
+   "topic": "Stage IV rehabilitation",
+   "aliases": [
+    "stage iv case types",
+    "stage 4",
+    "perio rehabilitation",
+    "interdisciplinary"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are grouping a stage IV patient to plan interdisciplinary rehabilitation.",
+   "url": "https://doi.org/10.1111/jcpe.13639",
+   "related": [
+    "efp-stage4"
+   ],
+   "group": "Diagnosis & classification",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-cairo",
+   "title": "The interproximal clinical attachment level to classify gingival recessions and predict root coverage outcomes",
+   "short": "Cairo recession types (RT1–RT3)",
+   "publisher": "Cairo F et al. (J Clin Periodontol 2011)",
+   "year": 2011,
+   "type": "classification",
+   "measure": "risk",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Gingival recession",
+   "aliases": [
+    "cairo",
+    "rt1",
+    "rt2",
+    "rt3",
+    "recession",
+    "gum recession",
+    "root coverage"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying gingival recession and predicting root coverage.",
+   "url": "https://doi.org/10.1111/j.1600-051X.2011.01732.x",
+   "related": [
+    "cls-miller"
+   ],
+   "group": "Recession & furcation",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-miller",
+   "title": "A classification of marginal tissue recession",
+   "short": "Miller recession classes (historical)",
+   "publisher": "Miller PD Jr (Int J Periodontics Restorative Dent 1985)",
+   "year": 1985,
+   "type": "classification",
+   "measure": "risk",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Gingival recession",
+   "aliases": [
+    "miller class",
+    "recession",
+    "gum recession"
+   ],
+   "jurisdiction": "RES",
+   "status": "historical",
+   "useWhen": "you are reading older literature — the 2017 World Workshop adopted the Cairo RT classification.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/3858267/",
+   "related": [
+    "cls-cairo"
+   ],
+   "group": "Recession & furcation",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-hamp",
+   "title": "Periodontal treatment of multirooted teeth. Results after 5 years (Hamp furcation degrees)",
+   "short": "Hamp furcation classification",
+   "publisher": "Hamp SE, Nyman S, Lindhe J (J Clin Periodontol 1975)",
+   "year": 1975,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Furcation involvement",
+   "aliases": [
+    "furcation",
+    "hamp",
+    "degree i ii iii",
+    "horizontal furcation"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading horizontal furcation involvement.",
+   "url": "https://doi.org/10.1111/j.1600-051x.1975.tb01734.x",
+   "group": "Recession & furcation",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-endoperio",
+   "title": "Acute periodontal lesions (periodontal abscesses and necrotizing periodontal diseases) and endo-periodontal lesions (2017 World Workshop)",
+   "short": "Endo-periodontal lesion classification",
+   "publisher": "Herrera D et al. (J Clin Periodontol 2018)",
+   "year": 2018,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "perio",
+    "endo"
+   ],
+   "topic": "Endo-perio lesions",
+   "aliases": [
+    "endo perio",
+    "endodontic-periodontal lesion",
+    "perio-endo",
+    "periodontal abscess",
+    "necrotising"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are classifying a combined endodontic-periodontal lesion or periodontal abscess.",
+   "url": "https://doi.org/10.1111/jcpe.12941",
+   "related": [
+    "ww2017"
+   ],
+   "group": "Diagnosis & classification",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pra",
+   "title": "Periodontal risk assessment (PRA) for patients in supportive periodontal therapy (SPT)",
+   "short": "Lang–Tonetti Periodontal Risk Assessment",
+   "publisher": "Lang NP, Tonetti MS (Oral Health Prev Dent 2003)",
+   "year": 2003,
+   "type": "tool",
+   "measure": "risk",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Periodontal risk",
+   "aliases": [
+    "pra",
+    "periodontal risk",
+    "spt interval",
+    "risk diagram",
+    "functional diagram"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are setting a supportive periodontal care interval from patient risk.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/15643744/",
+   "group": "Risk & prognosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-mcguire",
+   "title": "Prognosis versus actual outcome (McGuire & Nunn)",
+   "short": "McGuire–Nunn tooth prognosis",
+   "publisher": "McGuire MK, Nunn ME (J Periodontol 1996)",
+   "year": 1996,
+   "type": "classification",
+   "measure": "risk",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Tooth prognosis",
+   "aliases": [
+    "prognosis",
+    "tooth prognosis",
+    "hopeless",
+    "questionable"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are assigning periodontal prognosis to individual teeth.",
+   "url": "https://doi.org/10.1902/jop.1996.67.7.658",
+   "links": [
+    {
+     "label": "Part III",
+     "url": "https://doi.org/10.1902/jop.1996.67.7.666"
+    }
+   ],
+   "related": [
+    "cls-kwokcaton"
+   ],
+   "group": "Risk & prognosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-kwokcaton",
+   "title": "Prognosis revisited: a system for assigning periodontal prognosis",
+   "short": "Kwok–Caton prognosis",
+   "publisher": "Kwok V, Caton JG (J Periodontol 2007)",
+   "year": 2007,
+   "type": "classification",
+   "measure": "risk",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Tooth prognosis",
+   "aliases": [
+    "prognosis",
+    "kwok caton",
+    "favourable",
+    "questionable",
+    "unfavourable"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you want a stability-based periodontal prognosis system.",
+   "url": "https://doi.org/10.1902/jop.2007.070210",
+   "related": [
+    "cls-mcguire"
+   ],
+   "group": "Risk & prognosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-oleary",
+   "title": "The plaque control record",
+   "short": "O'Leary plaque control record",
+   "publisher": "O'Leary TJ, Drake RB, Naylor JE (J Periodontol 1972)",
+   "year": 1972,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "perio",
+    "prevention"
+   ],
+   "topic": "Plaque scoring",
+   "aliases": [
+    "plaque score",
+    "pcr",
+    "plaque control record",
+    "oral hygiene index"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are recording a percentage plaque score to monitor oral hygiene.",
+   "url": "https://doi.org/10.1902/jop.1972.43.1.38",
+   "group": "Plaque & gingival indices",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-silness",
+   "title": "Periodontal disease in pregnancy II (Silness–Löe Plaque Index)",
+   "short": "Silness–Löe Plaque Index",
+   "publisher": "Silness J, Löe H (Acta Odontol Scand 1964)",
+   "year": 1964,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Plaque scoring",
+   "aliases": [
+    "plaque index",
+    "pli",
+    "silness loe"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you need a graded (0–3) plaque thickness index.",
+   "url": "https://doi.org/10.3109/00016356408993968",
+   "group": "Plaque & gingival indices",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-loe",
+   "title": "Periodontal disease in pregnancy I (Löe–Silness Gingival Index)",
+   "short": "Löe–Silness Gingival Index",
+   "publisher": "Löe H, Silness J (Acta Odontol Scand 1963)",
+   "year": 1963,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "perio"
+   ],
+   "topic": "Gingival inflammation",
+   "aliases": [
+    "gingival index",
+    "gi",
+    "loe silness"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you need a graded (0–3) gingival inflammation index.",
+   "url": "https://doi.org/10.3109/00016356309011240",
+   "group": "Plaque & gingival indices",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-perimplant-def",
+   "title": "Peri-implant diseases and conditions: Consensus report of workgroup 4 of the 2017 World Workshop",
+   "short": "Peri-implant case definitions",
+   "publisher": "Berglundh T et al. (J Clin Periodontol 2018)",
+   "year": 2018,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "implant",
+    "perio"
+   ],
+   "topic": "Peri-implant diagnosis",
+   "aliases": [
+    "peri-implantitis case definition",
+    "peri-implant mucositis",
+    "bleeding around implant",
+    "implant bleeding",
+    "implant bone loss",
+    "peri-implant health"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are diagnosing peri-implant health, mucositis or peri-implantitis.",
+   "url": "https://doi.org/10.1111/jcpe.12957",
+   "related": [
+    "efp-perimplant",
+    "bsp-perimplant"
+   ],
+   "group": "Peri-implant disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-idra",
+   "title": "Implant Disease Risk Assessment IDRA — a tool for preventing peri-implant disease",
+   "short": "IDRA implant disease risk",
+   "publisher": "Heitz-Mayfield LJA et al. (Clin Oral Implants Res 2020)",
+   "year": 2020,
+   "type": "tool",
+   "measure": "risk",
+   "specialties": [
+    "implant",
+    "perio"
+   ],
+   "topic": "Peri-implant risk",
+   "aliases": [
+    "idra",
+    "implant risk",
+    "peri-implantitis risk"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are estimating a patient's risk of peri-implant disease before or after placement.",
+   "url": "https://doi.org/10.1111/clr.13585",
+   "related": [
+    "efp-perimplant"
+   ],
+   "group": "Peri-implant disease",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pulpal-apical",
+   "title": "Pulpal and apical diagnostic terminology (paired diagnoses)",
+   "short": "Paired pulpal / apical diagnoses",
+   "publisher": "AAE 2009 terminology; AAE/ESE update proposed",
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Endodontic diagnosis",
+   "aliases": [
+    "pulpal diagnosis",
+    "apical diagnosis",
+    "reversible pulpitis",
+    "irreversible pulpitis",
+    "pulp necrosis",
+    "apical periodontitis",
+    "apical abscess"
+   ],
+   "jurisdiction": "US",
+   "useWhen": "you are recording a paired pulpal and apical diagnosis; a joint AAE/ESE replacement is still a proposal.",
+   "url": "https://www.aae.org/specialty/diagnostic-terminology-stakeholder-input/",
+   "related": [
+    "aae-ese-terms",
+    "ese-s3"
+   ],
+   "note": "The page describes the update as building on the 2009 classification published in the Journal of Endodontics.",
+   "group": "Diagnosis",
+   "checked": "2026-11-08",
+   "reviewNote": "A joint AAE/ESE replacement terminology has been proposed and is not yet final."
+  },
+  {
+   "id": "cls-weine",
+   "title": "Canal configuration in the mesiobuccal root of the maxillary first molar and its endodontic significance",
+   "short": "Weine canal configuration",
+   "publisher": "Weine FS et al. (Oral Surg 1969)",
+   "year": 1969,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Canal anatomy",
+   "aliases": [
+    "weine",
+    "canal configuration",
+    "mb2",
+    "canal anatomy"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing root canal configuration (types I–IV).",
+   "url": "https://doi.org/10.1016/0030-4220(69)90237-0",
+   "group": "Canal anatomy & anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-vertucci",
+   "title": "Root canal anatomy of the human permanent teeth",
+   "short": "Vertucci canal classification",
+   "publisher": "Vertucci FJ (Oral Surg 1984)",
+   "year": 1984,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Canal anatomy",
+   "aliases": [
+    "vertucci",
+    "canal configuration",
+    "canal anatomy"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing root canal configuration (types I–VIII).",
+   "url": "https://doi.org/10.1016/0030-4220(84)90085-9",
+   "group": "Canal anatomy & anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-ahmed",
+   "title": "A new system for classifying root and root canal morphology",
+   "short": "Ahmed root & canal morphology code",
+   "publisher": "Ahmed HMA et al. (Int Endod J 2017)",
+   "year": 2017,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Canal anatomy",
+   "aliases": [
+    "ahmed classification",
+    "root canal morphology",
+    "canal code"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you want a coded description of tooth, root and canal morphology.",
+   "url": "https://doi.org/10.1111/iej.12685",
+   "links": [
+    {
+     "label": "Anomalies extension (2018)",
+     "url": "https://doi.org/10.1111/iej.12867"
+    }
+   ],
+   "group": "Canal anatomy & anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-heithersay",
+   "title": "Invasive cervical resorption: an analysis of potential predisposing factors (Heithersay classes 1–4)",
+   "short": "Heithersay ECR classes",
+   "publisher": "Heithersay GS (Quintessence Int 1999)",
+   "year": 1999,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "External cervical resorption",
+   "aliases": [
+    "heithersay",
+    "ecr",
+    "invasive cervical resorption",
+    "external cervical resorption"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading the extent of external cervical resorption on radiographs.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/10356560/",
+   "related": [
+    "cls-patel-ecr",
+    "ese-ecr"
+   ],
+   "group": "Resorption",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-patel-ecr",
+   "title": "External cervical resorption: a three-dimensional classification",
+   "short": "Patel 3D ECR classification",
+   "publisher": "Patel S, Foschi F et al. (Int Endod J 2018)",
+   "year": 2018,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "endo",
+    "radiology"
+   ],
+   "topic": "External cervical resorption",
+   "aliases": [
+    "ecr",
+    "external cervical resorption",
+    "cbct resorption",
+    "patel classification"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying ECR in three dimensions from CBCT.",
+   "url": "https://doi.org/10.1111/iej.12824",
+   "related": [
+    "cls-heithersay",
+    "ese-ecr"
+   ],
+   "group": "Resorption",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-cracks",
+   "title": "Longitudinal crack and fracture categories (craze line, fractured cusp, cracked tooth, split tooth, vertical root fracture)",
+   "short": "Longitudinal crack / fracture categories",
+   "publisher": "ESE position statement 2025 (definitions table)",
+   "year": 2025,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "endo",
+    "operative"
+   ],
+   "topic": "Cracked teeth",
+   "aliases": [
+    "cracked tooth",
+    "cracked tooth syndrome",
+    "crack",
+    "split tooth",
+    "vertical root fracture",
+    "vrf",
+    "craze line",
+    "fractured cusp"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are naming the type of longitudinal crack or fracture.",
+   "url": "https://doi.org/10.1111/iej.14186",
+   "related": [
+    "ese-cracks"
+   ],
+   "group": "Diagnosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-cvek",
+   "title": "Prognosis of luxated non-vital maxillary incisors treated with calcium hydroxide and filled with gutta-percha (Cvek root development stages)",
+   "short": "Cvek root development stages",
+   "publisher": "Cvek M (Endod Dent Traumatol 1992)",
+   "year": 1992,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "trauma",
+    "endo",
+    "paeds"
+   ],
+   "topic": "Root development",
+   "aliases": [
+    "cvek",
+    "root development stage",
+    "immature root",
+    "open apex"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are staging root development in a traumatised immature tooth.",
+   "url": "https://doi.org/10.1111/j.1600-9657.1992.tb00228.x",
+   "related": [
+    "nvi-1998",
+    "iadt-2020"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-iadt",
+   "title": "IADT / Andreasen traumatic dental injury categories",
+   "short": "Traumatic injury categories (IADT)",
+   "publisher": "IADT 2020 guidelines",
+   "year": 2020,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "trauma"
+   ],
+   "topic": "Trauma diagnosis",
+   "aliases": [
+    "andreasen",
+    "luxation types",
+    "concussion",
+    "subluxation",
+    "extrusive luxation",
+    "lateral luxation",
+    "intrusive luxation",
+    "avulsion"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are naming the injury type before following its management pathway.",
+   "url": "https://iadt-dentaltrauma.org/guidelines-and-resources/current-guidelines-2/",
+   "related": [
+    "iadt-2020"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pai",
+   "title": "The periapical index: a scoring system for radiographic assessment of apical periodontitis",
+   "short": "Ørstavik Periapical Index (PAI)",
+   "publisher": "Ørstavik D, Kerekes K, Eriksen HM (Endod Dent Traumatol 1986)",
+   "year": 1986,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "endo",
+    "radiology"
+   ],
+   "topic": "Periapical healing",
+   "aliases": [
+    "pai",
+    "periapical index",
+    "orstavik",
+    "healing"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are scoring periapical status (1–5) to monitor healing.",
+   "url": "https://doi.org/10.1111/j.1600-9657.1986.tb00119.x",
+   "group": "Surgery, transplantation & healing",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-rud-molven",
+   "title": "Radiographic healing after endodontic surgery (Rud & Molven criteria)",
+   "short": "Rud / Molven apical surgery healing",
+   "publisher": "Rud J, Andreasen JO, Jensen JE (1972); Molven O et al. (1987)",
+   "year": 1972,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "endo"
+   ],
+   "topic": "Healing after apical surgery",
+   "aliases": [
+    "rud molven",
+    "apicectomy healing",
+    "complete incomplete uncertain unsatisfactory",
+    "apical surgery outcome"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are judging radiographic healing after periradicular surgery.",
+   "url": "https://doi.org/10.1016/s0300-9785(72)80013-9",
+   "links": [
+    {
+     "label": "Molven et al. 1987",
+     "url": "https://doi.org/10.1016/s0901-5027(87)80080-2"
+    }
+   ],
+   "related": [
+    "rcs-periradicular"
+   ],
+   "group": "Surgery, transplantation & healing",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-oehlers",
+   "title": "Dens invaginatus (dilated composite odontome) I. Variations of the invagination process",
+   "short": "Oehlers dens invaginatus types",
+   "publisher": "Oehlers FA (Oral Surg 1957)",
+   "year": 1957,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "endo",
+    "develop"
+   ],
+   "topic": "Dens invaginatus",
+   "aliases": [
+    "dens invaginatus",
+    "dens in dente",
+    "oehlers type"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying a dens invaginatus (types I, II, IIIa/b).",
+   "url": "https://doi.org/10.1016/0030-4220(57)90077-4",
+   "group": "Canal anatomy & anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-acp-pdi",
+   "title": "ACP Prosthodontic Diagnostic Index — complete edentulism, partial edentulism, completely dentate",
+   "short": "ACP Prosthodontic Diagnostic Index",
+   "publisher": "McGarry TJ et al. (J Prosthodont 1999, 2002, 2004)",
+   "year": 1999,
+   "type": "classification",
+   "measure": "complexity",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Prosthodontic complexity",
+   "aliases": [
+    "pdi",
+    "acp classification",
+    "prosthodontic complexity",
+    "edentulous classification"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you want a class I–IV prosthodontic complexity rating.",
+   "url": "https://doi.org/10.1111/j.1532-849x.1999.tb00005.x",
+   "parts": [
+    {
+     "label": "Complete edentulism (1999)",
+     "url": "https://doi.org/10.1111/j.1532-849x.1999.tb00005.x"
+    },
+    {
+     "label": "Partial edentulism (2002)",
+     "url": "https://pubmed.ncbi.nlm.nih.gov/12237799/"
+    },
+    {
+     "label": "Completely dentate (2004)",
+     "url": "https://doi.org/10.1111/j.1532-849X.2004.04019.x"
+    }
+   ],
+   "group": "Complexity & ridge assessment",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-atwood",
+   "title": "Atwood's classification of residual ridge form (Orders I–VI)",
+   "short": "Atwood residual ridge classification",
+   "publisher": "Atwood DA (J Prosthet Dent 1963;13:810–824; developed in 1971 papers)",
+   "year": 1963,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "prostho",
+    "implant"
+   ],
+   "topic": "Residual ridge resorption",
+   "aliases": [
+    "atwood",
+    "atwood's classification",
+    "atwoods ridge classification",
+    "residual ridge",
+    "ridge resorption",
+    "rrr",
+    "knife edge ridge",
+    "order iv",
+    "edentulous ridge"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing residual ridge form after extraction — Order I pre-extraction, II post-extraction, III high well-rounded, IV knife-edge, V low well-rounded, VI depressed.",
+   "url": "https://doi.org/10.1016/0022-3913(71)90069-2",
+   "links": [
+    {
+     "label": "Atwood & Coy 1971 (uses the Orders)",
+     "url": "https://doi.org/10.1016/0022-3913(71)90070-9"
+    }
+   ],
+   "related": [
+    "cls-cawood",
+    "bsspd-standards"
+   ],
+   "note": "The Orders were first described in Atwood 1963 (J Prosthet Dent 13:810–824), which has no verified online link; the primary link is Atwood's 1971 paper on residual ridge reduction.",
+   "group": "Complexity & ridge assessment",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-cawood",
+   "title": "A classification of the edentulous jaws",
+   "short": "Cawood & Howell ridge classification",
+   "publisher": "Cawood JI, Howell RA (Int J Oral Maxillofac Surg 1988)",
+   "year": 1988,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "prostho",
+    "implant"
+   ],
+   "topic": "Ridge resorption",
+   "aliases": [
+    "cawood howell",
+    "ridge resorption",
+    "atrophic ridge",
+    "edentulous ridge"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading edentulous ridge resorption (classes I–VI).",
+   "url": "https://doi.org/10.1016/s0901-5027(88)80047-x",
+   "related": [
+    "cls-atwood"
+   ],
+   "group": "Complexity & ridge assessment",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-seibert",
+   "title": "Reconstruction of deformed, partially edentulous ridges, using full thickness onlay grafts (Seibert classes)",
+   "short": "Seibert ridge defects",
+   "publisher": "Seibert JS (Compend Contin Educ Dent 1983)",
+   "year": 1983,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "prostho",
+    "implant",
+    "perio"
+   ],
+   "topic": "Ridge defects",
+   "aliases": [
+    "seibert",
+    "ridge defect",
+    "pontic site",
+    "class i ii iii"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing a localised ridge defect (horizontal, vertical, combined).",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/6578906/",
+   "group": "Complexity & ridge assessment",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-kapur",
+   "title": "A clinical evaluation of denture adhesives (Kapur retention and stability scale)",
+   "short": "Kapur denture retention/stability scale",
+   "publisher": "Kapur KK (J Prosthet Dent 1967)",
+   "year": 1967,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Denture retention",
+   "aliases": [
+    "kapur index",
+    "denture retention",
+    "denture stability",
+    "modified kapur"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are rating denture retention and stability.",
+   "url": "https://doi.org/10.1016/0022-3913(67)90221-1",
+   "note": "The modified Kapur index is a later adaptation (source not verified here).",
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-sda",
+   "title": "Shortened dental arches and oral function",
+   "short": "Shortened dental arch (concept)",
+   "publisher": "Käyser AF (J Oral Rehabil 1981)",
+   "year": 1981,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Treatment concept",
+   "aliases": [
+    "shortened dental arch",
+    "sda",
+    "premolar occlusion",
+    "no partial denture"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are considering not replacing missing molars (a treatment concept, not a score).",
+   "url": "https://doi.org/10.1111/j.1365-2842.1981.tb00519.x",
+   "group": "Removable & general prosthodontics",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-misch-density",
+   "title": "Density of bone: effect on treatment plans, surgical approach, healing, and progressive bone loading",
+   "short": "Misch bone density (D1–D4)",
+   "publisher": "Misch CE (Int J Oral Implantol 1990)",
+   "year": 1990,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Bone density",
+   "aliases": [
+    "misch d1 d4",
+    "bone density",
+    "bone quality"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing bone density at an implant site (D1–D4).",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/2073394/",
+   "group": "Planning, complexity & loading",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pes",
+   "title": "Evaluation of soft tissue around single-tooth implant crowns: the pink esthetic score",
+   "short": "Pink Esthetic Score (original PES)",
+   "publisher": "Fürhauser R et al. (Clin Oral Implants Res 2005)",
+   "year": 2005,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant aesthetics",
+   "aliases": [
+    "pes",
+    "pink esthetic score",
+    "pink aesthetic score",
+    "implant aesthetics"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are scoring peri-implant soft-tissue aesthetics (original 7-variable PES).",
+   "url": "https://doi.org/10.1111/j.1600-0501.2005.01193.x",
+   "related": [
+    "cls-pes-wes"
+   ],
+   "group": "Aesthetics & outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pes-wes",
+   "title": "Outcome evaluation of early placed maxillary anterior single-tooth implants using objective esthetic criteria (PES/WES)",
+   "short": "PES/WES (modified PES + White Esthetic Score)",
+   "publisher": "Belser UC et al. (J Periodontol 2009)",
+   "year": 2009,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant aesthetics",
+   "aliases": [
+    "wes",
+    "white esthetic score",
+    "pes/wes",
+    "modified pes",
+    "implant aesthetics"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are scoring both soft-tissue (modified 5-variable PES) and crown (WES) aesthetics.",
+   "url": "https://doi.org/10.1902/jop.2009.080435",
+   "related": [
+    "cls-pes"
+   ],
+   "group": "Aesthetics & outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-jemt",
+   "title": "Regeneration of gingival papillae after single-implant treatment",
+   "short": "Jemt Papilla Index",
+   "publisher": "Jemt T (Int J Periodontics Restorative Dent 1997)",
+   "year": 1997,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Papilla fill",
+   "aliases": [
+    "papilla index",
+    "jemt",
+    "black triangle",
+    "papilla fill"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are scoring papilla fill (0–4) next to a single implant.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/9497723/",
+   "group": "Aesthetics & outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-zucchelli",
+   "title": "Classification of facial peri-implant soft tissue dehiscence/deficiencies at single implant sites in the esthetic zone",
+   "short": "Zucchelli peri-implant soft tissue dehiscence",
+   "publisher": "Zucchelli G et al. (J Periodontol 2019)",
+   "year": 2019,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "implant",
+    "perio"
+   ],
+   "topic": "Peri-implant soft tissue",
+   "aliases": [
+    "pstd",
+    "peri-implant recession",
+    "soft tissue dehiscence",
+    "zucchelli"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying a facial soft-tissue dehiscence at an anterior implant.",
+   "url": "https://doi.org/10.1002/JPER.18-0616",
+   "group": "Aesthetics & outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-pisa",
+   "title": "Implant success, survival, and failure: the ICOI Pisa Consensus Conference",
+   "short": "ICOI Pisa implant outcomes",
+   "publisher": "Misch CE et al. (Implant Dent 2008)",
+   "year": 2008,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "implant"
+   ],
+   "topic": "Implant outcome",
+   "aliases": [
+    "implant success",
+    "implant survival",
+    "implant failure",
+    "pisa"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you are reporting implant success, survival or failure categories.",
+   "url": "https://doi.org/10.1097/ID.0b013e3181676059",
+   "group": "Aesthetics & outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-hypodontia-sev",
+   "title": "Hypodontia severity (mild / moderate / severe) and terminology",
+   "short": "Hypodontia severity terms",
+   "publisher": "BSSPD Hypodontia guidance 2026",
+   "year": 2026,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "develop",
+    "prostho"
+   ],
+   "topic": "Hypodontia",
+   "aliases": [
+    "hypodontia severity",
+    "oligodontia",
+    "anodontia",
+    "agenesis",
+    "mild moderate severe hypodontia"
+   ],
+   "jurisdiction": "UK",
+   "useWhen": "you are describing hypodontia severity: mild 1–2, moderate 3–5, severe ≥6 missing teeth (excluding third molars).",
+   "url": "https://www.bsspd.org/File.ashx?id=16509",
+   "related": [
+    "bsspd-hypodontia",
+    "cls-tac"
+   ],
+   "group": "Hypodontia & developmental anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-tac",
+   "title": "A numeric code for identifying patterns of human tooth agenesis: a new approach (Tooth Agenesis Code)",
+   "short": "Tooth Agenesis Code (TAC)",
+   "publisher": "van Wijk AJ, Tan SP (Eur J Oral Sci 2006)",
+   "year": 2006,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "develop"
+   ],
+   "topic": "Agenesis patterns",
+   "aliases": [
+    "tac",
+    "tooth agenesis code",
+    "hypodontia pattern"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are recording a hypodontia pattern as a numeric code.",
+   "url": "https://doi.org/10.1111/j.1600-0722.2006.00340.x",
+   "related": [
+    "cls-hypodontia-sev"
+   ],
+   "group": "Hypodontia & developmental anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-ioftn",
+   "title": "An index of orthognathic functional treatment need (IOFTN)",
+   "short": "IOFTN",
+   "publisher": "Ireland AJ et al. (J Orthod 2014)",
+   "year": 2014,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "ortho",
+    "develop"
+   ],
+   "topic": "Orthognathic need",
+   "aliases": [
+    "ioftn",
+    "orthognathic",
+    "jaw surgery need"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading functional need for orthognathic surgery.",
+   "url": "https://doi.org/10.1179/1465313314Y.0000000100",
+   "related": [
+    "iotn-dhc"
+   ],
+   "group": "Orthodontic & orthognathic need",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-mih",
+   "title": "Judgement criteria for molar incisor hypomineralisation (MIH) in epidemiologic studies (EAPD criteria)",
+   "short": "EAPD MIH criteria",
+   "publisher": "Weerheijm KL et al. (Eur J Paediatr Dent 2003)",
+   "year": 2003,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "paeds",
+    "develop"
+   ],
+   "topic": "MIH",
+   "aliases": [
+    "mih criteria",
+    "molar incisor hypomineralisation",
+    "demarcated opacity",
+    "post-eruptive breakdown"
+   ],
+   "jurisdiction": "EUR",
+   "useWhen": "you are diagnosing MIH by its clinical signs.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/14529329/",
+   "related": [
+    "eapd-mih"
+   ],
+   "group": "Paediatric caries & MIH",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-witkop",
+   "title": "Amelogenesis imperfecta, dentinogenesis imperfecta and dentin dysplasia revisited: problems in classification",
+   "short": "Witkop amelogenesis imperfecta classification",
+   "publisher": "Witkop CJ Jr (J Oral Pathol 1988)",
+   "year": 1988,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "develop"
+   ],
+   "topic": "Amelogenesis imperfecta",
+   "aliases": [
+    "amelogenesis imperfecta",
+    "ai",
+    "witkop",
+    "hypoplastic",
+    "hypomaturation",
+    "hypocalcified"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying an inherited enamel defect.",
+   "url": "https://doi.org/10.1111/j.1600-0714.1988.tb01332.x",
+   "related": [
+    "cls-shields"
+   ],
+   "group": "Hypodontia & developmental anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-shields",
+   "title": "A proposed classification for heritable human dentine defects with a description of a new entity",
+   "short": "Shields dentine disorder classification",
+   "publisher": "Shields ED, Bixler D, el-Kafrawy AM (Arch Oral Biol 1973)",
+   "year": 1973,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "develop"
+   ],
+   "topic": "Dentine defects",
+   "aliases": [
+    "dentinogenesis imperfecta",
+    "dentine dysplasia",
+    "shields type",
+    "di"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are classifying an inherited dentine defect.",
+   "url": "https://doi.org/10.1016/0003-9969(73)90075-7",
+   "related": [
+    "cls-witkop"
+   ],
+   "group": "Hypodontia & developmental anomalies",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-bergland",
+   "title": "Secondary bone grafting and orthodontic treatment in patients with bilateral complete clefts of the lip and palate (Bergland scale)",
+   "short": "Bergland alveolar bone graft scale",
+   "publisher": "Bergland O, Semb G, Abyholm FE (Ann Plast Surg 1986)",
+   "year": 1986,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "develop",
+    "ortho"
+   ],
+   "topic": "Alveolar bone graft",
+   "aliases": [
+    "bergland",
+    "alveolar bone graft",
+    "abg",
+    "cleft"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading radiographic success of a secondary alveolar bone graft.",
+   "url": "https://doi.org/10.1097/00000637-198612000-00005",
+   "related": [
+    "cls-kindelan",
+    "cls-chelsea"
+   ],
+   "group": "Cleft alveolar bone grafts",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-kindelan",
+   "title": "Radiographic assessment of secondary autogenous alveolar bone grafting in cleft lip and palate patients (Kindelan scale)",
+   "short": "Kindelan alveolar bone graft scale",
+   "publisher": "Kindelan JD et al. (Cleft Palate Craniofac J 1997)",
+   "year": 1997,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "develop",
+    "ortho"
+   ],
+   "topic": "Alveolar bone graft",
+   "aliases": [
+    "kindelan",
+    "alveolar bone graft",
+    "abg",
+    "cleft"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading alveolar bone graft fill on radiographs.",
+   "url": "https://doi.org/10.1597/1545-1569_1997_034_0195_raosaa_2.3.co_2",
+   "related": [
+    "cls-bergland",
+    "cls-chelsea"
+   ],
+   "group": "Cleft alveolar bone grafts",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-chelsea",
+   "title": "A new scale to assess radiographic success of secondary alveolar bone grafts (Chelsea scale)",
+   "short": "Chelsea alveolar bone graft scale",
+   "publisher": "Witherow H et al. (Cleft Palate Craniofac J 2002)",
+   "year": 2002,
+   "type": "classification",
+   "measure": "outcome",
+   "specialties": [
+    "develop",
+    "ortho"
+   ],
+   "topic": "Alveolar bone graft",
+   "aliases": [
+    "chelsea scale",
+    "alveolar bone graft",
+    "abg",
+    "cleft"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading alveolar bone graft success with the Chelsea scale.",
+   "url": "https://doi.org/10.1597/1545-1569_2002_039_0255_anstar_2.0.co_2",
+   "related": [
+    "cls-bergland",
+    "cls-kindelan"
+   ],
+   "group": "Cleft alveolar bone grafts",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-brownshaw",
+   "title": "Reconstruction of the maxilla and midface: introducing a new classification",
+   "short": "Brown–Shaw maxillectomy classification",
+   "publisher": "Brown JS, Shaw RJ (Lancet Oncol 2010)",
+   "year": 2010,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "oncology",
+    "prostho"
+   ],
+   "topic": "Maxillectomy defects",
+   "aliases": [
+    "maxillectomy",
+    "brown shaw",
+    "maxillary defect",
+    "obturator",
+    "midface"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing a maxillectomy defect (vertical and horizontal components).",
+   "url": "https://doi.org/10.1016/S1470-2045(10)70113-3",
+   "related": [
+    "cls-aramany",
+    "bsspd-hnc"
+   ],
+   "group": "Defects & obturators",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-brownmand",
+   "title": "A new classification for mandibular defects after oncological resection",
+   "short": "Brown mandibular defect classification",
+   "publisher": "Brown JS et al. (Lancet Oncol 2016)",
+   "year": 2016,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Mandibular defects",
+   "aliases": [
+    "mandibulectomy",
+    "mandibular defect",
+    "brown classification"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are describing a mandibular resection defect.",
+   "url": "https://doi.org/10.1016/S1470-2045(15)00310-1",
+   "group": "Defects & obturators",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-aramany",
+   "title": "Basic principles of obturator design for partially edentulous patients. Part I: Classification",
+   "short": "Aramany obturator classification",
+   "publisher": "Aramany MA (J Prosthet Dent 1978; reprinted 2001)",
+   "year": 1978,
+   "type": "classification",
+   "measure": "descriptive",
+   "specialties": [
+    "oncology",
+    "prostho"
+   ],
+   "topic": "Obturator design",
+   "aliases": [
+    "aramany",
+    "obturator",
+    "maxillectomy",
+    "obturator design"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are designing an obturator for a partially dentate maxillectomy patient (classes I–VI).",
+   "url": "https://doi.org/10.1067/mpr.2001.121618",
+   "links": [
+    {
+     "label": "Part II: design principles",
+     "url": "https://doi.org/10.1067/mpr.2001.121619"
+    }
+   ],
+   "related": [
+    "cls-brownshaw",
+    "cls-ofs"
+   ],
+   "group": "Defects & obturators",
+   "checked": "2026-11-08",
+   "suiteLinks": [
+    {
+     "label": "Design the obturator in Chrome Card",
+     "path": "/chrome-card/"
+    }
+   ]
+  },
+  {
+   "id": "cls-notani",
+   "title": "Management of mandibular osteoradionecrosis corresponding to the severity of osteoradionecrosis and the method of radiotherapy (Notani grades)",
+   "short": "Notani ORN grades",
+   "publisher": "Notani K et al. (Head Neck 2003)",
+   "year": 2003,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Osteoradionecrosis",
+   "aliases": [
+    "orn",
+    "osteoradionecrosis",
+    "notani"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are grading mandibular osteoradionecrosis after radiotherapy.",
+   "url": "https://doi.org/10.1002/hed.10171",
+   "related": [
+    "isoo-orn",
+    "cls-clinrad"
+   ],
+   "group": "Osteoradionecrosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-clinrad",
+   "title": "Development and Standardization of an Osteoradionecrosis Classification System in Head and Neck Cancer (ClinRad)",
+   "short": "ClinRad ORN classification",
+   "publisher": "Watson EE et al. (J Clin Oncol 2024)",
+   "year": 2024,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "oncology"
+   ],
+   "topic": "Osteoradionecrosis",
+   "aliases": [
+    "orn",
+    "osteoradionecrosis",
+    "clinrad"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are staging radiotherapy-related osteoradionecrosis with the ClinRad system.",
+   "url": "https://doi.org/10.1200/JCO.23.01951",
+   "related": [
+    "isoo-orn",
+    "cls-notani"
+   ],
+   "group": "Osteoradionecrosis",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-aaoms",
+   "title": "American Association of Oral and Maxillofacial Surgeons' Position Paper on Medication-Related Osteonecrosis of the Jaws — 2022 Update",
+   "short": "AAOMS MRONJ staging",
+   "publisher": "Ruggiero SL et al. (J Oral Maxillofac Surg 2022)",
+   "year": 2022,
+   "type": "classification",
+   "measure": "severity",
+   "specialties": [
+    "medical",
+    "oralsurg"
+   ],
+   "topic": "MRONJ",
+   "aliases": [
+    "mronj",
+    "mronj staging",
+    "bronj",
+    "stage 0",
+    "exposed bone"
+   ],
+   "jurisdiction": "US",
+   "useWhen": "you are staging medication-related osteonecrosis of the jaw.",
+   "url": "https://doi.org/10.1016/j.joms.2022.02.008",
+   "related": [
+    "sdcep-mronj"
+   ],
+   "group": "MRONJ",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-dctmd",
+   "title": "Diagnostic Criteria for Temporomandibular Disorders (DC/TMD) for Clinical and Research Applications",
+   "short": "DC/TMD Axis I & II",
+   "publisher": "Schiffman E et al. (J Oral Facial Pain Headache 2014)",
+   "year": 2014,
+   "type": "classification",
+   "measure": "diagnosis",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "TMD diagnosis",
+   "aliases": [
+    "dc/tmd",
+    "dctmd",
+    "axis i",
+    "axis ii",
+    "tmd diagnosis",
+    "myalgia",
+    "arthralgia",
+    "disc displacement"
+   ],
+   "jurisdiction": "INTL",
+   "useWhen": "you need standardised TMD diagnoses (Axis I) and psychosocial assessment (Axis II).",
+   "url": "https://doi.org/10.11607/jop.1151",
+   "related": [
+    "rcs-tmd",
+    "cls-3qtmd"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-3qtmd",
+   "title": "Validity of three screening questions (3Q/TMD) in relation to the DC/TMD",
+   "short": "3Q/TMD screener",
+   "publisher": "Lövgren A et al. (J Oral Rehabil 2016)",
+   "year": 2016,
+   "type": "tool",
+   "measure": "screening",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "TMD screening",
+   "aliases": [
+    "3q/tmd",
+    "3q tmd",
+    "tmd screening",
+    "jaw pain screen"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you want to SCREEN for TMD in three questions — it does not diagnose.",
+   "url": "https://doi.org/10.1111/joor.12428",
+   "related": [
+    "rcs-tmd",
+    "cls-dctmd"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-phq4",
+   "title": "An ultra-brief screening scale for anxiety and depression: the PHQ-4",
+   "short": "PHQ-4 psychosocial screen",
+   "publisher": "Kroenke K et al. (Psychosomatics 2009)",
+   "year": 2009,
+   "type": "prom",
+   "measure": "screening",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "Psychosocial screening",
+   "aliases": [
+    "phq-4",
+    "phq4",
+    "anxiety screen",
+    "depression screen",
+    "psychosocial"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are screening psychosocial distress in a TMD patient (screening, not diagnosis).",
+   "url": "https://doi.org/10.1176/appi.psy.50.6.613",
+   "related": [
+    "rcs-tmd"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-cpi",
+   "title": "Grading the severity of chronic pain (Characteristic Pain Intensity)",
+   "short": "Characteristic Pain Intensity (CPI)",
+   "publisher": "Von Korff M et al. (Pain 1992)",
+   "year": 1992,
+   "type": "prom",
+   "measure": "severity",
+   "specialties": [
+    "tmd"
+   ],
+   "topic": "Pain intensity",
+   "aliases": [
+    "cpi",
+    "characteristic pain intensity",
+    "graded chronic pain",
+    "pain score"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are recording baseline and follow-up pain intensity.",
+   "url": "https://doi.org/10.1016/0304-3959(92)90154-4",
+   "related": [
+    "rcs-tmd"
+   ],
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-ohipedent",
+   "title": "A modified short version of the oral health impact profile for assessing health-related quality of life in edentulous adults (OHIP-EDENT)",
+   "short": "OHIP-EDENT",
+   "publisher": "Allen F, Locker D (Int J Prosthodont 2002)",
+   "year": 2002,
+   "type": "prom",
+   "measure": "outcome",
+   "specialties": [
+    "prostho"
+   ],
+   "topic": "Edentulous quality of life",
+   "aliases": [
+    "ohip-edent",
+    "ohip",
+    "oral health impact profile",
+    "denture quality of life",
+    "prom"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are measuring oral-health-related quality of life in edentulous patients.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/12375458/",
+   "group": "Patient-reported outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-lorq",
+   "title": "The further development and validation of the Liverpool Oral Rehabilitation Questionnaire (LORQ) version 3",
+   "short": "LORQv3",
+   "publisher": "Pace-Balzan A et al. (J Prosthet Dent 2008)",
+   "year": 2008,
+   "type": "prom",
+   "measure": "outcome",
+   "specialties": [
+    "prostho",
+    "oncology"
+   ],
+   "topic": "Oral rehabilitation outcomes",
+   "aliases": [
+    "lorq",
+    "lorqv3",
+    "liverpool oral rehabilitation questionnaire",
+    "prom"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are measuring patient-reported outcomes of oral rehabilitation.",
+   "url": "https://doi.org/10.1016/S0022-3913(08)60048-7",
+   "group": "Patient-reported outcomes",
+   "checked": "2026-11-08"
+  },
+  {
+   "id": "cls-ofs",
+   "title": "Quality of life of maxillectomy patients using an obturator prosthesis (Obturator Functioning Scale)",
+   "short": "Obturator Functioning Scale",
+   "publisher": "Kornblith AB et al. (Head Neck 1996)",
+   "year": 1996,
+   "type": "prom",
+   "measure": "outcome",
+   "specialties": [
+    "oncology",
+    "prostho"
+   ],
+   "topic": "Obturator outcomes",
+   "aliases": [
+    "obturator functioning scale",
+    "ofs",
+    "obturator",
+    "maxillectomy quality of life",
+    "prom"
+   ],
+   "jurisdiction": "RES",
+   "useWhen": "you are measuring how well an obturator functions from the patient's view.",
+   "url": "https://pubmed.ncbi.nlm.nih.gov/8780943/",
+   "related": [
+    "cls-aramany"
+   ],
+   "group": "Defects & obturators",
+   "checked": "2026-11-08"
+  }
+ ],
+ "pending": [
+  {
+   "name": "Morriston Hospital (Swansea Bay UHB) restorative acceptance criteria",
+   "reason": "No public acceptance-criteria document found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "BOS tooth autotransplantation advice sheet",
+   "reason": "No BOS advice sheet found; the ESE autotransplantation position statement is in the catalogue instead.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Kennedy classification and Applegate's rules",
+   "reason": "No primary source verified; the BSSPD partial denture design document mentions Kennedy classes only as examples, without defining them.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Denture support classification (tooth-, mucosa-, tooth-and-mucosa-borne)",
+   "reason": "No verified primary or society definition.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "G.V. Black cavity classes",
+   "reason": "Original textbook source; no verified online primary source.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Tooth Restorability Index (McDonald & Setchell, Dent Update 2005)",
+   "reason": "Citation known, but no verified link.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Glickman furcation classification",
+   "reason": "Original textbook source; not verified.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Tooth mobility grading (Miller)",
+   "reason": "Original textbook source; not verified.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Eichner occlusal support index",
+   "reason": "Original 1955 German publication not found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Newton denture stomatitis classes",
+   "reason": "Original 1962 BDJ article not found in PubMed.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Standardised Tool for the Assessment of Bruxism (STAB) — original publication",
+   "reason": "Only translations and adaptations found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Lekholm & Zarb bone quantity/quality",
+   "reason": "Book chapter (1985); no verified online source.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Misch FP/RP prosthesis classification",
+   "reason": "Book source; not verified.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Five-Year-Olds' Index (cleft)",
+   "reason": "Original publication not found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Mixing Ability Test (Speksnijder 2009)",
+   "reason": "Original publication not found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Modified Kapur index",
+   "reason": "Source of the modification not verified.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "MHRA examples of custom-made device statements",
+   "reason": "The GB guidance page links a collection of examples, but no example statements were found.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Cleft / developmental MDT pathway (regional)",
+   "reason": "No specific regional pathway named or verified.",
+   "checked": "2026-11-08"
+  },
+  {
+   "name": "Head & Neck Cancer UK 6th edition — restorative chapter deep link",
+   "reason": "Chapter link not verified (main supplement linked).",
+   "checked": "2026-11-08"
+  }
+ ]
+}

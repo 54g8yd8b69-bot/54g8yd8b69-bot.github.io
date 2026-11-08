@@ -1,0 +1,29 @@
+name: Guide Card link check
+# On the 1st of each month: checks every Guide Card link, writes guide-card/data/link-report.md and
+# turns red (GitHub emails you) if a link has newly broken. Run it any time from the Actions tab.
+on:
+  schedule:
+    - cron: '17 6 1 * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check links
+        id: check
+        run: python3 guide-card/tools/check_links.py || echo "newly_broken=1" >> "$GITHUB_OUTPUT"
+      - name: Show the report on this run's page
+        run: cat guide-card/data/link-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the report and state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add guide-card/data/link-report.md guide-card/data/link-state.json
+          git diff --cached --quiet || { git commit -m "Guide Card link report $(date +%F)"; git pull --rebase -q && git push; }
+      - name: Fail if a link newly broke
+        if: steps.check.outputs.newly_broken == '1'
+        run: echo "A Guide Card link has newly broken. See guide-card/data/link-report.md" && exit 1
