@@ -1418,6 +1418,8 @@ ${queueHtml}
 
   /* =================================================================== boot */
   $("#appVersion").textContent = APP_VERSION;
+  // Builds without the scanner (e.g. the offline single-file suite) hide every scan entry point.
+  if (!window.ImplantRefScan) document.documentElement.classList.add("no-scan");
   restore();
   route();
   // A host site can own offline caching (e.g. the Notile suite's site-wide worker) by setting <html data-sw="off">.

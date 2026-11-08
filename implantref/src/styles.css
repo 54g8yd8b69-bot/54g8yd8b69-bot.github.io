@@ -1552,3 +1552,8 @@ body.scan-open {
 #scanBtn {
   white-space: nowrap;
 }
+
+html.no-scan #scanBtn,
+html.no-scan [data-scan-start] {
+  display: none !important;
+}
