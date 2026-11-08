@@ -1557,3 +1557,14 @@ html.no-scan #scanBtn,
 html.no-scan [data-scan-start] {
   display: none !important;
 }
+
+/* Automated cross-check: teal-outlined, distinct from verified (solid green) and pending (amber). */
+.pill.xc {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.xcheck.ok {
+  margin: 6px 0 2px;
+  line-height: 1.45;
+}

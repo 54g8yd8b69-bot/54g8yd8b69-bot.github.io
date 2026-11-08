@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.4";
+  const APP_VERSION = "3.5";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -492,6 +492,15 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     superseded: ["Superseded", "neutral"],
     contradicted: ["Contradicted", "danger"],
   };
+  /** Automated cross-check label. Never a verification: only a named clinician verifies. */
+  const crossCheckHtml = (c) => {
+    const x = c.crossCheck;
+    if (!x || c.verificationStatus === "verified") return "";
+    if (x.status === "agreed")
+      return `<div class="xcheck ok"><span class="pill xc">Cross-checked against IFU · automated</span> <span class="secondary">An independent re-reading of ${esc(x.independentPage || "the cited page")} found the same instruction (${esc(x.checkedAt)}). <b>Not clinician-verified</b>: confirm against the IFU before use.${x.note ? `<br><b>Note:</b> ${esc(x.note)}` : ""}</span></div>`;
+    return `<div class="warning xcheck"><b>Automated cross-check disagreed.</b> ${esc(x.note || "An independent re-reading of the document did not find this instruction as stated.")} Do not use this value until it is checked against the IFU.</div>`;
+  };
+  const xcRank = (c) => (c.crossCheck?.status === "disagreed" ? 0 : c.crossCheck?.status === "agreed" ? 1 : 2);
   const standingChip = (g) => {
     const [l, t] = standingLabel[g.standing] || [g.standing, "neutral"];
     return `<span class="pill ${t}" title="${esc(g.reasons.join("; "))}">${l}</span>`;
@@ -529,7 +538,8 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     const comp = C.resolveCompatibility(r, ev, null, evOpts());
     const ctxComp = C.resolveCompatibility(r, ev, { implantSystem: r.implantSystem, platform: r.platform }, evOpts());
     const torque = C.resolveTorque(r, ev, evOpts());
-    const awaiting = torque.notEffective.filter((g) => g.standing === "unverified" && g.claim.verificationStatus === "pending");
+    const awaiting = torque.notEffective.filter((g) => g.standing === "unverified" && g.claim.verificationStatus === "pending").sort((a, b) => xcRank(a.claim) - xcRank(b.claim));
+    const xcAgreed = awaiting.length > 0 && awaiting.every((g) => g.claim.crossCheck?.status === "agreed") && !awaiting.some((g) => g.claim.conflictGroup);
     const otherPending = torque.notEffective.filter((g) => !awaiting.includes(g));
     const disagree = C.pendingDisagreements(torque);
     const contexts = sameRefContexts(r);
@@ -557,7 +567,7 @@ ${
     : `<div class="empty small"><b>Not established.</b> No product-specific manufacturer source is linked to REF ${esc(r.articleNumber)}. The catalogue platform label is not evidence of compatibility.</div>`
 }
 </div>
-<div class="section evidence-block"><div class="panel-head"><h3>Torque documentation</h3>${torque.verified.length ? '<span class="pill ok">Verified value recorded</span>' : awaiting.length ? '<span class="pill flag">Sourced · awaiting review</span>' : '<span class="pill neutral">No verified value</span>'}</div>
+<div class="section evidence-block"><div class="panel-head"><h3>Torque documentation</h3>${torque.verified.length ? '<span class="pill ok">Verified value recorded</span>' : awaiting.length ? (xcAgreed ? '<span class="pill xc">Cross-checked · awaiting clinician review</span>' : '<span class="pill flag">Sourced · awaiting review</span>') : '<span class="pill neutral">No verified value</span>'}</div>
 ${
   torque.verified.length
     ? `<div class="torque-list">${torque.verified
@@ -569,8 +579,8 @@ ${
 }
 ${
   awaiting.length
-    ? `<div class="awaiting">${disagree.length ? `<div class="warning"><b>Sources disagree</b> for: ${disagree.map(esc).join("; ")}. Check the IFU for this exact REF; verify only the instruction that matches it and mark the other “Doesn't match IFU”.</div>` : ""}<div class="awaiting-head"><b>Sourced from the manufacturer IFU — awaiting your review</b><span class="secondary">Not yet confirmed by a clinician. Open the cited page and check it before relying on this value.</span></div>${awaiting
-        .map((g) => `<div class="claim torque pending-val"><div class="claim-head"><div><div class="torque-val">${torqueHtml(g.claim)}</div><b>${esc(g.claim.application)}</b>${g.claim.instrument ? `<div class="secondary">Instrument: ${esc(g.claim.instrument)}</div>` : ""}</div>${standingChip(g)}</div>${claimSourceHtml(g)}${bindingNote(g.claim)}${g.claim.conflictGroup ? '<div class="secondary"><b>Part of a declared conflict:</b> the same source gives a different instruction elsewhere.</div>' : ""}${g.claim.origin === "local" ? '<div class="secondary">Your own entry.</div>' : ""}${claimActions(g)}</div>`)
+    ? `<div class="awaiting">${disagree.length ? `<div class="warning"><b>Sources disagree</b> for: ${disagree.map(esc).join("; ")}. Check the IFU for this exact REF; verify only the instruction that matches it and mark the other “Doesn't match IFU”.</div>` : ""}<div class="awaiting-head"><b>Sourced from the manufacturer IFU — awaiting clinician review</b><span class="secondary">Not yet confirmed by a clinician. Values marked “cross-checked” were found again by an independent automated re-reading of the document; it catches extraction errors but is not a clinical check. Open the cited page before relying on any value here.</span></div>${awaiting
+        .map((g) => `<div class="claim torque pending-val"><div class="claim-head"><div><div class="torque-val">${torqueHtml(g.claim)}</div><b>${esc(g.claim.application)}</b>${g.claim.instrument ? `<div class="secondary">Instrument: ${esc(g.claim.instrument)}</div>` : ""}</div>${standingChip(g)}</div>${crossCheckHtml(g.claim)}${claimSourceHtml(g)}${bindingNote(g.claim)}${g.claim.conflictGroup ? '<div class="secondary"><b>Part of a declared conflict:</b> the same source gives a different instruction elsewhere.</div>' : ""}${g.claim.origin === "local" ? '<div class="secondary">Your own entry.</div>' : ""}${claimActions(g)}</div>`)
         .join("")}</div>`
     : ""
 }
@@ -1142,13 +1152,14 @@ ${missing ? `<div class="warning">${missing} item(s) are not in the current cata
     const list = fullList.slice(0, LIST_CAP);
     const groups = {};
     for (const g of graded.filter(inQueue)) (groups[g.claim.curationRuleId] ??= []).push(g);
-    const groupList = Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+    const groupList = Object.entries(groups).sort((a, b) => xcRank(a[1][0].claim) - xcRank(b[1][0].claim) || a[0].localeCompare(b[0]));
+    const xcCount = (st) => groupList.filter(([, gs]) => gs[0].claim.crossCheck?.status === st).length;
     const queueHtml = groupList.length
-      ? `<div class="panel"><div class="panel-head"><h2>Review queue — ${graded.filter(inQueue).length} shipped claims in ${groupList.length} source statements</h2></div><p class="sub">Each row is one statement from one IFU page, bound to the REFs listed. Open the document, check the page, then verify the whole group or flag it.</p>${groupList
+      ? `<div class="panel"><div class="panel-head"><h2>Review queue — ${graded.filter(inQueue).length} shipped claims in ${groupList.length} source statements</h2></div><p class="sub">Each row is one statement from one IFU page, bound to the REFs listed. Open the document, check the page, then verify the whole group or flag it.${xcCount("agreed") + xcCount("disagreed") ? ` Automated cross-check: <b>${xcCount("agreed")}</b> statements agreed${xcCount("disagreed") ? `, <b>${xcCount("disagreed")}</b> disagreed (listed first: check these)` : ""}.` : ""}</p>${groupList
           .map(([rid, gs]) => {
             const c = gs[0].claim;
             const s0 = gs[0].source;
-            return `<div class="claim queue-row"><div class="claim-head"><div><div class="torque-val small-val">${torqueHtml(c)}</div><b>${esc(c.application)}</b><div class="secondary">${esc(s0.documentTitle)} · ${esc(s0.revisionOrDate)} · ${esc(c.pageOrSection)}</div><details><summary>${gs.length} REF${gs.length > 1 ? "s" : ""}</summary><div class="ref-chips">${gs.map((g) => { const r = recFor(g.claim); return r ? `<button class="chip" data-record="${r.recordId}">${esc(g.claim.subject.articleNumber)}</button>` : esc(g.claim.subject.articleNumber); }).join(" ")}</div></details></div><span class="btn-row"><span class="pill flag">${gs.length} pending</span>${c.conflictGroup ? '<span class="pill danger">Conflicting source</span>' : ""}${c.refPrintedInDocument !== undefined ? `<span class="pill neutral">${gs.filter((g) => g.claim.refPrintedInDocument).length}/${gs.length} REFs printed</span>` : ""}</span></div><div class="claim-actions"><a class="btn small" href="${esc(s0.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open IFU ↗</a><button class="btn small primary" data-group-verify="${esc(rid)}">Verify group…</button><button class="btn small" data-group-flag="${esc(rid)}">Doesn't match IFU</button></div></div>`;
+            return `<div class="claim queue-row"><div class="claim-head"><div><div class="torque-val small-val">${torqueHtml(c)}</div><b>${esc(c.application)}</b><div class="secondary">${esc(s0.documentTitle)} · ${esc(s0.revisionOrDate)} · ${esc(c.pageOrSection)}</div><details><summary>${gs.length} REF${gs.length > 1 ? "s" : ""}</summary><div class="ref-chips">${gs.map((g) => { const r = recFor(g.claim); return r ? `<button class="chip" data-record="${r.recordId}">${esc(g.claim.subject.articleNumber)}</button>` : esc(g.claim.subject.articleNumber); }).join(" ")}</div></details></div><span class="btn-row"><span class="pill flag">${gs.length} pending</span>${c.crossCheck?.status === "agreed" ? '<span class="pill xc">Cross-checked</span>' : c.crossCheck?.status === "disagreed" ? '<span class="pill danger">Cross-check disagreed</span>' : ""}${c.conflictGroup ? '<span class="pill danger">Conflicting source</span>' : ""}${c.refPrintedInDocument !== undefined ? `<span class="pill neutral">${gs.filter((g) => g.claim.refPrintedInDocument).length}/${gs.length} REFs printed</span>` : ""}</span></div><div class="claim-actions"><a class="btn small" href="${esc(s0.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open IFU ↗</a><button class="btn small primary" data-group-verify="${esc(rid)}">Verify group…</button><button class="btn small" data-group-flag="${esc(rid)}">Doesn't match IFU</button></div></div>`;
           })
           .join("")}</div>`
       : "";
