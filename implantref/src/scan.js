@@ -14,7 +14,8 @@
   const TESS_DIR = BASE + "src/vendor/tesseract/";
   const LANG_DIR = BASE + "data/ocr";
   let refIndex = null;
-  const index = () => refIndex || (refIndex = C.buildRefIndex(window.IMPLANTREF_DATA.records));
+  // Workbook REFs plus the FDA-listing supplement (parts not in the workbook), so a label lands on whichever exists.
+  const index = () => refIndex || (refIndex = C.buildRefIndex(window.IMPLANTREF_DATA.records.concat((window.IMPLANTREF_SUPPLEMENT || {}).items || [])));
 
   const loaded = {};
   function loadScript(src) {

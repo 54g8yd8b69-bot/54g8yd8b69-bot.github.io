@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.7.2";
+  const APP_VERSION = "3.8.0";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -33,6 +33,26 @@
       C.normalize([r.articleNumber, r.component, r.manufacturer, r.implantSystem, r.platform, r.productFamily, r.material, r.cataloguePages, JSON.stringify(r.dimensions)].join(" ")),
     ]),
   );
+  /* FDA-listing supplement: manufacturer-registered REFs that are not in the workbook. Identity only, kept apart from
+     `records` so the 3,961 workbook rows, filters, evidence and the implant finder are unaffected. */
+  const SUP = window.IMPLANTREF_SUPPLEMENT || { items: [], count: 0 };
+  const supItems = SUP.items || [];
+  const supById = new Map(supItems.map((x) => [x.recordId, x]));
+  const supText = new Map(supItems.map((x) => [x.recordId, C.normalize([x.articleNumber, x.description, (x.otherDescriptions || []).join(" "), x.brand, x.category, (x.gmdn || []).join(" "), x.manufacturer].join(" "))]));
+  const supByRef = (man, ref) => supItems.find((x) => (!man || x.manufacturer === man) && C.normalizeRef(x.articleNumber) === C.normalizeRef(ref));
+  function supMatches() {
+    const q = String(ui.query || "").trim();
+    if (q.length < 3 || ui.system || ui.platform || ui.family || ui.material || ui.ctype || ui.evidenceFilter) return [];
+    const nq = C.normalize(q), rq = C.normalizeRef(q);
+    const out = supItems.filter((x) => (!ui.manufacturer || x.manufacturer === ui.manufacturer) && (C.normalizeRef(x.articleNumber) === rq || supText.get(x.recordId).includes(nq)));
+    return out.sort((a, b) => (C.normalizeRef(b.articleNumber) === rq) - (C.normalizeRef(a.articleNumber) === rq) || a.articleNumber.localeCompare(b.articleNumber));
+  }
+  const supDistribution = (x) => (x.inCommercialDistribution ? "" : `<span class="pill neutral">Not in US commercial distribution${x.distributionEnd ? " since " + esc(x.distributionEnd) : ""}</span>`);
+  function supRowsHtml(list) {
+    return `<div class="cards sup-cards">${list
+      .map((x) => `<div class="rcard data-row sup-row" tabindex="0" data-record="${esc(x.recordId)}"><div class="rcard-top"><span class="ref">${esc(x.articleNumber)}</span><span class="pill xc">FDA listing · not in workbook</span></div><b>${esc(x.description)}</b><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}${x.brand ? " · " + esc(x.brand) : ""}</div>${supDistribution(x)}</div>`)
+      .join("")}</div>`;
+  }
   const firstByRef = new Map();
   for (const r of records) {
     const k = r.manufacturer + "|" + C.normalizeRef(r.articleNumber);
@@ -202,6 +222,7 @@
       window.scrollTo(0, 0);
     }
     if (recordId && findRecord(recordId)) openSheet(recordId);
+    else if (recordId && supById.has(recordId)) openSupSheet(recordId);
     else closeSheet(false);
   }
   const setView = (v) => navigate(v);
@@ -279,7 +300,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
     box.innerHTML = `<div class="modal-inner"><h2>Which REF is on the label?</h2><p class="sub">The ${esc(viaLabel[res.via] || res.via)} matched more than one catalogue REF.</p>${cands
-      .map((c, i) => `<button class="option mt" data-pick="${i}"><b class="ref">${esc(c.articleNumber)}</b><span class="secondary">${esc(c.manufacturer)} · ${esc((records.find((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber)) || {}).component || "")}</span></button>`)
+      .map((c, i) => `<button class="option mt" data-pick="${i}"><b class="ref">${esc(c.articleNumber)}</b><span class="secondary">${esc(c.manufacturer)} · ${esc((records.find((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber)) || {}).component || (supByRef(c.manufacturer, c.articleNumber) || {}).description || "")}</span></button>`)
       .join("")}<div class="detail-actions"><button class="btn" data-pick="cancel">Cancel</button></div></div>`;
     document.body.appendChild(box);
     box.addEventListener("click", (e) => {
@@ -293,6 +314,12 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     const info = res.info || {};
     ui.scanInfo = { ref: c.articleNumber, manufacturer: c.manufacturer, via: c.via || res.via, lot: info.lot || null, expiry: info.expiry || null, gtin: info.gtin || null };
     const rows = records.filter((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber));
+    const supHit = !rows.length && supByRef(c.manufacturer, c.articleNumber);
+    if (supHit) {
+      Object.assign(ui, { query: c.articleNumber, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+      toast(`REF ${c.articleNumber} — not in your workbook; FDA listing found`);
+      return navigate("catalogue", supHit.recordId);
+    }
     if (mode === "wizard") {
       const implants = rows.filter((r) => typesOf.get(r.recordId)[0] === "implant");
       if (implants.length === 1) {
@@ -373,7 +400,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
 <div class="filters collapsed" id="filters">${selectField("Manufacturer", "manufacturer", unique("manufacturer"), ui.manufacturer)}${selectField("Implant system", "system", unique("implantSystem", ui.manufacturer ? records.filter((r) => r.manufacturer === ui.manufacturer) : records), ui.system)}${selectField("Platform", "platform", unique("platform", scope), ui.platform)}${selectField("Product family", "family", unique("productFamily", scope), ui.family)}${selectField("Material", "material", unique("material", scope), ui.material)}<div class="field"><label for="evidenceFilter">Evidence</label><select id="evidenceFilter"><option value="">Any (incl. not established)</option><option value="any">Has any evidence record</option><option value="manufacturer-confirmed">Compatibility: manufacturer-confirmed</option><option value="contraindicated">Compatibility: contraindicated</option><option value="pending">Compatibility: pending verification</option><option value="torque">Verified torque recorded</option><option value="torque-any">Torque sourced (verified or awaiting review)</option></select></div></div>
 <div id="scanBanner">${scanBannerHtml()}</div><div id="exactBanner"></div>
 <div class="filter-actions"><span class="result-count" id="resultCount" aria-live="polite"></span><label class="secondary">Sort <select id="sort" class="inline-select"><option value="article">Article number</option><option value="name">Component name</option><option value="manufacturer">Manufacturer/system</option><option value="family">Product family</option></select></label><label class="secondary desktop-inline">Rows <select id="pageSize" class="inline-select"><option>25</option><option>50</option><option>100</option><option>200</option></select></label></div>
-<div id="tableBox"></div><div id="pagination" class="pagination"></div>
+<div id="tableBox"></div><div id="pagination" class="pagination"></div><div id="supBox"></div>
 <div class="footnote">Records are imported from your workbook and not independently IFU-verified. Component-type chips are a browsing aid derived from the family label, not a clinical classification.</div>`;
     $("#evidenceFilter").value = ui.evidenceFilter;
     let debounce;
@@ -439,6 +466,12 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
           new Set(exact.map((r) => r.manufacturer)).size > 1 ? " across manufacturers" : ""
         } — listed first. ${exact.length > 1 ? "Confirm the exact system and platform; repeated contexts are not proof of interchangeability." : ""}</div>`
       : "";
+    const sup = supMatches();
+    if (!exact.length && sup.length && C.normalizeRef(sup[0].articleNumber) === C.normalizeRef(ui.query))
+      $("#exactBanner").innerHTML = `<div class="notice exact"><b>REF ${esc(sup[0].articleNumber)} isn't in your workbook catalogue.</b> It is in ${esc(sup[0].manufacturer)}'s FDA device listing — shown below (identity only: no torque or compatibility evidence).</div>`;
+    $("#supBox").innerHTML = sup.length
+      ? `<div class="section sup-section"><h3>Not in your workbook — ${esc(fmtN(sup.length))} FDA-listed part${sup.length === 1 ? "" : "s"}</h3><div class="sub">From the manufacturers' own FDA (GUDID) device records. Identity only: no catalogue context, torque or compatibility evidence.</div>${supRowsHtml(sup.slice(0, 30))}${sup.length > 30 ? `<div class="secondary">${fmtN(sup.length - 30)} more — refine the search.</div>` : ""}</div>`
+      : "";
     $("#resultCount").textContent = `${fmtN(arr.length)} matching · showing ${arr.length ? start + 1 : 0}–${Math.min(start + ui.pageSize, arr.length)}`;
     $("#tableBox").innerHTML = recordTable(view);
     $("#pagination").innerHTML = `<span class="secondary">Page ${ui.page} of ${pages}</span><div class="page-buttons"><button class="btn small" id="prev" ${ui.page <= 1 ? "disabled" : ""}>← Previous</button><button class="btn small" id="next" ${ui.page >= pages ? "disabled" : ""}>Next →</button></div>`;
@@ -474,6 +507,28 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     (mode === "record" ? $("#sheetClose") : $("#efType"))?.focus({ preventScroll: true });
     if (mode === "record") bindRecordSheet(r);
     else bindEvidenceForm(r);
+  }
+  function openSupSheet(id) {
+    const x = supById.get(id);
+    if (!x) return;
+    if ($("#sheet").classList.contains("hidden")) lastFocus = document.activeElement;
+    ui.selected = id;
+    ui.sheetMode = "supplement";
+    const portal = C.ifuPortalUrl(x.manufacturer, x.articleNumber);
+    const scanned = ui.scanInfo && C.normalizeRef(ui.scanInfo.ref) === C.normalizeRef(x.articleNumber) && ui.scanInfo.manufacturer === x.manufacturer;
+    $("#sheetBody").innerHTML = `<div class="sheet-head"><div><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}</div><h2 id="sheetTitle">${esc(x.description)}</h2><div class="ref big">REF ${esc(x.articleNumber)}</div><div class="chip-row"><span class="pill xc">FDA listing · not in your workbook</span>${supDistribution(x)}</div></div><button class="icon-btn" id="sheetClose" aria-label="Close">✕</button></div>
+<div class="warning">This part is <b>not in your workbook catalogue</b>. What is shown is ${esc(x.manufacturer)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID): an identity record only. ImplantRef has <b>no catalogue context, torque or compatibility evidence</b> for it — use the manufacturer's IFU.</div>
+${scanned ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}. Check the REF matches the label.</div>` : ""}
+<div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(x.manufacturer)}</b></div><div class="kv"><small>FDA DEVICE DESCRIPTION</small><b>${esc(x.description)}</b></div>${x.brand ? `<div class="kv"><small>BRAND NAME (FDA)</small><b>${esc(x.brand)}</b></div>` : ""}<div class="kv"><small>CATEGORY (FROM GMDN)</small><b>${esc(x.category)}</b></div>${(x.gmdn || []).length ? `<div class="kv"><small>GMDN TERM</small><b>${esc(x.gmdn.join("; "))}</b></div>` : ""}<div class="kv"><small>US DISTRIBUTION</small><b>${x.inCommercialDistribution ? "In commercial distribution" : "Not in commercial distribution" + (x.distributionEnd ? " (since " + esc(x.distributionEnd) + ")" : "")}</b></div></div>
+${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA records for this REF</b><br>${x.otherDescriptions.map(esc).join("<br>")}</div>` : ""}
+<div class="detail-actions">${portal ? `<a class="btn primary" href="${esc(portal)}" target="_blank" rel="noopener">Find IFU on the ${esc(x.manufacturer)} eIFU portal</a>` : ""}<button class="btn" data-copy="${esc(x.articleNumber)}">Copy REF</button></div>
+<div class="footnote">Source: ${esc(SUP.source || "FDA GUDID")} · snapshot ${esc(SUP.builtAt || "")}. GUDID lists devices registered for US distribution; it does not establish UK availability, compatibility or torque.</div>`;
+    $("#sheet").classList.remove("hidden");
+    $("#sheetBackdrop").classList.remove("hidden");
+    document.body.classList.add("sheet-open");
+    $("#sheetBody").scrollTop = 0;
+    $("#sheetClose").addEventListener("click", () => closeSheet());
+    $("#sheetClose").focus({ preventScroll: true });
   }
   function closeSheet(updateHash = true) {
     if ($("#sheet").classList.contains("hidden")) return;

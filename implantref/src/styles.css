@@ -1585,3 +1585,8 @@ html.no-scan [data-scan-start] {
   font-size: 17px;
 }
 .scan-tap.hidden { display: none; }
+
+/* FDA-listing supplement (parts not in the workbook) */
+.sup-section { margin-top: 18px; border-top: 1px dashed var(--line, #ccd); padding-top: 12px; }
+.sup-section h3 { margin: 0 0 4px; }
+.sup-row { border-style: dashed; cursor: pointer; }
