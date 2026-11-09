@@ -470,6 +470,12 @@
       const afterRef = /^REF/.test(m[0]);
       const raw = m[1].trim();
       const pieces = new Set([raw, ...raw.split(/\s{2,}| (?=[A-Z]{2,})/)]);
+      // OCR often glues a garbled "REF" box to the number ("EF 021.5508", "AEF] 021. 5508"): also try each digit run alone.
+      // Only runs that are real catalogue REFs can ever match, so this cannot invent a REF.
+      for (const d of raw.matchAll(/\d[\d.\- ]{2,12}[\dA-Z]/g)) pieces.add(d[0].trim());
+      // ...and every run of 1–3 neighbouring groups, so stray marks don't hide the REF ("27 021 5508" → "021 5508").
+      const groups = raw.split(/\s+/).filter(Boolean);
+      for (let i = 0; i < groups.length; i++) for (let j = i + 1; j <= Math.min(groups.length, i + 3); j++) pieces.add(groups.slice(i, j).join(" "));
       for (const p of pieces) {
         const plain = normalizeRef(p);
         if (plain.length < 4) continue;

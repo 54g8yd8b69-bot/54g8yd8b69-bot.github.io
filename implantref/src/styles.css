@@ -1569,3 +1569,19 @@ html.no-scan [data-scan-start] {
   line-height: 1.45;
 }
 .compat-val { font-size: 1.02rem; margin-bottom: 2px; }
+.scan-tap {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  padding: 16px 26px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(106, 208, 197, 0.95);
+  color: #04201d;
+  font: inherit;
+  font-weight: 750;
+  font-size: 17px;
+}
+.scan-tap.hidden { display: none; }

@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.7";
+  const APP_VERSION = "3.7.1";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";

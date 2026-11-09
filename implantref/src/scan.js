@@ -200,12 +200,26 @@
   function open(opts = {}) {
     if (state) close();
     const box = el(`<div class="scan-overlay" role="dialog" aria-modal="true" aria-label="Scan a product label">
-<div class="scan-stage"><video class="scan-video" playsinline muted autoplay></video><div class="scan-frame" aria-hidden="true"></div>
+<div class="scan-stage"><div class="scan-video-slot"></div><div class="scan-frame" aria-hidden="true"></div>
+<button class="scan-tap hidden" data-scan="tap">Tap to show camera</button>
 <div class="scan-top"><button class="scan-btn" data-scan="close" aria-label="Close scanner">✕</button><span class="scan-title">Scan label</span><button class="scan-btn hidden" data-scan="torch" aria-label="Torch" aria-pressed="false">☀︎</button></div>
 <div class="scan-bottom"><div class="scan-status" aria-live="polite">Starting camera…</div>
 <div class="scan-actions"><button class="scan-btn wide" data-scan="ocr">Read REF now</button><label class="scan-btn wide">Use a photo<input type="file" accept="image/*" capture="environment" class="hidden" data-scan="photo"></label></div>
 <div class="scan-hint">Point at the barcode or the printed <b>REF</b>. Nothing is uploaded or stored.</div></div></div></div>`);
     document.body.appendChild(box);
+    // iOS Safari: a <video> parsed inside a <template> can lose muted/playsinline when adopted into the page, and then
+    // refuses to play (black preview while the camera light is on). Create it here and set the properties directly.
+    const video = document.createElement("video");
+    video.className = "scan-video";
+    video.muted = true;
+    video.defaultMuted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute("muted", "");
+    video.setAttribute("autoplay", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    box.querySelector(".scan-video-slot").replaceWith(video);
     document.body.classList.add("scan-open");
     state = { box, opts, stream: null, timer: null, busy: false, ocrBusy: false, started: Date.now(), lastOcr: 0, ocrVotes: {}, gs1Info: null, done: false };
     const status = (t) => {
@@ -220,6 +234,7 @@
       if (a === "close") cancel();
       else if (a === "torch") toggleTorch(b);
       else if (a === "ocr") runOcrNow();
+      else if (a === "tap") tapToPlay();
     });
     box.querySelector('[data-scan="photo"]').addEventListener("change", (e) => {
       const f = e.target.files && e.target.files[0];
@@ -249,19 +264,51 @@
       if (!state) return stream.getTracks().forEach((t) => t.stop());
       state.stream = stream;
       v.srcObject = stream;
-      await v.play().catch(() => {});
+      await playVideo(v);
       if (!state) return;
       const track = stream.getVideoTracks()[0];
       const caps = track.getCapabilities ? track.getCapabilities() : {};
       if (caps.torch) state.box.querySelector('[data-scan="torch"]').classList.remove("hidden");
       if (caps.focusMode && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
-      state.status("Looking for a barcode…");
+      if (videoLive(v)) state.status("Looking for a barcode…");
       loop();
     } catch (e) {
       if (!state) return;
       state.status(e && e.name === "NotAllowedError" ? "Camera permission was declined. Allow camera access in Settings, or use a photo." : "Camera could not start — use a photo of the label instead.");
       state.box.classList.add("photo-only");
     }
+  }
+
+  /** True once the camera picture is actually being drawn (not just a granted stream). */
+  function videoLive(v) {
+    return v && !v.paused && v.readyState >= 2 && v.videoWidth > 0;
+  }
+
+  /** Start playback; if the browser blocks it (seen on iOS), offer a tap — a user gesture always allows play(). */
+  async function playVideo(v) {
+    try {
+      await v.play();
+    } catch (_) {
+      /* handled by the watchdog below */
+    }
+    const deadline = Date.now() + 2500;
+    while (state && !videoLive(v) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 150));
+    if (!state || videoLive(v)) return;
+    state.box.querySelector('[data-scan="tap"]').classList.remove("hidden");
+    state.status("Tap the button to show the camera.");
+  }
+
+  function tapToPlay() {
+    if (!state) return;
+    const v = state.box.querySelector("video");
+    v.muted = true;
+    v.play().then(() => {
+      if (!state) return;
+      state.box.querySelector('[data-scan="tap"]').classList.add("hidden");
+      state.status("Looking for a barcode…");
+    }).catch(() => {
+      if (state) state.status("The camera picture could not be shown here — use a photo of the label instead.");
+    });
   }
 
   /**
@@ -271,7 +318,7 @@
   function frameCanvas(full) {
     const v = state.box.querySelector("video");
     const vw = v.videoWidth, vh = v.videoHeight;
-    if (!vw || !vh) return null;
+    if (!vw || !vh || v.paused || v.readyState < 2) return null; // never read frames from a stalled (black) preview
     const vr = v.getBoundingClientRect();
     const scale = Math.max(vr.width / vw, vr.height / vh);
     const ox = vr.left + (vr.width - vw * scale) / 2, oy = vr.top + (vr.height - vh * scale) / 2;
