@@ -491,6 +491,23 @@
   }
 
   /**
+   * REF-shaped tokens read from a label, used only when nothing matched the catalogue, so the scanner can say
+   * "REF X read — not in the catalogue" instead of silently failing. Never treated as catalogue data.
+   * Straumann: 0xx.xxx(x) with an optional letter suffix. Nobel: 5–6 digits, accepted only right after "REF".
+   */
+  function labelRefsFromText(text) {
+    const src = String(text || "").toUpperCase();
+    const out = new Map();
+    for (const m of src.matchAll(/(REF\W{0,4})?\b(0\d{2})\s?[.,·:]\s?(\d{3,4})([A-Z])?(?![\d.])/g)) {
+      const ref = `${m[2]}.${m[3]}${m[4] || ""}`;
+      const score = m[1] ? 3 : 1;
+      if (!out.has(ref) || out.get(ref).score < score) out.set(ref, { ref, manufacturer: "Straumann", score });
+    }
+    for (const m of src.matchAll(/REF\W{0,4}(\d{5,6})\b/g)) out.set(m[1], { ref: m[1], manufacturer: "Nobel Biocare", score: 2 });
+    return [...out.values()].sort((a, b) => b.score - a.score);
+  }
+
+  /**
    * Resolve a decoded barcode payload to candidate REFs.
    * gtinMap: { [gtin14]: [manufacturerInitial, ref] } (see data/gtin-data.js).
    */
@@ -652,6 +669,7 @@
     parseHIBC,
     buildRefIndex,
     refsFromText,
+    labelRefsFromText,
     resolveBarcode,
     emptyUserState,
     migrateUserState,

@@ -155,7 +155,7 @@
   }
 
   /** Grey, contrast-stretched, upscaled copy of a canvas region for OCR. */
-  function prepForOcr(src) {
+  function prepForOcr(src, evenLighting = true) {
     const scale = Math.min(2.5, Math.max(1, 1400 / src.width));
     const c = document.createElement("canvas");
     c.width = Math.round(src.width * scale);
@@ -165,10 +165,28 @@
     ctx.drawImage(src, 0, 0, c.width, c.height);
     const img = ctx.getImageData(0, 0, c.width, c.height);
     const d = img.data;
+    // Even out uneven lighting (shadows across a record sheet): estimate the background from a heavily blurred copy
+    // (draw tiny, scale back up) and divide it out, so a shadowed sticker reads like a lit one.
+    const bw = Math.max(4, Math.round(c.width / 28)), bh = Math.max(4, Math.round(c.height / 28));
+    const small = document.createElement("canvas");
+    small.width = bw;
+    small.height = bh;
+    const sctx = small.getContext("2d", { willReadFrequently: true });
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(c, 0, 0, bw, bh);
+    const bgc = document.createElement("canvas");
+    bgc.width = c.width;
+    bgc.height = c.height;
+    const bctx = bgc.getContext("2d", { willReadFrequently: true });
+    bctx.imageSmoothingQuality = "high";
+    bctx.drawImage(small, 0, 0, c.width, c.height);
+    const bg = bctx.getImageData(0, 0, c.width, c.height).data;
     let lo = 255, hi = 0;
     const lum = new Uint8ClampedArray(d.length / 4);
     for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-      const v = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+      const v0 = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+      const b = Math.max(24, (bg[i] * 77 + bg[i + 1] * 150 + bg[i + 2] * 29) >> 8);
+      const v = evenLighting ? Math.min(255, (v0 * 235) / b) : v0;
       lum[j] = v;
       if (v < lo) lo = v;
       if (v > hi) hi = v;
@@ -182,10 +200,32 @@
     return c;
   }
 
+  /** Overlapping sections of a photo (2 columns × 3 rows, ~35% overlap) for a closer OCR pass. */
+  function photoSections(src) {
+    const out = [];
+    const cols = src.width > src.height ? 3 : 2, rows = src.width > src.height ? 2 : 3;
+    const tw = Math.round((src.width / cols) * 1.35), th = Math.round((src.height / rows) * 1.35);
+    for (let r = 0; r < rows; r++)
+      for (let k = 0; k < cols; k++) {
+        const x = Math.min(src.width - tw, Math.max(0, Math.round((k * src.width) / cols - (tw - src.width / cols) / 2)));
+        const y = Math.min(src.height - th, Math.max(0, Math.round((r * src.height) / rows - (th - src.height / rows) / 2)));
+        const t = document.createElement("canvas");
+        t.width = tw;
+        t.height = th;
+        t.getContext("2d", { willReadFrequently: true }).drawImage(src, x, y, tw, th, 0, 0, tw, th);
+        out.push(t);
+      }
+    return out;
+  }
+
   async function readText(canvas, onProgress) {
     const w = await ensureOcr(onProgress);
-    const { data } = await w.recognize(prepForOcr(canvas));
-    return data && data.text ? data.text : "";
+    // First with lighting evened out (shadows); if that yields no REF at all, again with plain contrast (a sticker
+    // filling the frame can darken the background estimate). Both readings are returned.
+    const first = (await w.recognize(prepForOcr(canvas, true))).data?.text || "";
+    if (C.refsFromText(first, index()).length || C.labelRefsFromText(first).length) return first;
+    const second = (await w.recognize(prepForOcr(canvas, false))).data?.text || "";
+    return first + "\n" + second;
   }
 
   /* ----------------------------------------------------------------- UI */
@@ -400,7 +440,7 @@
   function handleOcr(text, decisive) {
     if (!state || state.done) return;
     const cands = C.refsFromText(text, index());
-    if (!cands.length) return;
+    if (!cands.length) return handleUnknownRef(text, decisive);
     const top = cands[0];
     const key = top.manufacturer + "|" + top.articleNumber;
     state.ocrVotes[key] = (state.ocrVotes[key] || 0) + 1;
@@ -408,6 +448,17 @@
     if (decisive || top.score >= 13 || state.ocrVotes[key] >= 2) {
       finish({ candidates: cands.slice(0, 5), info: state.gs1Info || {}, via: "ocr", text });
     } else state.status(`Reading… ${top.articleNumber}?`);
+  }
+
+  /** A REF-shaped token that is not in the catalogue: report it (after two matching live reads) instead of failing silently. */
+  function handleUnknownRef(text, decisive) {
+    const unk = C.labelRefsFromText(text);
+    if (!unk.length) return false;
+    const key = "unknown|" + unk[0].ref;
+    state.ocrVotes[key] = (state.ocrVotes[key] || 0) + 1;
+    if (decisive || state.ocrVotes[key] >= 2) finish({ candidates: [], unknownRef: unk[0], info: state.gs1Info || {}, via: "ocr", text });
+    else state.status(`Reading… ${unk[0].ref}?`);
+    return true;
   }
 
   async function runOcrNow() {
@@ -423,7 +474,7 @@
       if (!state) return;
       state.ocrBusy = false;
       const cands = C.refsFromText(text, index());
-      if (cands.length) return handleOcr(text, true);
+      if (cands.length || C.labelRefsFromText(text).length) return handleOcr(text, true);
       state.status("No catalogue REF found in that view. Fill the frame with the REF line and try again.");
     } catch (e) {
       state && state.status("Text reader unavailable (" + e.message + ").");
@@ -464,6 +515,20 @@
       if (!state) return;
       const cands = C.refsFromText(text, index());
       if (cands.length) return finish({ candidates: cands.slice(0, 5), info: state.gs1Info || {}, via: "ocr", text });
+      let unk = C.labelRefsFromText(text);
+      if (!unk.length) {
+        // A small sticker in a big photo: read overlapping sections at a larger scale.
+        state.status("Looking closer…");
+        for (const t of photoSections(c)) {
+          if (!state) return;
+          const tt = await readText(t);
+          const tc = C.refsFromText(tt, index());
+          if (tc.length) return finish({ candidates: tc.slice(0, 5), info: state.gs1Info || {}, via: "ocr", text: tt });
+          if (!unk.length) unk = C.labelRefsFromText(tt);
+        }
+        if (!state) return;
+      }
+      if (unk.length) return finish({ candidates: [], unknownRef: unk[0], info: state.gs1Info || {}, via: "ocr", text });
       state.status(state.gs1Info ? `GTIN ${state.gs1Info.gtin} isn't in the UDI table and no REF could be read. Type the REF instead.` : "No barcode or catalogue REF found in that photo. Try closer, flatter and well lit.");
     } catch (e) {
       state && state.status("Couldn't read that photo (" + e.message + ").");

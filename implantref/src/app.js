@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.7.1";
+  const APP_VERSION = "3.7.2";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -248,6 +248,10 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
   function scanBannerHtml() {
     const s = ui.scanInfo;
     if (!s || C.normalizeRef(s.ref) !== C.normalizeRef(ui.query)) return "";
+    if (s.unknown) {
+      const portal = C.ifuPortalUrl(s.manufacturer, s.ref);
+      return `<div class="warning scan-note"><b>Scanned label:</b> REF <b>${esc(s.ref)}</b> read from the printed REF (looks like a ${esc(s.manufacturer)} REF) — <b>this REF isn't in the ImplantRef catalogue</b>, so there is nothing to show for it yet. Check it against the label.${portal ? ` <a href="${esc(portal)}" target="_blank" rel="noopener">Find its IFU on the ${esc(s.manufacturer)} eIFU portal</a>.` : ""} <button class="btn small" data-copy="${esc(s.ref)}">Copy REF</button> <button class="linkish" data-scan-start="lookup">Scan another</button></div>`;
+    }
     return `<div class="notice exact scan-note"><b>Scanned label:</b> REF ${esc(s.ref)} (${esc(s.manufacturer)}) read from the ${esc(viaLabel[s.via] || s.via)}${s.lot ? ` · LOT <b>${esc(s.lot)}</b> <button class="btn small" data-copy="${esc(s.lot)}">Copy LOT</button>` : ""}${s.expiry ? ` · Use by ${esc(s.expiry)}` : ""}. ${s.via === "ocr" ? "Check the REF matches the label." : ""} <button class="linkish" data-scan-start="lookup">Scan another</button></div>`;
   }
   function startScan(mode) {
@@ -256,6 +260,13 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
   }
   function handleScan(res, mode) {
     const cands = res.candidates || [];
+    if (!cands.length && res.unknownRef) {
+      const u = res.unknownRef;
+      ui.scanInfo = { ref: u.ref, manufacturer: u.manufacturer, via: "ocr", unknown: true };
+      Object.assign(ui, { query: u.ref, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+      toast(`REF ${u.ref} read — not in the catalogue`);
+      return ui.view === "catalogue" ? catalogue() : setView("catalogue");
+    }
     if (!cands.length) {
       return toast(res.info && res.info.gtin ? `GTIN ${res.info.gtin} isn't in ImplantRef — type the REF instead` : "No catalogue REF found on that label");
     }
