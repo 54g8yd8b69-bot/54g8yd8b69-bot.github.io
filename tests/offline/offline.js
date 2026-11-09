@@ -17,7 +17,9 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     ok(h.app === id && h.n > 50, `${id}: loaded (${h.n} chars, ${h.fonts} fonts)`);
     ok(errs.length === 0, `${id}: no errors ${errs.slice(0,3).join(' | ')}`);
   }
-  // ImplantRef specifics
+  // ImplantRef specifics (open it explicitly: the checks below read the visible frame)
+  await p.evaluate(() => location.hash = 'implantref');
+  await p.waitForTimeout(1200);
   const ir = p.frames().find(f => f.url() === 'about:srcdoc' && 0) ;
   const irInfo = await p.evaluate(() => { const f=[...document.querySelectorAll('#frames iframe')].find(x=>!x.hidden); const w=f.contentWindow; return { recs: (w.IMPLANTREF_CATALOGUE||w.CATALOGUE||{}).records ? 1:0, scan: !!w.ImplantRefScan, noscan: w.document.documentElement.classList.contains('no-scan'), scanBtn: getComputedStyle(w.document.querySelector('#scanBtn')||w.document.body).display, text: w.document.body.innerText.match(/3,?961/) ? 1 : 0 }; });
   ok(!irInfo.scan && irInfo.noscan && irInfo.scanBtn === 'none', 'implantref: scanner absent and Scan hidden');
