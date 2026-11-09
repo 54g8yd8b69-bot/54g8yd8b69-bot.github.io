@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.8.0";
+  const APP_VERSION = "3.9.0";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -50,7 +50,7 @@
   const supDistribution = (x) => (x.inCommercialDistribution ? "" : `<span class="pill neutral">Not in US commercial distribution${x.distributionEnd ? " since " + esc(x.distributionEnd) : ""}</span>`);
   function supRowsHtml(list) {
     return `<div class="cards sup-cards">${list
-      .map((x) => `<div class="rcard data-row sup-row" tabindex="0" data-record="${esc(x.recordId)}"><div class="rcard-top"><span class="ref">${esc(x.articleNumber)}</span><span class="pill xc">FDA listing · not in workbook</span></div><b>${esc(x.description)}</b><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}${x.brand ? " · " + esc(x.brand) : ""}</div>${supDistribution(x)}</div>`)
+      .map((x) => `<div class="rcard data-row sup-row" tabindex="0" data-record="${esc(x.recordId)}"><div class="rcard-top"><span class="ref">${esc(x.articleNumber)}</span><span class="pill xc">FDA listing · not in workbook</span>${supHasTorque(x) ? '<span class="pill neutral">Torque · awaiting review</span>' : ""}</div><b>${esc(x.description)}</b><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}${x.brand ? " · " + esc(x.brand) : ""}</div>${supDistribution(x)}</div>`)
       .join("")}</div>`;
   }
   const firstByRef = new Map();
@@ -470,7 +470,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     if (!exact.length && sup.length && C.normalizeRef(sup[0].articleNumber) === C.normalizeRef(ui.query))
       $("#exactBanner").innerHTML = `<div class="notice exact"><b>REF ${esc(sup[0].articleNumber)} isn't in your workbook catalogue.</b> It is in ${esc(sup[0].manufacturer)}'s FDA device listing — shown below (identity only: no torque or compatibility evidence).</div>`;
     $("#supBox").innerHTML = sup.length
-      ? `<div class="section sup-section"><h3>Not in your workbook — ${esc(fmtN(sup.length))} FDA-listed part${sup.length === 1 ? "" : "s"}</h3><div class="sub">From the manufacturers' own FDA (GUDID) device records. Identity only: no catalogue context, torque or compatibility evidence.</div>${supRowsHtml(sup.slice(0, 30))}${sup.length > 30 ? `<div class="secondary">${fmtN(sup.length - 30)} more — refine the search.</div>` : ""}</div>`
+      ? `<div class="section sup-section"><h3>Not in your workbook — ${esc(fmtN(sup.length))} FDA-listed part${sup.length === 1 ? "" : "s"}</h3><div class="sub">From the manufacturers' own FDA (GUDID) device records. Identity only, except where torque could be carried over from an identical workbook product (pending review). No catalogue context or compatibility evidence.</div>${supRowsHtml(sup.slice(0, 30))}${sup.length > 30 ? `<div class="secondary">${fmtN(sup.length - 30)} more — refine the search.</div>` : ""}</div>`
       : "";
     $("#resultCount").textContent = `${fmtN(arr.length)} matching · showing ${arr.length ? start + 1 : 0}–${Math.min(start + ui.pageSize, arr.length)}`;
     $("#tableBox").innerHTML = recordTable(view);
@@ -516,10 +516,21 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     ui.sheetMode = "supplement";
     const portal = C.ifuPortalUrl(x.manufacturer, x.articleNumber);
     const scanned = ui.scanInfo && C.normalizeRef(ui.scanInfo.ref) === C.normalizeRef(x.articleNumber) && ui.scanInfo.manufacturer === x.manufacturer;
+    const torque = C.resolveTorque({ manufacturer: x.manufacturer, articleNumber: x.articleNumber, implantSystem: "", platform: "" }, evidence(), evOpts());
+    const awaiting = torque.notEffective.filter((g) => g.standing === "unverified" && g.claim.verificationStatus === "pending");
+    const hasTorque = torque.all.length > 0;
+    const claimRow = (g, cls) => `<div class="claim torque ${cls}"><div class="claim-head"><div><div class="torque-val">${torqueHtml(g.claim)}</div><b>${esc(g.claim.application)}</b>${g.claim.instrument ? `<div class="secondary">Instrument: ${esc(g.claim.instrument)}</div>` : ""}</div>${standingChip(g)}</div>${crossCheckHtml(g.claim)}${claimSourceHtml(g)}${bindingNote(g.claim)}${claimActions(g)}</div>`;
+    const torqueBlock = !hasTorque
+      ? ""
+      : `<div class="section evidence-block sup-torque"><div class="panel-head"><h3>Torque documentation</h3>${torque.verified.length ? '<span class="pill ok">Verified value recorded</span>' : '<span class="pill neutral">Awaiting clinician review</span>'}</div>
+${torque.verified.length ? `<div class="torque-list">${torque.verified.map((g) => claimRow(g, "")).join("")}</div>` : ""}
+${awaiting.length ? `<div class="awaiting"><div class="awaiting-head"><b>From the manufacturer IFU — awaiting clinician review</b><span class="secondary">This part isn't in your workbook. The value is the IFU statement already cited for the identical workbook product named below; it has not been confirmed by a clinician for this REF. Open the cited page before relying on it.</span></div>${awaiting.map((g) => claimRow(g, "pending-val")).join("")}</div>` : ""}
+${torque.conflicts.length ? `<div class="warning"><b>Conflicting verified values</b> for: ${torque.conflicts.map(esc).join(", ")}. No value is shown until the conflict is resolved.</div>` : ""}</div>`;
     $("#sheetBody").innerHTML = `<div class="sheet-head"><div><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}</div><h2 id="sheetTitle">${esc(x.description)}</h2><div class="ref big">REF ${esc(x.articleNumber)}</div><div class="chip-row"><span class="pill xc">FDA listing · not in your workbook</span>${supDistribution(x)}</div></div><button class="icon-btn" id="sheetClose" aria-label="Close">✕</button></div>
-<div class="warning">This part is <b>not in your workbook catalogue</b>. What is shown is ${esc(x.manufacturer)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID): an identity record only. ImplantRef has <b>no catalogue context, torque or compatibility evidence</b> for it — use the manufacturer's IFU.</div>
+<div class="warning">This part is <b>not in your workbook catalogue</b>. What is shown is ${esc(x.manufacturer)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID)${hasTorque ? ", plus torque carried over from the identical workbook product (pending review). ImplantRef has <b>no catalogue context or compatibility evidence</b> for it" : `: an identity record only. ImplantRef has <b>no catalogue context, torque or compatibility evidence</b> for it`} — use the manufacturer's IFU.</div>
 ${scanned ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}. Check the REF matches the label.</div>` : ""}
 <div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(x.manufacturer)}</b></div><div class="kv"><small>FDA DEVICE DESCRIPTION</small><b>${esc(x.description)}</b></div>${x.brand ? `<div class="kv"><small>BRAND NAME (FDA)</small><b>${esc(x.brand)}</b></div>` : ""}<div class="kv"><small>CATEGORY (FROM GMDN)</small><b>${esc(x.category)}</b></div>${(x.gmdn || []).length ? `<div class="kv"><small>GMDN TERM</small><b>${esc(x.gmdn.join("; "))}</b></div>` : ""}<div class="kv"><small>US DISTRIBUTION</small><b>${x.inCommercialDistribution ? "In commercial distribution" : "Not in commercial distribution" + (x.distributionEnd ? " (since " + esc(x.distributionEnd) + ")" : "")}</b></div></div>
+${torqueBlock}
 ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA records for this REF</b><br>${x.otherDescriptions.map(esc).join("<br>")}</div>` : ""}
 <div class="detail-actions">${portal ? `<a class="btn primary" href="${esc(portal)}" target="_blank" rel="noopener">Find IFU on the ${esc(x.manufacturer)} eIFU portal</a>` : ""}<button class="btn" data-copy="${esc(x.articleNumber)}">Copy REF</button></div>
 <div class="footnote">Source: ${esc(SUP.source || "FDA GUDID")} · snapshot ${esc(SUP.builtAt || "")}. GUDID lists devices registered for US distribution; it does not establish UK availability, compatibility or torque.</div>`;
@@ -530,6 +541,7 @@ ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA reco
     $("#sheetClose").addEventListener("click", () => closeSheet());
     $("#sheetClose").focus({ preventScroll: true });
   }
+  const supHasTorque = (x) => (CURATED.claims || []).some((c) => c.supplement && c.claimType === "torque" && c.subject.manufacturer === x.manufacturer && c.specificProductRef === x.articleNumber);
   function closeSheet(updateHash = true) {
     if ($("#sheet").classList.contains("hidden")) return;
     $("#sheet").classList.add("hidden");
@@ -592,6 +604,8 @@ ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA reco
     const ref = esc(c.subject.articleNumber);
     const printed = c.refPrintedInDocument ? `REF ${ref} is printed in the cited document (${esc(c.refPrintedInDocument)}). ` : "";
     const b = c.bindingCheck;
+    if (b?.status === "sibling")
+      return `<div class="secondary binding sib"><b>Not in your workbook — bound by FDA description:</b> ${esc(c.subject.manufacturer)} describes REF ${ref} as “${esc(b.description)}”, the same product (sizes aside) as workbook REF ${(b.siblings || []).map(esc).join(", ")}, which this statement covers. ${c.refPrintedInDocument ? printed : "REF " + ref + " itself is not printed in the cited document. "}Confirm the IFU covers this exact part.</div>`;
     if (b?.status === "confirmed")
       return `<div class="secondary binding ok">${printed}<b>REF identity checked:</b> ${esc(c.subject.manufacturer)}'s own FDA device listing describes REF ${ref} as “${esc(b.description)}”, which matches the product and connection of the cited statement.</div>`;
     if (printed) return `<div class="secondary">${printed}</div>`;
@@ -880,7 +894,7 @@ ${otherPending.length ? `<details class="pending-claims"><summary>${otherPending
     };
   }
   function refreshAfterEvidenceChange() {
-    if (!$("#sheet").classList.contains("hidden") && ui.selected) openSheet(ui.selected);
+    if (!$("#sheet").classList.contains("hidden") && ui.selected) supById.has(ui.selected) ? openSupSheet(ui.selected) : openSheet(ui.selected);
     else render();
   }
   function claimWhat(c) {
@@ -901,7 +915,7 @@ ${otherPending.length ? `<details class="pending-claims"><summary>${otherPending
       .map((ref) => {
         const r = records.find((x) => x.manufacturer === c.subject.manufacturer && C.normalizeRef(x.articleNumber) === C.normalizeRef(ref));
         const fda = claims.find((x) => x.subject.articleNumber === ref)?.bindingCheck?.description;
-        return `<li><b>${esc(ref)}</b> — ${esc(r ? r.component : "not in catalogue")}${fda ? `<br><span class="secondary">Manufacturer's FDA description: ${esc(fda)}</span>` : ""}</li>`;
+        return `<li><b>${esc(ref)}</b> — ${esc(r ? r.component : "not in your workbook (FDA-listed part)")}${fda ? `<br><span class="secondary">Manufacturer's FDA description: ${esc(fda)}</span>` : ""}</li>`;
       })
       .join("");
     box.innerHTML = `<div class="modal-inner"><h2>${many ? `Verify ${refs.length} REFs` : "Verify evidence"}</h2><p class="sub"><b>${esc(claimWhat(c))}</b>${many ? "" : ` for REF <b>${esc(c.subject.articleNumber)}</b>`}</p><div class="muted-box">${doc.sourceUrl ? `<a href="${esc(doc.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(doc.documentTitle || "?")}</a>` : esc(doc.documentTitle || "?")} · ${esc(doc.revisionOrDate || "?")} · <b>${esc(c.pageOrSection)}</b><br>${esc(doc.sourceType || "")} · ${esc(doc.territory || "")} · retrieved ${esc(doc.retrievedAt || "")}${c.curationRuleId ? `<br>REFs matched by catalogue name (rule ${esc(c.curationRuleId)}); ${claims.filter((x) => x.refPrintedInDocument).length} of ${claims.length} are printed in the cited document.` : ""}${c.conflictGroup ? `<br><b>Declared conflict:</b> this source also gives a different instruction for the same products — verify only the one that matches the product IFU.` : ""}</div>

@@ -1,5 +1,5 @@
 /* Notile service worker: network first, so updates show straight away; the last good copy is used when offline. */
-const CACHE='notile-v6';
+const CACHE='notile-v7';
 const PRECACHE=['/','/notile/','/notile/chart/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/','/implantref/data/catalogue-data.js','/implantref/data/evidence-data.js','/implantref/data/gtin-data.js','/implantref/data/supplement-data.js','/implantref/src/scan.js','/implantref/src/vendor/zxing-0.21.3.min.js',
   '/fonts/fonts.css','/set-app/vendor/qrcode-generator-1.4.4.js','/manifest.webmanifest','/icons/icon-192.png'];
 const ok=r=>r&&r.ok&&r.type==='basic'&&!r.redirected;
