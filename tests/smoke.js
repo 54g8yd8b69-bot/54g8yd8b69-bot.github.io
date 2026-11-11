@@ -54,6 +54,17 @@ run({name:'Landing page',fn:async()=>{
     for(const f of ['src/vendor/zxing-0.21.3.min.js','src/vendor/tesseract/tesseract.min.js','src/vendor/tesseract/worker.min.js','src/vendor/tesseract/tesseract-core-simd-lstm.wasm.js','data/ocr/eng.traineddata.gz'])
       expect((await pg.request.get(BASE+'/implantref/'+f)).ok(),'missing '+f);
     expect(await pg.locator('#scanBtn').count()===1,'scan button missing');await noErrors(pg)});
+  await test('ImplantRef brands: five brand pages, FDA-listed parts and sourced torque under the CSP',async()=>{const pg=await page('/implantref/');
+    await pg.waitForFunction(()=>window.IMPLANTREF_SUPPLEMENT&&document.querySelector('.brand-tile'),null,{timeout:15000});
+    expect(await pg.evaluate(()=>IMPLANTREF_SUPPLEMENT.items.length)===16111,'FDA-listed parts incomplete');
+    expect(await pg.locator('.brand-tile').count()===5,'brand tiles missing');
+    await pg.goto(BASE+'/implantref/#/catalogue/b/southern');await pg.waitForSelector('.fda-note',{timeout:5000});
+    expect((await pg.innerText('.page-head h1'))==='Southern Implants components','brand page title');
+    await pg.fill('#q','TS-Z-18');await pg.waitForTimeout(500);
+    await pg.click('.sup-row[data-record="fda-si-tsz18"]');await pg.waitForSelector('#sheet:not(.hidden) .sup-torque',{timeout:5000});
+    const sh=await pg.innerText('#sheet');expect(sh.includes('32–40')&&sh.includes('CAT-8068-08')&&sh.includes('awaiting clinician review'),'Southern torque sheet');
+    const man=await pg.evaluate(()=>ImplantRefCore.resolveBarcode('(01)04251574800008(10)X',IMPLANTREF_GTIN,ImplantRefCore.buildRefIndex(IMPLANTREF_DATA.records.concat(IMPLANTREF_SUPPLEMENT.items))).candidates[0].manufacturer);
+    expect(man==='Medentika','Medentika barcode gave '+man);await noErrors(pg)});
   await test('Guide Card opens under the site CSP with its catalogue and search',async()=>{const pg=await page('/guide-card/');
     await pg.waitForFunction(()=>typeof REFS!=='undefined'&&document.querySelector('details.cat'),null,{timeout:15000});
     expect(await pg.evaluate(()=>REFS.length)>=150,'catalogue incomplete');

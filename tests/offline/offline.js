@@ -28,6 +28,16 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
   await p.waitForTimeout(1200);
   const ev = await p.evaluate(() => { const f=[...document.querySelectorAll('#frames iframe')].find(x=>!x.hidden); return f.contentDocument.body.innerText; });
   ok(/Ncm/.test(ev), 'implantref: torque evidence renders');
+  // ImplantRef brand pages inside the single file (address changes happen in an embedded frame)
+  errs.length = 0;
+  const irDo = (fn) => p.evaluate((src) => { const f=[...document.querySelectorAll('#frames iframe')].find(x=>!x.hidden); return (new Function('w','d','return ('+src+')(w,d)'))(f.contentWindow, f.contentDocument); }, fn.toString());
+  await irDo((w) => { w.location.hash = '#/dashboard'; }); await p.waitForTimeout(800);
+  ok(await irDo((w, d) => d.querySelectorAll('.brand-tile').length) === 5, 'implantref: five brand tiles');
+  await irDo((w, d) => d.querySelector('.brand-tile[data-brand-go="astra"]').click()); await p.waitForTimeout(900);
+  const br = await irDo((w, d) => [w.location.hash, d.querySelector('.page-head h1').textContent, d.querySelectorAll('.sup-row').length]);
+  ok(br[0] === '#/catalogue/b/astra' && br[1] === 'Astra Tech components' && br[2] > 0, 'implantref: brand page opens with its FDA-listed parts (' + br.join(' · ') + ')');
+  await irDo((w, d) => d.querySelector('.brand-chips [data-brand=""]').click()); await p.waitForTimeout(700);
+  ok(await irDo((w) => w.location.hash) === '#/catalogue' && errs.length === 0, 'implantref: back to all brands, no errors ' + errs.slice(0,2).join(' | '));
   // deep link + set list
   await p.evaluate(() => SUITE.go('/set-app/list.html'));
   await p.waitForTimeout(2000);

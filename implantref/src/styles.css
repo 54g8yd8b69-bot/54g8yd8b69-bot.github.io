@@ -1590,3 +1590,23 @@ html.no-scan [data-scan-start] {
 .sup-section { margin-top: 18px; border-top: 1px dashed var(--line, #ccd); padding-top: 12px; }
 .sup-section h3 { margin: 0 0 4px; }
 .sup-row { border-style: dashed; cursor: pointer; }
+
+/* --- brands (4.0): menu entries, catalogue brand chips, source switch, FDA-part browsing --- */
+.brand-nav-list { display: grid; gap: 2px; }
+.nav .nav-count { margin-left: auto; font-size: 10px; font-weight: 600; opacity: 0.6; font-variant-numeric: tabular-nums; }
+.more-label { color: #9fb6c0; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 6px 11px 2px; }
+.more-menu { max-height: calc(100vh - var(--tabbar-h) - var(--safe-b) - 24px); overflow-y: auto; }
+.brand-chips { margin-bottom: 8px; }
+.chip .chip-n { font-weight: 600; opacity: 0.65; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.source-seg { margin: 0 0 10px; }
+.fda-note { margin-bottom: 10px; min-width: 0; }
+.chips.wrap { flex-wrap: wrap; overflow-x: visible; padding-bottom: 0; margin-bottom: 0; }
+.fda-tools { display: flex; gap: 6px 16px; flex-wrap: wrap; margin: 0 0 10px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
+.check input { width: 16px; height: 16px; }
+.brand-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.brand-tile { text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 11px 12px; display: grid; gap: 3px; cursor: pointer; color: var(--text); }
+.brand-tile:hover { background: #f9fbfc; }
+.brand-tile b { font-size: 13px; }
+.sup-cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.sup-size { color: var(--text); }

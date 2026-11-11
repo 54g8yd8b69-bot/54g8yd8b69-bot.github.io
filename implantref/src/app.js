@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "3.9.0";
+  const APP_VERSION = "4.0.0";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -33,24 +33,86 @@
       C.normalize([r.articleNumber, r.component, r.manufacturer, r.implantSystem, r.platform, r.productFamily, r.material, r.cataloguePages, JSON.stringify(r.dimensions)].join(" ")),
     ]),
   );
-  /* FDA-listing supplement: manufacturer-registered REFs that are not in the workbook. Identity only, kept apart from
-     `records` so the 3,961 workbook rows, filters, evidence and the implant finder are unaffected. */
+  /* FDA-listed parts: manufacturer-registered REFs that are not in the workbook (all parts of the brands the workbook
+     does not cover). Kept apart from `records`, so the 3,961 workbook rows, their filters and the implant finder are
+     unaffected. Identity only; torque appears only where a curated manufacturer statement is bound to the exact REF. */
   const SUP = window.IMPLANTREF_SUPPLEMENT || { items: [], count: 0 };
   const supItems = SUP.items || [];
   const supById = new Map(supItems.map((x) => [x.recordId, x]));
-  const supText = new Map(supItems.map((x) => [x.recordId, C.normalize([x.articleNumber, x.description, (x.otherDescriptions || []).join(" "), x.brand, x.category, (x.gmdn || []).join(" "), x.manufacturer].join(" "))]));
+  let supTextCache = null; // built on first search: the 16k rows are not needed to draw the first screen
+  const supTextOf = (x) => {
+    if (!supTextCache)
+      supTextCache = new Map(supItems.map((y) => [y.recordId, C.normalize([y.articleNumber, y.description, (y.otherDescriptions || []).join(" "), y.brand, y.category, y.sizeText, y.specs, (y.gmdn || []).join(" "), y.manufacturer].join(" "))]));
+    return supTextCache.get(x.recordId);
+  };
   const supByRef = (man, ref) => supItems.find((x) => (!man || x.manufacturer === man) && C.normalizeRef(x.articleNumber) === C.normalizeRef(ref));
-  function supMatches() {
+  let supTorqueCache = null;
+  function supTorqueRefs() {
+    if (!supTorqueCache) {
+      supTorqueCache = new Set();
+      for (const c of CURATED.claims || []) if (c.supplement && c.claimType === "torque") supTorqueCache.add(c.subject.manufacturer + "|" + C.normalizeRef(c.subject.articleNumber));
+    }
+    return supTorqueCache;
+  }
+  const supHasTorque = (x) => supTorqueRefs().has(x.manufacturer + "|" + C.normalizeRef(x.articleNumber));
+
+  /* Brands: two have workbook rows (plus FDA-listed parts the workbook lacks); the others are FDA-listed parts only. */
+  const BRANDS = C.BRANDS;
+  const brandOf = (man) => C.BRAND_BY_MANUFACTURER[man] || null;
+  const wbCount = {}, fdaCount = {};
+  for (const b of BRANDS) wbCount[b.manufacturer] = fdaCount[b.manufacturer] = 0;
+  for (const r of records) wbCount[r.manufacturer] = (wbCount[r.manufacturer] || 0) + 1;
+  for (const x of supItems) fdaCount[x.manufacturer] = (fdaCount[x.manufacturer] || 0) + 1;
+  const isFdaOnly = (man) => !!man && !!brandOf(man) && !brandOf(man).workbook;
+  /** True when the list being browsed is the FDA-listed parts: always for brands without workbook rows, otherwise by choice. */
+  const fdaMode = () => isFdaOnly(ui.manufacturer) || ui.source === "fda";
+  const sourceCounts = () => (ui.manufacturer ? { wb: wbCount[ui.manufacturer] || 0, fda: fdaCount[ui.manufacturer] || 0 } : { wb: records.length, fda: supItems.length });
+
+  /** Query test for FDA-listed parts: exact REF, the whole phrase, or every word (so "titanium base bone level" works). */
+  function supQueryMatcher() {
     const q = String(ui.query || "").trim();
-    if (q.length < 3 || ui.system || ui.platform || ui.family || ui.material || ui.ctype || ui.evidenceFilter) return [];
     const nq = C.normalize(q), rq = C.normalizeRef(q);
-    const out = supItems.filter((x) => (!ui.manufacturer || x.manufacturer === ui.manufacturer) && (C.normalizeRef(x.articleNumber) === rq || supText.get(x.recordId).includes(nq)));
-    return out.sort((a, b) => (C.normalizeRef(b.articleNumber) === rq) - (C.normalizeRef(a.articleNumber) === rq) || a.articleNumber.localeCompare(b.articleNumber));
+    const words = q.split(/\s+/).map(C.normalize).filter(Boolean);
+    return { q, rq, test: (x) => !nq || C.normalizeRef(x.articleNumber) === rq || supTextOf(x).includes(nq) || (words.length > 1 && words.every((w) => supTextOf(x).includes(w))) };
+  }
+  const supExactFirst = (rq) => (a, b) => (C.normalizeRef(b.articleNumber) === rq) - (C.normalizeRef(a.articleNumber) === rq);
+  /** FDA-listed parts matching the search, shown under the workbook results. */
+  function supMatches() {
+    const m = supQueryMatcher();
+    if (m.q.length < 3 || ui.system || ui.platform || ui.family || ui.material || ui.ctype || ui.evidenceFilter) return [];
+    const out = supItems.filter((x) => (!ui.manufacturer || x.manufacturer === ui.manufacturer) && m.test(x));
+    return out.sort((a, b) => supExactFirst(m.rq)(a, b) || a.articleNumber.localeCompare(b.articleNumber));
+  }
+  /** FDA-listed parts as the main list (brand, category, distribution and torque filters; sortable). */
+  function fdaFiltered() {
+    const m = supQueryMatcher();
+    const tq = ui.supTorque ? supTorqueRefs() : null;
+    const out = supItems.filter(
+      (x) =>
+        (!ui.manufacturer || x.manufacturer === ui.manufacturer) &&
+        (!ui.supCategory || x.category === ui.supCategory) &&
+        (!ui.supLive || x.inCommercialDistribution) &&
+        (!tq || tq.has(x.manufacturer + "|" + C.normalizeRef(x.articleNumber))) &&
+        m.test(x),
+    );
+    const byRef = (a, b) => a.articleNumber.localeCompare(b.articleNumber, undefined, { numeric: true });
+    const by =
+      ui.sort === "name" ? (a, b) => a.description.localeCompare(b.description) || byRef(a, b)
+      : ui.sort === "family" ? (a, b) => a.category.localeCompare(b.category) || a.description.localeCompare(b.description)
+      : ui.sort === "manufacturer" ? (a, b) => a.manufacturer.localeCompare(b.manufacturer) || byRef(a, b)
+      : byRef;
+    return out.sort((a, b) => supExactFirst(m.rq)(a, b) || by(a, b));
   }
   const supDistribution = (x) => (x.inCommercialDistribution ? "" : `<span class="pill neutral">Not in US commercial distribution${x.distributionEnd ? " since " + esc(x.distributionEnd) : ""}</span>`);
-  function supRowsHtml(list) {
+  const supPill = (x) => `<span class="pill xc">${brandOf(x.manufacturer)?.workbook ? "FDA listing · not in workbook" : "FDA listing"}</span>`;
+  function supRowsHtml(list, { extra = null } = {}) {
     return `<div class="cards sup-cards">${list
-      .map((x) => `<div class="rcard data-row sup-row" tabindex="0" data-record="${esc(x.recordId)}"><div class="rcard-top"><span class="ref">${esc(x.articleNumber)}</span><span class="pill xc">FDA listing · not in workbook</span>${supHasTorque(x) ? '<span class="pill neutral">Torque · awaiting review</span>' : ""}</div><b>${esc(x.description)}</b><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}${x.brand ? " · " + esc(x.brand) : ""}</div>${supDistribution(x)}</div>`)
+      .map(
+        (x) =>
+          `<div class="rcard data-row sup-row" tabindex="0" data-record="${esc(x.recordId)}"><div class="rcard-top"><span class="ref">${esc(x.articleNumber)}</span>${supPill(x)}${supHasTorque(x) ? '<span class="pill neutral">Torque · awaiting review</span>' : ""}</div><b>${esc(x.description)}</b>${
+            x.sizeText ? `<div class="secondary sup-size">${esc(x.sizeText)}</div>` : ""
+          }<div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}${x.brand && C.normalize(x.brand) !== C.normalize(x.manufacturer) ? " · " + esc(x.brand) : ""}</div>${supDistribution(x)}${extra ? `<div class="rcard-actions">${extra(x)}</div>` : ""}</div>`,
+      )
       .join("")}</div>`;
   }
   const firstByRef = new Map();
@@ -85,6 +147,10 @@
     material: "",
     ctype: "",
     evidenceFilter: "",
+    source: "workbook", // "workbook" | "fda" (ignored for brands that only have FDA-listed parts)
+    supCategory: "",
+    supLive: false,
+    supTorque: false,
     sort: "article",
     page: 1,
     pageSize: 50,
@@ -195,8 +261,10 @@
 
   /* ================================================================ routing
    * Hash format: #/view or #/view/r/<recordId>. Browser Back closes the record sheet. */
+  const catalogueHash = () => "#/catalogue" + (brandOf(ui.manufacturer) ? "/b/" + brandOf(ui.manufacturer).id : "");
   function navigate(view, recordId = null, { replace = false } = {}) {
-    const h = "#/" + view + (recordId ? "/r/" + encodeURIComponent(recordId) : "");
+    // The catalogue address carries the chosen brand (#/catalogue/b/<brand>), so brand pages can be linked and Back works.
+    const h = (view === "catalogue" ? catalogueHash() : "#/" + view) + (recordId ? "/r/" + encodeURIComponent(recordId) : "");
     if (location.hash === h) return route();
     if (replace) {
       history.replaceState(null, "", h);
@@ -204,13 +272,18 @@
     } else location.hash = h;
   }
   function parseHash() {
-    const m = location.hash.match(/^#\/([a-z]+)(?:\/r\/([^/]+))?/);
+    const m = location.hash.match(/^#\/([a-z]+)(?:\/b\/([a-z]+))?(?:\/r\/([^/]+))?/);
     const view = m && TITLES[m[1]] ? m[1] : "dashboard";
-    return { view, recordId: m && m[2] ? decodeURIComponent(m[2]) : null };
+    return { view, brand: m && m[2] && C.BRAND_BY_ID[m[2]] ? C.BRAND_BY_ID[m[2]].manufacturer : "", recordId: m && m[3] ? decodeURIComponent(m[3]) : null };
+  }
+  function markBrandNav() {
+    $$("[data-brand-go]").forEach((b) => b.classList.toggle("active", ui.view === "catalogue" && !!ui.manufacturer && C.BRAND_BY_ID[b.dataset.brandGo]?.manufacturer === ui.manufacturer));
   }
   function route() {
-    const { view, recordId } = parseHash();
-    if (view !== ui.view || !$("#screen").innerHTML) {
+    const { view, brand, recordId } = parseHash();
+    const brandChanged = view === "catalogue" && brand !== ui.manufacturer;
+    if (brandChanged) Object.assign(ui, { manufacturer: brand, system: "", platform: "", family: "", supCategory: "", page: 1 });
+    if (view !== ui.view || brandChanged || !$("#screen").innerHTML) {
       ui.view = view;
       ui.page = 1;
       $$("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
@@ -221,9 +294,26 @@
       $("#screen").scrollTop = 0;
       window.scrollTo(0, 0);
     }
+    markBrandNav();
     if (recordId && findRecord(recordId)) openSheet(recordId);
     else if (recordId && supById.has(recordId)) openSupSheet(recordId);
     else closeSheet(false);
+  }
+  /** Clear every catalogue filter (sort and page size stay); `over` sets the ones to keep, e.g. { query, manufacturer }. */
+  function resetFilters(over = {}) {
+    Object.assign(ui, { query: "", manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", source: "workbook", supCategory: "", supLive: false, supTorque: false, page: 1 }, over);
+  }
+  /** Show the catalogue with the current filters from any screen, keeping the address in step with the chosen brand. */
+  function showCatalogue() {
+    if (ui.view !== "catalogue") return navigate("catalogue");
+    navigate("catalogue");
+    catalogue();
+  }
+  /** Brand menu: open one brand's components with a clean slate. */
+  function goBrand(manufacturer) {
+    closeMore();
+    resetFilters({ manufacturer });
+    showCatalogue();
   }
   const setView = (v) => navigate(v);
   const openRecord = (id) => navigate(ui.view, id);
@@ -244,12 +334,15 @@
     const uniqueRefs = new Set(records.map((r) => r.manufacturer + "|" + C.normalizeRef(r.articleNumber))).size;
     const recent = user.recent.map(findRecord).filter(Boolean).slice(0, 6);
     $("#screen").innerHTML =
-      pageHead("ImplantRef", "A mobile-first restorative component reference for Straumann and Nobel Biocare, with evidence-linked compatibility and torque documentation.") +
+      pageHead("ImplantRef", "A mobile-first restorative component reference for Straumann, Nobel Biocare, Astra Tech, Southern Implants and Medentika, with evidence-linked compatibility and torque documentation.") +
       (storageNotice ? `<div class="notice ok-notice">${esc(storageNotice)}</div>` : "") +
-      `<div class="notice"><b>Data provenance:</b> catalogue records were imported from your workbook and have not been checked against current manufacturer IFUs. A shared system or platform label is a reference trail, <b>not</b> proof of compatibility. Compatibility and torque are shown only from reviewed, product-specific manufacturer sources; otherwise they read <b>Not established</b>.</div>
+      `<div class="notice"><b>Data provenance:</b> catalogue records were imported from your workbook and have not been checked against current manufacturer IFUs. A shared system or platform label is a reference trail, <b>not</b> proof of compatibility. Compatibility and torque are shown only from reviewed, product-specific manufacturer sources; otherwise they read <b>Not established</b>. Parts outside the workbook, including every Astra Tech, Southern Implants and Medentika part, come from the manufacturers' FDA device listings and are labelled as such.</div>
 <div class="dash-grid"><div class="panel"><h2>Quick REF lookup</h2><div class="sub">Type or paste the REF from the packaging label. Dots and spaces are ignored.</div><form class="search-hero" id="dashForm"><input id="dashQuery" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 046.415, 36543, Variobase…" aria-label="REF or component search"><button class="btn primary">Search</button></form><div class="quick-actions mt"><button class="btn primary" data-scan-start="lookup">⌖ Scan a label with the camera</button></div><div class="footnote">An exact REF shows every catalogue context in which it appears. Scanning reads the label barcode (UDI) or the printed REF on your device.</div></div>
 <div class="panel"><h2>Identify &amp; find parts</h2><div class="sub">Manufacturer → system → connection/platform → restorative intent.</div><div class="quick-actions"><button class="btn primary" data-view="identify">◎ Start the guided finder</button><button class="btn" data-view="catalogue">⌕ Browse the full catalogue</button><button class="btn" data-view="casebox">＋ Create a case component list</button></div></div></div>
-<div class="stats"><div class="stat"><div class="stat-label">CATALOGUE-CONTEXT RECORDS</div><div class="stat-value">${fmtN(records.length)}</div><div class="stat-note">No rows deduplicated</div></div><div class="stat"><div class="stat-label">IMPLANT SYSTEMS</div><div class="stat-value">${Object.keys(summary.implantSystems).length}</div><div class="stat-note">Straumann and Nobel Biocare</div></div><div class="stat"><div class="stat-label">REFS WITH VERIFIED EVIDENCE</div><div class="stat-value">${fmtN(effectiveRefs.size)}</div><div class="stat-note">of ${fmtN(uniqueRefs)} unique REFs</div></div><div class="stat"><div class="stat-label">EVIDENCE CLAIMS</div><div class="stat-value">${fmtN(ev.claims.length)}</div><div class="stat-note"><a href="#/evidence">Open registry →</a></div></div></div>
+<div class="panel"><div class="panel-head"><h2>Browse by brand</h2><span class="secondary">Workbook rows · FDA-listed parts</span></div><div class="brand-grid">${BRANDS.map(
+        (b) => `<button class="brand-tile" data-brand-go="${b.id}"><b>${esc(b.label)}</b><span class="secondary">${b.owner ? esc(b.owner) + " · " : ""}${b.workbook ? fmtN(wbCount[b.manufacturer]) + " workbook rows · " : ""}${fmtN(fdaCount[b.manufacturer])} FDA-listed parts</span></button>`,
+      ).join("")}</div></div>
+<div class="stats"><div class="stat"><div class="stat-label">CATALOGUE-CONTEXT RECORDS</div><div class="stat-value">${fmtN(records.length)}</div><div class="stat-note">No rows deduplicated</div></div><div class="stat"><div class="stat-label">IMPLANT SYSTEMS</div><div class="stat-value">${Object.keys(summary.implantSystems).length}</div><div class="stat-note">Workbook: Straumann and Nobel Biocare</div></div><div class="stat"><div class="stat-label">REFS WITH VERIFIED EVIDENCE</div><div class="stat-value">${fmtN(effectiveRefs.size)}</div><div class="stat-note">of ${fmtN(uniqueRefs)} unique REFs</div></div><div class="stat"><div class="stat-label">EVIDENCE CLAIMS</div><div class="stat-value">${fmtN(ev.claims.length)}</div><div class="stat-note"><a href="#/evidence">Open registry →</a></div></div></div>
 ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewed</h2></div>${recent.map((r) => `<div class="list-row data-row" tabindex="0" data-record="${r.recordId}"><div><b class="ref">${esc(r.articleNumber)}</b> · ${esc(r.component)}<div class="secondary">${esc(r.manufacturer)} · ${esc(r.implantSystem)} · ${esc(r.platform)}</div></div><span class="pill">View</span></div>`).join("")}</div>` : ""}
 <div class="dash-grid"><div class="panel"><div class="panel-head"><h2>Records by manufacturer</h2><span class="secondary">Imported rows</span></div>${Object.entries(summary.manufacturers)
         .map(([m, n]) => `<div class="list-row"><div><b>${esc(m)}</b><div class="secondary">${fmtN(n)} catalogue-context records</div></div><b>${Math.round((n / records.length) * 100)}%</b></div><div class="barline"><span style="width:${(n / records.length) * 100}%"></span></div>`)
@@ -259,7 +352,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
         .join("")}</div></div>`;
     $("#dashForm").onsubmit = (e) => {
       e.preventDefault();
-      Object.assign(ui, { query: $("#dashQuery").value, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "" });
+      resetFilters({ query: $("#dashQuery").value });
       setView("catalogue");
     };
   }
@@ -284,9 +377,9 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     if (!cands.length && res.unknownRef) {
       const u = res.unknownRef;
       ui.scanInfo = { ref: u.ref, manufacturer: u.manufacturer, via: "ocr", unknown: true };
-      Object.assign(ui, { query: u.ref, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+      resetFilters({ query: u.ref });
       toast(`REF ${u.ref} read — not in the catalogue`);
-      return ui.view === "catalogue" ? catalogue() : setView("catalogue");
+      return showCatalogue();
     }
     if (!cands.length) {
       return toast(res.info && res.info.gtin ? `GTIN ${res.info.gtin} isn't in ImplantRef — type the REF instead` : "No catalogue REF found on that label");
@@ -316,8 +409,9 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     const rows = records.filter((r) => r.manufacturer === c.manufacturer && C.normalizeRef(r.articleNumber) === C.normalizeRef(c.articleNumber));
     const supHit = !rows.length && supByRef(c.manufacturer, c.articleNumber);
     if (supHit) {
-      Object.assign(ui, { query: c.articleNumber, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
-      toast(`REF ${c.articleNumber} — not in your workbook; FDA listing found`);
+      // Brands without workbook rows open inside that brand's list; workbook brands stay on the general search.
+      resetFilters({ query: c.articleNumber, manufacturer: isFdaOnly(c.manufacturer) ? c.manufacturer : "" });
+      toast(isFdaOnly(c.manufacturer) ? `REF ${c.articleNumber} — ${c.manufacturer} (FDA listing)` : `REF ${c.articleNumber} — not in your workbook; FDA listing found`);
       return navigate("catalogue", supHit.recordId);
     }
     if (mode === "wizard") {
@@ -339,11 +433,10 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
         return;
       }
     }
-    Object.assign(ui, { query: c.articleNumber, manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+    resetFilters({ query: c.articleNumber });
     toast(`REF ${c.articleNumber} — ${rows.length} catalogue context${rows.length === 1 ? "" : "s"}`);
     if (rows.length === 1) return navigate("catalogue", rows[0].recordId);
-    if (ui.view === "catalogue") catalogue();
-    else setView("catalogue");
+    showCatalogue();
   }
 
   /* ============================================================== catalogue */
@@ -384,15 +477,46 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
   const activeFilterCount = () => ["manufacturer", "system", "family", "platform", "material", "ctype", "evidenceFilter"].filter((k) => ui[k]).length;
 
   function catalogue() {
+    const brand = brandOf(ui.manufacturer);
+    const fda = fdaMode();
+    const n = sourceCounts();
+    // Keep the address in step with the brand (links, Back) without a history entry for every filter change.
+    if (ui.view === "catalogue" && !parseHash().recordId && location.hash !== catalogueHash()) {
+      try {
+        history.replaceState(null, "", catalogueHash());
+      } catch (e) {
+        /* some embedded frames refuse address changes: the page still works, only the address stays behind */
+      }
+    }
+    $("#crumb").textContent = "ImplantRef / " + TITLES.catalogue + (brand ? " / " + brand.label : "");
+    document.title = (brand ? brand.label + " – " : "") + TITLES.catalogue + " – ImplantRef";
+    markBrandNav();
+    const brandChips = `<div class="chips brand-chips" role="group" aria-label="Brand"><button class="chip ${!ui.manufacturer ? "on" : ""}" data-brand="">All brands</button>${BRANDS.map(
+      (b) => `<button class="chip ${ui.manufacturer === b.manufacturer ? "on" : ""}" data-brand="${b.id}">${esc(b.label)} <span class="chip-n">${fmtN(wbCount[b.manufacturer] + fdaCount[b.manufacturer])}</span></button>`,
+    ).join("")}</div>`;
+    const sourceBar =
+      brand && !brand.workbook
+        ? `<div class="notice fda-note"><b>${esc(brand.label)}${brand.owner ? ` (${esc(brand.owner)})` : ""}</b> isn't in your workbook. These ${fmtN(n.fda)} parts come from the manufacturer's own FDA device listings: identity, plus torque where a manufacturer document states it (awaiting review). No compatibility evidence.${brand.note ? " " + esc(brand.note) : ""}</div>`
+        : `<div class="seg source-seg" role="group" aria-label="Data source"><button class="${!fda ? "on" : ""}" data-source="workbook">Workbook catalogue · ${fmtN(n.wb)}</button><button class="${fda ? "on" : ""}" data-source="fda">FDA-listed parts · ${fmtN(n.fda)}</button></div>`;
+    const head = pageHead(
+      brand ? esc(brand.label) + " components" : "Component catalogue",
+      fda
+        ? `Browse ${fmtN(n.fda)} FDA-listed part${n.fda === 1 ? "" : "s"}${brand ? "" : " across " + BRANDS.length + " brands"}: the manufacturers' own device registrations.`
+        : `Search ${fmtN(n.wb)} catalogue-context records. Each row keeps its manufacturer, system, platform and family context.`,
+      `<button class="btn" id="resetFilters">Reset</button>`,
+    );
+    setTimeout(() => {
+      const on = $(".brand-chips .chip.on");
+      if (on) on.parentElement.scrollLeft = Math.max(0, on.offsetLeft - on.parentElement.offsetLeft - 12);
+    }, 0);
+    if (fda) return catalogueFda(head + brandChips + sourceBar);
     // Dependent options: systems/platforms narrow to the chosen manufacturer/system.
     const scope = records.filter((r) => (!ui.manufacturer || r.manufacturer === ui.manufacturer) && (!ui.system || r.implantSystem === ui.system));
     const nFilters = activeFilterCount();
     $("#screen").innerHTML =
-      pageHead(
-        "Component catalogue",
-        `Search ${fmtN(records.length)} catalogue-context records. Each row keeps its manufacturer, system, platform and family context.`,
-        `<button class="btn" id="resetFilters">Reset</button>`,
-      ) +
+      head +
+      brandChips +
+      sourceBar +
       `<div class="search-sticky"><div class="field"><label for="q" class="sr-only">Search catalogue</label><input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="REF, component name, family, material…" value="${esc(ui.query)}"></div><button class="btn" data-scan-start="lookup" aria-label="Scan a label">⌖</button><button class="btn filter-toggle" id="filterToggle" aria-expanded="false" aria-controls="filters">Filters${nFilters ? ` (${nFilters})` : ""}</button></div>
 <div class="chips" role="group" aria-label="Component type"><button class="chip ${!ui.ctype ? "on" : ""}" data-ctype="">All types</button>${C.COMPONENT_TYPES.filter((t) => t.id !== "other")
         .map((t) => `<button class="chip ${ui.ctype === t.id ? "on" : ""}" data-ctype="${t.id}">${esc(t.label)}</button>`)
@@ -415,7 +539,7 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     for (const id of ["manufacturer", "system", "family", "platform", "material", "evidenceFilter"])
       $("#" + id).addEventListener("change", (e) => {
         ui[id] = e.target.value;
-        if (id === "manufacturer") Object.assign(ui, { system: "", platform: "", family: "" });
+        if (id === "manufacturer") Object.assign(ui, { system: "", platform: "", family: "", supCategory: "" });
         if (id === "system") Object.assign(ui, { platform: "" });
         ui.page = 1;
         const open = !$("#filters").classList.contains("collapsed");
@@ -443,7 +567,64 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
       drawTable();
     };
     $("#resetFilters").onclick = () => {
-      Object.assign(ui, { query: "", manufacturer: "", system: "", family: "", platform: "", material: "", ctype: "", evidenceFilter: "", page: 1 });
+      resetFilters({ manufacturer: ui.manufacturer });
+      catalogue();
+    };
+    drawTable();
+  }
+  /** The catalogue when the list is the FDA-listed parts: category chips, distribution/torque toggles, paginated cards. */
+  function catalogueFda(top) {
+    const inBrand = supItems.filter((x) => !ui.manufacturer || x.manufacturer === ui.manufacturer);
+    const catCount = {};
+    for (const x of inBrand) catCount[x.category] = (catCount[x.category] || 0) + 1;
+    const cats = Object.keys(catCount).sort((a, b) => catCount[b] - catCount[a]);
+    if (ui.supCategory && !catCount[ui.supCategory]) ui.supCategory = "";
+    $("#screen").innerHTML =
+      top +
+      `<div class="search-sticky"><div class="field"><label for="q" class="sr-only">Search FDA-listed parts</label><input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="REF, description, compatible system…" value="${esc(ui.query)}"></div><button class="btn" data-scan-start="lookup" aria-label="Scan a label">⌖</button></div>
+<div class="chips" role="group" aria-label="Category"><button class="chip ${!ui.supCategory ? "on" : ""}" data-supcat="">All categories</button>${cats.map((c) => `<button class="chip ${ui.supCategory === c ? "on" : ""}" data-supcat="${esc(c)}">${esc(c)} <span class="chip-n">${fmtN(catCount[c])}</span></button>`).join("")}</div>
+<div class="fda-tools"><label class="check"><input type="checkbox" id="supTorque" ${ui.supTorque ? "checked" : ""}> With torque sourced</label><label class="check"><input type="checkbox" id="supLive" ${ui.supLive ? "checked" : ""}> In US distribution only</label></div>
+<div id="scanBanner">${scanBannerHtml()}</div><div id="exactBanner"></div>
+<div class="filter-actions"><span class="result-count" id="resultCount" aria-live="polite"></span><label class="secondary">Sort <select id="sort" class="inline-select"><option value="article">Article number</option><option value="name">Description</option><option value="family">Category</option>${ui.manufacturer ? "" : '<option value="manufacturer">Brand</option>'}</select></label><label class="secondary desktop-inline">Rows <select id="pageSize" class="inline-select"><option>25</option><option>50</option><option>100</option><option>200</option></select></label></div>
+<div id="tableBox"></div><div id="pagination" class="pagination"></div><div id="supBox"></div>
+<div class="footnote">FDA-listed parts come from the manufacturers' own records in the FDA device database (GUDID, snapshot ${esc(SUP.builtAt || "")}). GUDID lists devices registered for US distribution: it does not establish UK availability or compatibility. Categories are a browsing aid derived from the device class and description.</div>`;
+    let debounce;
+    $("#q").addEventListener("input", (e) => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        ui.query = e.target.value;
+        ui.page = 1;
+        drawTable();
+      }, 150);
+    });
+    $$("[data-supcat]").forEach((b) =>
+      b.addEventListener("click", () => {
+        ui.supCategory = b.dataset.supcat;
+        ui.page = 1;
+        $$("[data-supcat]").forEach((x) => x.classList.toggle("on", x === b));
+        drawTable();
+      }),
+    );
+    for (const id of ["supTorque", "supLive"])
+      $("#" + id).addEventListener("change", (e) => {
+        ui[id] = e.target.checked;
+        ui.page = 1;
+        drawTable();
+      });
+    if (![...$("#sort").options].some((o) => o.value === ui.sort)) ui.sort = "article";
+    $("#sort").value = ui.sort;
+    $("#sort").onchange = (e) => {
+      ui.sort = e.target.value;
+      drawTable();
+    };
+    $("#pageSize").value = String(ui.pageSize);
+    $("#pageSize").onchange = (e) => {
+      ui.pageSize = Number(e.target.value);
+      ui.page = 1;
+      drawTable();
+    };
+    $("#resetFilters").onclick = () => {
+      resetFilters({ manufacturer: ui.manufacturer, source: ui.source });
       catalogue();
     };
     drawTable();
@@ -454,7 +635,38 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     f.classList.toggle("collapsed", !open);
     $("#filterToggle").setAttribute("aria-expanded", String(open));
   }
+  function pager(pages, start, shown, total, what = "") {
+    $("#resultCount").textContent = `${fmtN(total)} ${what || "matching"} · showing ${total ? start + 1 : 0}–${Math.min(start + shown, total)}`;
+    $("#pagination").innerHTML = `<span class="secondary">Page ${ui.page} of ${pages}</span><div class="page-buttons"><button class="btn small" id="prev" ${ui.page <= 1 ? "disabled" : ""}>← Previous</button><button class="btn small" id="next" ${ui.page >= pages ? "disabled" : ""}>Next →</button></div>`;
+    $("#prev").onclick = () => {
+      ui.page--;
+      drawTable();
+      $("#tableBox").scrollIntoView({ block: "start" });
+    };
+    $("#next").onclick = () => {
+      ui.page++;
+      drawTable();
+      $("#tableBox").scrollIntoView({ block: "start" });
+    };
+  }
+  function drawFdaTable() {
+    const arr = fdaFiltered();
+    const pages = Math.max(1, Math.ceil(arr.length / ui.pageSize));
+    ui.page = Math.min(ui.page, pages);
+    const start = (ui.page - 1) * ui.pageSize;
+    const view = arr.slice(start, start + ui.pageSize);
+    const inWorkbook = C.exactRefMatches(records, ui.query).filter((r) => !ui.manufacturer || r.manufacturer === ui.manufacturer);
+    $("#exactBanner").innerHTML = inWorkbook.length
+      ? `<div class="notice exact"><b>REF ${esc(inWorkbook[0].articleNumber)}</b> is in your workbook catalogue (${inWorkbook.length} context row${inWorkbook.length > 1 ? "s" : ""}). <button class="btn small" data-source="workbook">Show workbook rows</button></div>`
+      : "";
+    $("#supBox").innerHTML = "";
+    $("#tableBox").innerHTML = arr.length
+      ? supRowsHtml(view)
+      : `<div class="empty">No FDA-listed parts match${ui.supTorque ? " with torque sourced" : ""}. ${ui.supCategory || ui.supTorque || ui.supLive ? "Clear the category and tick boxes, or " : ""}check the REF.</div>`;
+    pager(pages, start, view.length, arr.length, "FDA-listed part" + (arr.length === 1 ? "" : "s"));
+  }
   function drawTable() {
+    if (fdaMode()) return drawFdaTable();
     const arr = applyFilters();
     const pages = Math.max(1, Math.ceil(arr.length / ui.pageSize));
     ui.page = Math.min(ui.page, pages);
@@ -470,21 +682,12 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     if (!exact.length && sup.length && C.normalizeRef(sup[0].articleNumber) === C.normalizeRef(ui.query))
       $("#exactBanner").innerHTML = `<div class="notice exact"><b>REF ${esc(sup[0].articleNumber)} isn't in your workbook catalogue.</b> It is in ${esc(sup[0].manufacturer)}'s FDA device listing — shown below (identity only: no torque or compatibility evidence).</div>`;
     $("#supBox").innerHTML = sup.length
-      ? `<div class="section sup-section"><h3>Not in your workbook — ${esc(fmtN(sup.length))} FDA-listed part${sup.length === 1 ? "" : "s"}</h3><div class="sub">From the manufacturers' own FDA (GUDID) device records. Identity only, except where torque could be carried over from an identical workbook product (pending review). No catalogue context or compatibility evidence.</div>${supRowsHtml(sup.slice(0, 30))}${sup.length > 30 ? `<div class="secondary">${fmtN(sup.length - 30)} more — refine the search.</div>` : ""}</div>`
+      ? `<div class="section sup-section"><h3>Not in your workbook — ${esc(fmtN(sup.length))} FDA-listed part${sup.length === 1 ? "" : "s"}</h3><div class="sub">From the manufacturers' own FDA (GUDID) device records. Identity only, plus torque where a manufacturer statement is bound to the exact REF (awaiting review). No catalogue context or compatibility evidence.</div>${supRowsHtml(sup.slice(0, 30))}${
+          sup.length > 30 ? `<div class="secondary">${fmtN(sup.length - 30)} more.</div>` : ""
+        }<div class="detail-actions"><button class="btn small" data-source="fda">Browse ${sup.length > 30 ? "all " + fmtN(sup.length) : "these"} as a list</button></div></div>`
       : "";
-    $("#resultCount").textContent = `${fmtN(arr.length)} matching · showing ${arr.length ? start + 1 : 0}–${Math.min(start + ui.pageSize, arr.length)}`;
     $("#tableBox").innerHTML = recordTable(view);
-    $("#pagination").innerHTML = `<span class="secondary">Page ${ui.page} of ${pages}</span><div class="page-buttons"><button class="btn small" id="prev" ${ui.page <= 1 ? "disabled" : ""}>← Previous</button><button class="btn small" id="next" ${ui.page >= pages ? "disabled" : ""}>Next →</button></div>`;
-    $("#prev").onclick = () => {
-      ui.page--;
-      drawTable();
-      $("#tableBox").scrollIntoView({ block: "start" });
-    };
-    $("#next").onclick = () => {
-      ui.page++;
-      drawTable();
-      $("#tableBox").scrollIntoView({ block: "start" });
-    };
+    pager(pages, start, view.length, arr.length);
   }
 
   /* =========================================================== record sheet */
@@ -515,33 +718,46 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
     ui.selected = id;
     ui.sheetMode = "supplement";
     const portal = C.ifuPortalUrl(x.manufacturer, x.articleNumber);
+    const brand = brandOf(x.manufacturer);
+    const registrant = brand?.owner && !brand.workbook && brand.id === "astra" ? brand.owner : x.manufacturer;
     const scanned = ui.scanInfo && C.normalizeRef(ui.scanInfo.ref) === C.normalizeRef(x.articleNumber) && ui.scanInfo.manufacturer === x.manufacturer;
     const torque = C.resolveTorque({ manufacturer: x.manufacturer, articleNumber: x.articleNumber, implantSystem: "", platform: "" }, evidence(), evOpts());
     const awaiting = torque.notEffective.filter((g) => g.standing === "unverified" && g.claim.verificationStatus === "pending");
     const hasTorque = torque.all.length > 0;
-    const claimRow = (g, cls) => `<div class="claim torque ${cls}"><div class="claim-head"><div><div class="torque-val">${torqueHtml(g.claim)}</div><b>${esc(g.claim.application)}</b>${g.claim.instrument ? `<div class="secondary">Instrument: ${esc(g.claim.instrument)}</div>` : ""}</div>${standingChip(g)}</div>${crossCheckHtml(g.claim)}${claimSourceHtml(g)}${bindingNote(g.claim)}${claimActions(g)}</div>`;
+    const statesSystem = /^compatible with\b/i.test(x.sizeText || ""); // the registrant's own wording, never ours
+    const supDisagree = C.pendingDisagreements(torque);
+    const claimRow = (g, cls) => `<div class="claim torque ${cls}"><div class="claim-head"><div><div class="torque-val">${torqueHtml(g.claim)}</div><b>${esc(g.claim.application)}</b>${g.claim.instrument ? `<div class="secondary">Instrument: ${esc(g.claim.instrument)}</div>` : ""}</div>${standingChip(g)}</div>${crossCheckHtml(g.claim)}${claimSourceHtml(g)}${bindingNote(g.claim)}${g.claim.conflictGroup ? '<div class="secondary"><b>Part of a declared conflict:</b> the manufacturer\'s documents give a different value for this elsewhere. Both are shown; neither is preferred.</div>' : ""}${claimActions(g)}</div>`;
     const torqueBlock = !hasTorque
       ? ""
       : `<div class="section evidence-block sup-torque"><div class="panel-head"><h3>Torque documentation</h3>${torque.verified.length ? '<span class="pill ok">Verified value recorded</span>' : '<span class="pill neutral">Awaiting clinician review</span>'}</div>
 ${torque.verified.length ? `<div class="torque-list">${torque.verified.map((g) => claimRow(g, "")).join("")}</div>` : ""}
-${awaiting.length ? `<div class="awaiting"><div class="awaiting-head"><b>From the manufacturer IFU — awaiting clinician review</b><span class="secondary">This part isn't in your workbook. The value is the IFU statement already cited for the identical workbook product named below; it has not been confirmed by a clinician for this REF. Open the cited page before relying on it.</span></div>${awaiting.map((g) => claimRow(g, "pending-val")).join("")}</div>` : ""}
+${awaiting.length ? `<div class="awaiting">${supDisagree.length ? `<div class="warning"><b>Sources disagree</b> for: ${supDisagree.map(esc).join("; ")}. The manufacturer's documents print different values. Check the current IFU for this exact REF before using either.</div>` : ""}<div class="awaiting-head"><b>From the manufacturer's documents — awaiting clinician review</b><span class="secondary">This part isn't in your workbook. Each value is a manufacturer statement bound to this REF in the way described under it; it has not been confirmed by a clinician for this REF. Open the cited page before relying on it.</span></div>${awaiting.map((g) => claimRow(g, "pending-val")).join("")}</div>` : ""}
 ${torque.conflicts.length ? `<div class="warning"><b>Conflicting verified values</b> for: ${torque.conflicts.map(esc).join(", ")}. No value is shown until the conflict is resolved.</div>` : ""}</div>`;
-    $("#sheetBody").innerHTML = `<div class="sheet-head"><div><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}</div><h2 id="sheetTitle">${esc(x.description)}</h2><div class="ref big">REF ${esc(x.articleNumber)}</div><div class="chip-row"><span class="pill xc">FDA listing · not in your workbook</span>${supDistribution(x)}</div></div><button class="icon-btn" id="sheetClose" aria-label="Close">✕</button></div>
-<div class="warning">This part is <b>not in your workbook catalogue</b>. What is shown is ${esc(x.manufacturer)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID)${hasTorque ? ", plus torque carried over from the identical workbook product (pending review). ImplantRef has <b>no catalogue context or compatibility evidence</b> for it" : `: an identity record only. ImplantRef has <b>no catalogue context, torque or compatibility evidence</b> for it`} — use the manufacturer's IFU.</div>
+    $("#sheetBody").innerHTML = `<div class="sheet-head"><div><div class="secondary">${esc(x.manufacturer)} · ${esc(x.category)}</div><h2 id="sheetTitle">${esc(x.description)}</h2><div class="ref big">REF ${esc(x.articleNumber)}</div><div class="chip-row"><span class="pill xc">${brand?.workbook === false ? "FDA listing" : "FDA listing · not in your workbook"}</span>${supDistribution(x)}</div></div><button class="icon-btn" id="sheetClose" aria-label="Close">✕</button></div>
+<div class="warning">${
+      brand?.workbook === false
+        ? `ImplantRef has <b>no workbook catalogue for ${esc(brand.label)}</b>. What is shown is ${esc(registrant)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID)${hasTorque ? ", plus torque from the manufacturer document cited below (awaiting review). There is <b>no compatibility evidence</b>" : ": an identity record only, with <b>no torque or compatibility evidence</b>"}`
+        : `This part is <b>not in your workbook catalogue</b>. What is shown is ${esc(x.manufacturer)}'s own registration of REF ${esc(x.articleNumber)} in the FDA device database (GUDID)${hasTorque ? ", plus torque from the manufacturer statement described below (pending review). ImplantRef has <b>no catalogue context or compatibility evidence</b> for it" : `: an identity record only. ImplantRef has <b>no catalogue context, torque or compatibility evidence</b> for it`}`
+    } — use the manufacturer's IFU.</div>
 ${scanned ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}. Check the REF matches the label.</div>` : ""}
-<div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(x.manufacturer)}</b></div><div class="kv"><small>FDA DEVICE DESCRIPTION</small><b>${esc(x.description)}</b></div>${x.brand ? `<div class="kv"><small>BRAND NAME (FDA)</small><b>${esc(x.brand)}</b></div>` : ""}<div class="kv"><small>CATEGORY (FROM GMDN)</small><b>${esc(x.category)}</b></div>${(x.gmdn || []).length ? `<div class="kv"><small>GMDN TERM</small><b>${esc(x.gmdn.join("; "))}</b></div>` : ""}<div class="kv"><small>US DISTRIBUTION</small><b>${x.inCommercialDistribution ? "In commercial distribution" : "Not in commercial distribution" + (x.distributionEnd ? " (since " + esc(x.distributionEnd) + ")" : "")}</b></div></div>
+<div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(x.manufacturer)}</b></div><div class="kv"><small>FDA DEVICE DESCRIPTION</small><b>${esc(x.description)}</b></div>${x.sizeText ? `<div class="kv"><small>${statesSystem ? "COMPATIBLE SYSTEM · SIZE (MANUFACTURER'S FDA TEXT)" : "SIZE TEXT (FDA RECORD)"}</small><b>${esc(x.sizeText)}</b></div>` : ""}${x.specs ? `<div class="kv"><small>DIMENSIONS (FDA RECORD)</small><b>${esc(x.specs)}</b></div>` : ""}${x.brand ? `<div class="kv"><small>BRAND NAME (FDA)</small><b>${esc(x.brand)}</b></div>` : ""}<div class="kv"><small>CATEGORY (FROM GMDN)</small><b>${esc(x.category)}</b></div>${(x.gmdn || []).length ? `<div class="kv"><small>GMDN TERM</small><b>${esc(x.gmdn.join("; "))}</b></div>` : ""}<div class="kv"><small>US DISTRIBUTION</small><b>${x.inCommercialDistribution ? "In commercial distribution" : "Not in commercial distribution" + (x.distributionEnd ? " (since " + esc(x.distributionEnd) + ")" : "")}</b></div></div>
 ${torqueBlock}
 ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA records for this REF</b><br>${x.otherDescriptions.map(esc).join("<br>")}</div>` : ""}
-<div class="detail-actions">${portal ? `<a class="btn primary" href="${esc(portal)}" target="_blank" rel="noopener">Find IFU on the ${esc(x.manufacturer)} eIFU portal</a>` : ""}<button class="btn" data-copy="${esc(x.articleNumber)}">Copy REF</button></div>
-<div class="footnote">Source: ${esc(SUP.source || "FDA GUDID")} · snapshot ${esc(SUP.builtAt || "")}. GUDID lists devices registered for US distribution; it does not establish UK availability, compatibility or torque.</div>`;
+<div class="detail-actions">${portal ? `<a class="btn primary" href="${esc(portal)}" target="_blank" rel="noopener">Find IFU on the ${esc(x.manufacturer)} eIFU portal</a>` : ""}<button class="btn" id="supSave">${user.saved.includes(id) ? "★ Saved" : "☆ Save"}</button><button class="btn" data-copy="${esc(x.articleNumber)}">Copy REF</button></div>
+<div class="footnote">${statesSystem ? `The compatible system is ${esc(x.manufacturer)}'s own statement in its FDA record, not an ImplantRef compatibility finding and not a statement by the implant's manufacturer. ` : ""}Source: ${esc(SUP.source || "FDA GUDID")} · snapshot ${esc(SUP.builtAt || "")}. GUDID lists devices registered for US distribution; it does not establish UK availability, compatibility or torque.</div>`;
     $("#sheet").classList.remove("hidden");
     $("#sheetBackdrop").classList.remove("hidden");
     document.body.classList.add("sheet-open");
     $("#sheetBody").scrollTop = 0;
     $("#sheetClose").addEventListener("click", () => closeSheet());
+    $("#supSave").onclick = () => {
+      user.saved = user.saved.includes(id) ? user.saved.filter((v) => v !== id) : [...user.saved, id];
+      persist();
+      toast(user.saved.includes(id) ? "Saved component" : "Removed from saved");
+      openSupSheet(id);
+    };
     $("#sheetClose").focus({ preventScroll: true });
   }
-  const supHasTorque = (x) => (CURATED.claims || []).some((c) => c.supplement && c.claimType === "torque" && c.subject.manufacturer === x.manufacturer && c.specificProductRef === x.articleNumber);
   function closeSheet(updateHash = true) {
     if ($("#sheet").classList.contains("hidden")) return;
     $("#sheet").classList.add("hidden");
@@ -604,6 +820,10 @@ ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA reco
     const ref = esc(c.subject.articleNumber);
     const printed = c.refPrintedInDocument ? `REF ${ref} is printed in the cited document (${esc(c.refPrintedInDocument)}). ` : "";
     const b = c.bindingCheck;
+    if (b?.status === "printed")
+      return `<div class="secondary binding ok"><b>REF ${ref} is printed in the cited document</b> with this instruction (${esc(String(c.refPrintedInDocument || c.pageOrSection))}). FDA listing: “${esc(b.description)}”.</div>`;
+    if (b?.status === "described")
+      return `<div class="secondary binding sib"><b>Bound by the manufacturer's FDA description:</b> REF ${ref} is registered as “${esc(b.description)}”, the product this statement names. REF ${ref} itself is not printed in the cited document. Confirm the document covers this exact part.</div>`;
     if (b?.status === "sibling")
       return `<div class="secondary binding sib"><b>Not in your workbook — bound by FDA description:</b> ${esc(c.subject.manufacturer)} describes REF ${ref} as “${esc(b.description)}”, the same product (sizes aside) as workbook REF ${(b.siblings || []).map(esc).join(", ")}, which this statement covers. ${c.refPrintedInDocument ? printed : "REF " + ref + " itself is not printed in the cited document. "}Confirm the IFU covers this exact part.</div>`;
     if (b?.status === "confirmed")
@@ -969,7 +1189,11 @@ ${many ? `<details class="mt" open><summary>${refs.length} REFs covered by this 
       body = `<div class="dash-grid"><div class="panel"><h2>Start from an implant REF</h2><div class="sub">If you have the implant's REF (sticker, notes, lab ticket) enter it to set manufacturer, system and platform.</div><form class="search-hero" id="implantRefForm"><input id="implantRef" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Implant REF"><button class="btn primary">Look up</button></form><button class="btn mt" data-scan-start="wizard">⌖ Scan the implant label</button><div id="implantRefOut"></div></div>
 <div class="panel"><h2>1. Manufacturer</h2><div class="option-grid">${unique("manufacturer")
         .map((m) => `<button class="option" data-wiz-set="manufacturer" data-val="${esc(m)}"><b>${esc(m)}</b><span class="secondary">${fmtN(sysRows(m).length)} records · ${unique("implantSystem", sysRows(m)).length} systems</span></button>`)
-        .join("")}</div></div></div>`;
+        .join("")}</div>${
+        BRANDS.some((b) => !b.workbook)
+          ? `<div class="notice fda-note mt"><b>The finder covers the workbook brands only.</b> ${BRANDS.filter((b) => !b.workbook).map((b) => esc(b.label)).join(", ")} are not in your workbook, so there are no systems or platforms to step through. Browse their FDA-listed parts by brand instead:<div class="chips wrap mt">${BRANDS.filter((b) => !b.workbook).map((b) => `<button class="chip" data-brand-go="${b.id}">${esc(b.label)} <span class="chip-n">${fmtN(fdaCount[b.manufacturer])}</span></button>`).join("")}</div></div>`
+          : ""
+      }</div></div>`;
     } else if (stepIdx === 1) {
       const rows = sysRows(w.manufacturer);
       body = `<div class="panel"><h2>2. Implant system</h2><div class="sub">System labels as printed in your workbook.</div><div class="option-grid">${unique("implantSystem", rows)
@@ -1021,7 +1245,7 @@ ${wide.length ? `<h3 class="mt">Listed under “All platforms” for ${esc(w.sys
       identify();
     });
     $("#wizToCat")?.addEventListener("click", () => {
-      Object.assign(ui, { query: "", manufacturer: w.manufacturer, system: w.system, platform: w.platform, family: "", material: "", ctype: w.intent, evidenceFilter: "" });
+      resetFilters({ manufacturer: w.manufacturer, system: w.system, platform: w.platform, ctype: w.intent });
       setView("catalogue");
     });
     $("#wizToCase")?.addEventListener("click", () => {
@@ -1123,12 +1347,15 @@ ${wide.length ? `<h3 class="mt">Listed under “All platforms” for ${esc(w.sys
   /* ================================================================== saved */
   function saved() {
     const arr = user.saved.map(findRecord).filter(Boolean);
-    const missing = user.saved.length - arr.length;
+    const supArr = user.saved.map((id) => supById.get(id)).filter(Boolean);
+    const missing = user.saved.length - arr.length - supArr.length;
     $("#screen").innerHTML =
       pageHead("Saved components", "Your locally saved restorative components.") +
       `<div class="panel"><div class="panel-head"><h2>Saved records (${arr.length})</h2><div class="btn-row"><button class="btn small" id="savedCompare">Add first 4 to compare</button><button class="btn small" id="exportSaved">Export CSV</button></div></div>${
         missing ? `<div class="warning">${missing} saved ID(s) are not in the current catalogue. They are kept in storage and in exports.</div>` : ""
-      }${arr.length ? recordTable(arr, { extraCol: (r) => `<button class="btn small" data-unsave="${r.recordId}">Remove</button>`, showSaved: false }) : '<div class="empty">No saved components yet. Save records from a component sheet.</div>'}</div>`;
+      }${arr.length ? recordTable(arr, { extraCol: (r) => `<button class="btn small" data-unsave="${r.recordId}">Remove</button>`, showSaved: false }) : supArr.length ? '<div class="empty">No saved workbook records.</div>' : '<div class="empty">No saved components yet. Save records from a component sheet.</div>'}</div>${
+        supArr.length ? `<div class="panel"><div class="panel-head"><h2>Saved FDA-listed parts (${supArr.length})</h2></div><p class="sub">Parts that are not in your workbook. Compare, CSV export and case lists use workbook records only.</p>${supRowsHtml(supArr, { extra: (x) => `<button class="btn small" data-unsave="${esc(x.recordId)}">Remove</button>` })}</div>` : ""
+      }`;
     $("#exportSaved").onclick = () => exportCsv(arr, "implantref-saved-components.csv");
     $("#savedCompare").onclick = () => {
       user.compare = arr.slice(0, C.MAX_COMPARE).map((r) => r.recordId);
@@ -1250,7 +1477,7 @@ ${missing ? `<div class="warning">${missing} item(s) are not in the current cata
           .join("")}</div>`
       : "";
     $("#screen").innerHTML =
-      pageHead("Evidence & IFU registry", "Every compatibility or torque statement links to a product-specific manufacturer document, revision, page and reviewer.", `<a class="btn" href="https://ifu.straumann.com/" target="_blank" rel="noopener noreferrer">Straumann eIFU ↗</a><a class="btn" href="https://ifu.nobelbiocare.com/en" target="_blank" rel="noopener noreferrer">Nobel eIFU ↗</a>`) +
+      pageHead("Evidence & IFU registry", "Every compatibility or torque statement links to a product-specific manufacturer document, revision, page and reviewer.", `<a class="btn" href="https://ifu.straumann.com/" target="_blank" rel="noopener noreferrer">Straumann eIFU ↗</a><a class="btn" href="https://ifu.nobelbiocare.com/en" target="_blank" rel="noopener noreferrer">Nobel eIFU ↗</a><a class="btn" href="https://www.dentsplysirona.com/ifu" target="_blank" rel="noopener noreferrer">Dentsply Sirona IFU ↗</a><a class="btn" href="https://southernimplants.com/ifu/" target="_blank" rel="noopener noreferrer">Southern IFU ↗</a><a class="btn" href="https://ifu.medentika.com/" target="_blank" rel="noopener noreferrer">Medentika eIFU ↗</a>`) +
       `<div class="notice"><b>How status is decided.</b> A claim counts only when it is <b>verified</b> by a named reviewer, cites an <b>official IFU, technique guide or manufacturer compatibility chart</b> (not a catalogue, portal or spreadsheet), names the <b>exact REF</b>, is not superseded, and was retrieved within <b>${user.settings.staleDays} days</b>. Everything else stays “pending” or “not established”.</div>
 <div class="stats"><div class="stat"><div class="stat-label">VERIFIED &amp; CURRENT</div><div class="stat-value">${count("effective")}</div></div><div class="stat"><div class="stat-label">PENDING</div><div class="stat-value">${count("unverified")}</div></div><div class="stat"><div class="stat-label">STALE</div><div class="stat-value">${count("stale")}</div></div><div class="stat"><div class="stat-label">DOCUMENTS</div><div class="stat-value">${ev.documents.length}</div></div></div>
 ${queueHtml}
@@ -1333,7 +1560,7 @@ ${queueHtml}
       `<div class="notice"><b>Imported dataset:</b> ${esc(DATA.source?.file || "User-supplied catalogue")} · ${esc(DATA.source?.sheet || "Catalogue")} · ${esc(DATA.source?.rowRange || "")}. All ${fmtN(records.length)} component-context rows are retained. Records are not independently IFU-verified.</div>
 <div class="dash-grid"><div class="panel"><h2>Export</h2><p class="sub">Full catalogue, or your personal data (saved, comparisons, notes, case lists, local evidence, settings).</p><div class="detail-actions"><button class="btn primary" id="exportUser">Export personal backup</button><button class="btn" id="exportJson">Full JSON dataset</button><button class="btn" id="exportAllCsv">All records as CSV</button>${hasV2 ? '<button class="btn" id="exportV2">Download retained 2.0 data</button>' : ""}</div></div>
 <div class="panel"><h2>Import personal backup</h2><p class="sub">Accepts ImplantRef 2.0 and 3.0 personal backups. Replaces current personal data after confirmation.</p><div class="field mt"><label for="userBackup">JSON backup</label><input type="file" id="userBackup" accept=".json,application/json"></div><button class="btn mt" id="importUser">Validate and restore</button></div></div>
-<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>Label scanning: UDI/GTIN → REF table</span><b>${fmtN(Object.keys(window.IMPLANTREF_GTIN || {}).length)} GTINs · FDA GUDID</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
+<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div>${BRANDS.map((b) => `<div class="list-row"><span>FDA-listed parts not in the workbook — ${esc(b.label)}</span><b>${fmtN(fdaCount[b.manufacturer])}</b></div>`).join("")}<div class="list-row"><span>FDA listing snapshot (GUDID)</span><b>${esc(SUP.builtAt || "?")}</b></div><div class="list-row"><span>Label scanning: UDI/GTIN → REF table</span><b>${fmtN(Object.keys(window.IMPLANTREF_GTIN || {}).length)} GTINs · FDA GUDID</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
 <div class="panel mt"><h2>Local storage</h2><p class="sub">Personal data lives in this browser only (schema v${user.schemaVersion}${user.migratedFrom ? `, migrated from ${esc(user.migratedFrom)}` : ""}). ${hasV2 ? "Your ImplantRef 2.0 data is retained unchanged as a rollback copy." : ""} Export a backup to move devices.</p><div class="list-row"><span>Saved</span><b>${user.saved.length}</b></div><div class="list-row"><span>Case lists</span><b>${user.cases.length}</b></div><div class="list-row"><span>Notes</span><b>${Object.keys(user.notes).length}</b></div><div class="list-row"><span>Local evidence claims</span><b>${user.evidence.claims.length}</b></div><div class="detail-actions"><button class="btn danger" id="clearPersonal">Clear personal data…</button></div></div>`;
     $("#exportJson").onclick = () => download("implantref-full-dataset.json", JSON.stringify(DATA, null, 2), "application/json");
     $("#exportUser").onclick = () => download("implantref-personal-backup-" + today() + ".json", JSON.stringify({ application: "ImplantRef", version: APP_VERSION + "-personal", exportedAt: new Date().toISOString(), ...user }, null, 2), "application/json");
@@ -1411,8 +1638,7 @@ ${queueHtml}
   $("#scanBtn").onclick = () => startScan("lookup");
   $("#globalSearchBtn").onclick = () => {
     ui.query = "";
-    if (ui.view === "catalogue") catalogue();
-    else setView("catalogue");
+    showCatalogue();
     setTimeout(() => $("#q")?.focus(), 0);
   };
   $("#sheetBackdrop").addEventListener("click", () => closeSheet());
@@ -1454,6 +1680,17 @@ ${queueHtml}
       persist();
       return compare();
     }
+    if ((el = act("[data-brand-go]"))) return goBrand(C.BRAND_BY_ID[el.dataset.brandGo]?.manufacturer || "");
+    if ((el = act("[data-brand]"))) {
+      // Brand chips on the catalogue keep the search text; the dependent filters are cleared.
+      Object.assign(ui, { manufacturer: C.BRAND_BY_ID[el.dataset.brand]?.manufacturer || "", system: "", platform: "", family: "", supCategory: "", page: 1 });
+      return showCatalogue();
+    }
+    if ((el = act("[data-source]"))) {
+      ui.source = el.dataset.source === "fda" ? "fda" : "workbook";
+      ui.page = 1;
+      return showCatalogue();
+    }
     if ((el = act("[data-scan-start]"))) return startScan(el.dataset.scanStart);
     if ((el = act("[data-copy]"))) return copyText(el.dataset.copy);
     if ((el = act("[data-claim-act]"))) return claimAction(el.dataset.claim, el.dataset.claimAct);
@@ -1483,7 +1720,7 @@ ${queueHtml}
     if ((el = act("[data-view]"))) return setView(el.dataset.view);
     if ((el = act("[data-system-filter]"))) {
       const [m, s] = el.dataset.systemFilter.split("|||");
-      Object.assign(ui, { manufacturer: m, system: s, family: "", platform: "", material: "", query: "", ctype: "", evidenceFilter: "" });
+      resetFilters({ manufacturer: m, system: s });
       return setView("catalogue");
     }
     if ((el = act("[data-wiz-system]"))) {
@@ -1520,6 +1757,9 @@ ${queueHtml}
 
   /* =================================================================== boot */
   $("#appVersion").textContent = APP_VERSION;
+  $("#footCounts").textContent = `${fmtN(records.length)} workbook records · ${fmtN(supItems.length)} FDA-listed parts.`;
+  for (const id of ["brandNav", "brandMenu"])
+    $("#" + id).innerHTML = BRANDS.map((b) => `<button class="nav brand-nav" data-brand-go="${b.id}"${id === "brandMenu" ? ' role="menuitem"' : ""}><span class="ico" aria-hidden="true">◆</span>${esc(b.label)}<span class="nav-count">${fmtN(wbCount[b.manufacturer] + fdaCount[b.manufacturer])}</span></button>`).join("");
   // Builds without the scanner (e.g. the offline single-file suite) hide every scan entry point.
   if (!window.ImplantRefScan) document.documentElement.classList.add("no-scan");
   restore();

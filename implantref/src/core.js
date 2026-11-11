@@ -32,6 +32,26 @@
   /** REF normalisation: case/punctuation/space-insensitive ("046.415" == "046415" == "046 415"). */
   const normalizeRef = normalize;
 
+  /* ------------------------------------------------------------------ brands
+   * `workbook: true` brands have catalogue-context rows from the user's workbook (plus FDA-listed parts that the
+   * workbook lacks). The other brands exist only as FDA-listed parts: identity from the manufacturer's own GUDID
+   * records, torque only where a manufacturer document states it. `gtin` is the one-letter code used in the
+   * barcode table (data/gtin-data.js, data/supplement-data.js). */
+  const BRANDS = [
+    { id: "straumann", manufacturer: "Straumann", label: "Straumann", workbook: true, gtin: "S" },
+    { id: "nobel", manufacturer: "Nobel Biocare", label: "Nobel Biocare", workbook: true, gtin: "N" },
+    { id: "astra", manufacturer: "Astra Tech", label: "Astra Tech", owner: "Dentsply Sirona", workbook: false, gtin: "A",
+      note: "Astra Tech Implant System (TX and EV) and the EV-family lines DS PrimeTaper and DS OmniTaper." },
+    { id: "southern", manufacturer: "Southern Implants", label: "Southern Implants", workbook: false, gtin: "U" },
+    { id: "medentika", manufacturer: "Medentika", label: "Medentika", owner: "Straumann Group", workbook: false, gtin: "M",
+      note: "Components made to fit other manufacturers' implants. The compatible system shown is the one Medentika registered for each part." },
+  ];
+  const BRAND_BY_ID = Object.fromEntries(BRANDS.map((b) => [b.id, b]));
+  const BRAND_BY_MANUFACTURER = Object.fromEntries(BRANDS.map((b) => [b.manufacturer, b]));
+  const GTIN_MANUFACTURER = Object.fromEntries(BRANDS.map((b) => [b.gtin, b.manufacturer]));
+  /** HIBC labeler identification codes (LIC) seen in the manufacturers' own GUDID records. */
+  const HIBC_LIC = { EMKA: "Medentika" };
+
   /* -------------------------------------------------------- component facets
    * Navigation aid derived from the workbook's product-family label and component name.
    * It is a browsing category, not a clinical classification or an indication. */
@@ -375,6 +395,9 @@
   function ifuPortalUrl(manufacturer, ref) {
     if (manufacturer === "Nobel Biocare") return "https://ifu.nobelbiocare.com/en?sku=" + encodeURIComponent(String(ref || "").trim());
     if (manufacturer === "Straumann") return "https://ifu.straumann.com/";
+    if (manufacturer === "Astra Tech") return "https://www.dentsplysirona.com/ifu";
+    if (manufacturer === "Medentika") return "https://ifu.medentika.com/";
+    if (manufacturer === "Southern Implants") return "https://southernimplants.com/ifu/";
     return "";
   }
 
@@ -487,7 +510,10 @@
         if (/S$/i.test(plain)) add(plain.slice(0, -1), 4 + bonus, p); // "S" misread or sterile variant not catalogued
       }
     }
-    return [...found.values()].sort((a, b) => b.score - a.score);
+    // With five brands indexed, stray label text (a LOT, a misread letter) can coincide with some other REF. Keep only
+    // candidates close to the best one, so a clear read is not turned into a "which REF?" question by a weak match.
+    const out = [...found.values()].sort((a, b) => b.score - a.score);
+    return out.length ? out.filter((c) => c.score >= out[0].score - 3) : out;
   }
 
   /**
@@ -519,7 +545,7 @@
       res.info = { gtin: gs1.gtin, lot: gs1.lot, expiry: gs1.expiry, serial: gs1.serial };
       const hit = gtinMap && (gtinMap[gs1.gtin] || gtinMap[gs1.gtin.replace(/^0/, "0")]);
       if (hit) {
-        const man = hit[0] === "S" ? "Straumann" : "Nobel Biocare";
+        const man = GTIN_MANUFACTURER[hit[0]];
         const ok = (refIndex.get(normalizeRef(hit[1])) || []).find((x) => x.manufacturer === man);
         if (ok) res.candidates.push({ ...ok, via: "gtin", score: 100 });
       }
@@ -529,7 +555,12 @@
     if (hibc) {
       res.kind = "hibc";
       res.info = { lot: hibc.lot, lic: hibc.lic };
-      for (const pc of hibc.productCodes) for (const h of refIndex.get(normalizeRef(pc)) || []) res.candidates.push({ ...h, via: "hibc", score: 90 });
+      const licMan = HIBC_LIC[hibc.lic]; // a known labeler code limits the match to that manufacturer's REFs
+      for (const pc of hibc.productCodes)
+        for (const h of refIndex.get(normalizeRef(pc)) || []) {
+          if (licMan && h.manufacturer !== licMan) continue;
+          if (!res.candidates.some((c) => c.manufacturer === h.manufacturer && c.articleNumber === h.articleNumber)) res.candidates.push({ ...h, via: "hibc", score: 90 });
+        }
       return res;
     }
     // Plain barcode text (e.g. Code 128 of the REF itself) or a QR containing text.
@@ -640,6 +671,11 @@
     USER_SCHEMA_VERSION,
     DEFAULT_STALE_DAYS,
     MAX_COMPARE,
+    BRANDS,
+    BRAND_BY_ID,
+    BRAND_BY_MANUFACTURER,
+    GTIN_MANUFACTURER,
+    HIBC_LIC,
     COMPONENT_TYPES,
     TYPE_BY_ID,
     SOURCE_TYPES,

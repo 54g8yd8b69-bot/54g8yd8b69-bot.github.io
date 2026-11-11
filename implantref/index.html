@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="ImplantRef – Straumann and Nobel Biocare restorative implant component reference with evidence-linked compatibility and torque documentation">
+<meta name="description" content="ImplantRef – restorative implant component reference for Straumann, Nobel Biocare, Astra Tech, Southern Implants and Medentika, with evidence-linked torque and compatibility documentation">
 <meta name="theme-color" content="#142d38">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -28,13 +28,15 @@
  <button class="nav" data-view="catalogue"><span class="ico" aria-hidden="true">⌕</span>Component catalogue</button>
  <button class="nav" data-view="systems"><span class="ico" aria-hidden="true">◫</span>Implant systems</button>
  <button class="nav" data-view="compare"><span class="ico" aria-hidden="true">⇄</span>Compare components</button>
+ <div class="nav-label">BRANDS</div>
+ <div id="brandNav" class="brand-nav-list"></div>
  <div class="nav-label">EVIDENCE</div>
  <button class="nav" data-view="evidence"><span class="ico" aria-hidden="true">✓</span>Evidence &amp; IFU registry</button>
  <div class="nav-label">MY REFERENCE</div>
  <button class="nav" data-view="saved"><span class="ico" aria-hidden="true">☆</span>Saved components</button>
  <button class="nav" data-view="casebox"><span class="ico" aria-hidden="true">▤</span>Case component lists</button>
  <button class="nav" data-view="data"><span class="ico" aria-hidden="true">⚙</span>Data &amp; export</button>
- <div class="sidebar-foot">ImplantRef <span id="appVersion"></span> · part of Notile<br>Clinical reference prototype<br><br>3,961 imported catalogue-context records.<br>Catalogue rows are not IFU-verified.</div>
+ <div class="sidebar-foot">ImplantRef <span id="appVersion"></span> · part of Notile<br>Clinical reference prototype<br><br><span id="footCounts"></span><br>Catalogue rows are not IFU-verified.</div>
 </aside>
 <main class="main">
  <div class="topbar">
@@ -53,6 +55,9 @@
  <button class="tab" id="moreTab" aria-haspopup="true" aria-expanded="false"><span aria-hidden="true">≡</span>More</button>
 </nav>
 <div class="more-menu hidden" id="moreMenu" role="menu">
+ <div class="more-label">Browse by brand</div>
+ <div id="brandMenu" class="brand-nav-list"></div>
+ <div class="more-label">More</div>
  <button class="nav" data-view="systems" role="menuitem">◫ Implant systems</button>
  <button class="nav" data-view="compare" role="menuitem">⇄ Compare components</button>
  <button class="nav" data-view="evidence" role="menuitem">✓ Evidence &amp; IFU registry</button>
