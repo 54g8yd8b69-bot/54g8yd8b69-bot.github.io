@@ -1,13 +1,20 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all ten apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all eleven apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
     for(const i of m.icons)expect((await pg.request.get(BASE+i.src)).ok(),'icon missing '+i.src)});
   await test('service worker installs',async()=>{const pg=await page('/');const ok=await pg.evaluate(async()=>{await navigator.serviceWorker.ready;return !!(await navigator.serviceWorker.getRegistration())});expect(ok,'no service worker')});
+  await test('Dictate opens under the site CSP, cleans up text, and loads the speech engine when Notile is served',async()=>{const pg=await page('/dictate/');
+    expect((await pg.request.get(BASE+'/dictate/manifest.webmanifest')).ok(),'Dictate manifest missing');
+    const c=await pg.evaluate(()=>dictateClean('Pain from the upper left six full stop new line G.I.C. placed'));expect(c==='Pain from the UL6.\nGIC placed','clean-up: '+JSON.stringify(c));
+    const engine=(await pg.request.get(BASE+'/notile/dictate-worker.js')).ok();
+    if(engine){await pg.waitForFunction(()=>/Ready/.test(document.getElementById('status').textContent),null,{timeout:120000});expect(!(await pg.isDisabled('#mic')),'mic disabled')}
+    else{await pg.waitForFunction(()=>/not available/.test(document.getElementById('status').textContent),null,{timeout:15000})}
+    await noErrors(pg)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');

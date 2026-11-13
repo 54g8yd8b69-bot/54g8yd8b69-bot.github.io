@@ -10,6 +10,6 @@ async function page(path,opts={}){const ctx=await browser.newContext({viewport:{
 function expect(cond,msg){if(!cond)throw new Error(msg)}
 async function test(name,fn){const t=Date.now();try{await fn();results.push([true,name]);console.log(`  ✓ ${name} (${Date.now()-t} ms)`)}catch(e){results.push([false,name]);console.log(`  ✗ ${name}\n      ${String(e.message).split('\n')[0]}`)}}
 async function noErrors(pg){expect(!pg._errors.length,'page errors: '+pg._errors.join(' | '))}
-async function run(suite){browser=await chromium.launch();console.log(suite.name);try{await suite.fn()}finally{await browser.close()}
+async function run(suite){browser=await chromium.launch({executablePath:process.env.CHROME_PATH||undefined,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});console.log(suite.name);try{await suite.fn()}finally{await browser.close()}
   const bad=results.filter(r=>!r[0]);console.log(`\n${results.length-bad.length} passed, ${bad.length} failed`);process.exit(bad.length?1:0)}
 module.exports={page,expect,test,noErrors,run,BASE};

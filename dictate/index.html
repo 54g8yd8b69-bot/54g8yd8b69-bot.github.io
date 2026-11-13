@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dictate</title>
+<meta name="description" content="Dictate: on-device voice typing for clinical free text. Speech is turned into text in your browser and never sent anywhere.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Dictate">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+/* Dictate: one mic button, one text box. The speech engine is Notile's (/notile/dictate-worker.js), shared so the model downloads once. */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0; --rec:#B83A3A;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4;
+  --f-display:"Caladea", Cambria, Georgia, serif;
+  --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, sans-serif;
+  --f-mono:ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --navy:#CFE2EE; --teal:#4FB3C9; --mint:#5CC3B7; --rec:#E06262;
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836; color-scheme:dark }}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--f-body);min-height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:12px max(18px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line);background:var(--panel)}
+a.brand{display:flex;align-items:center;gap:10px;color:var(--navy);text-decoration:none;font-family:var(--f-display);font-size:1.35rem;font-weight:700}
+a.brand em{font-style:normal;color:var(--mint)}
+.brand-dot{width:32px;height:32px;border-radius:9px;background:#0B2E4A;display:grid;place-items:center}
+.brand-dot svg{width:18px;height:18px}
+.pill{margin-left:auto;font-size:.82rem;color:var(--muted);background:var(--chip);border:1px solid var(--line);padding:3px 10px;border-radius:99px}
+main{max-width:860px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.top{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+#mic{width:92px;height:92px;flex:none;border:0;border-radius:50%;background:var(--teal);color:#fff;cursor:pointer;display:grid;place-items:center;box-shadow:0 4px 14px rgba(28,114,147,.3);transition:background .15s}
+#mic svg{width:38px;height:38px;fill:currentColor}
+#mic:focus-visible{outline:3px solid var(--mint);outline-offset:3px}
+#mic:disabled{opacity:.5;cursor:not-allowed}
+#mic.rec{background:var(--rec);animation:pulse 1.4s infinite}
+#mic.busy{background:var(--muted);cursor:progress}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(184,58,58,.5)}70%{box-shadow:0 0 0 18px rgba(184,58,58,0)}100%{box-shadow:0 0 0 0 rgba(184,58,58,0)}}
+@media (prefers-reduced-motion:reduce){#mic.rec{animation:none}}
+.st{flex:1;min-width:240px;display:grid;gap:8px}
+#status{font-weight:600;color:var(--navy)}
+#timer{font-family:var(--f-mono);color:var(--rec);margin-left:6px}
+.bar{height:6px;background:var(--chip);border-radius:99px;overflow:hidden}
+.bar>div{height:100%;width:0;background:var(--mint);transition:width .2s}
+.hint{font-size:.9rem;color:var(--muted)}
+kbd{font:12px var(--f-mono);background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+textarea{width:100%;min-height:300px;resize:vertical;font:17px/1.6 var(--f-body);color:var(--fg);background:var(--panel);padding:14px;border:1px solid var(--line);border-radius:10px}
+textarea:focus{outline:2px solid var(--teal);outline-offset:0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+button.btn{font:600 15px var(--f-body);border:1px solid transparent;border-radius:9px;padding:8px 14px;cursor:pointer;background:var(--teal);color:#fff}
+button.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
+button.btn:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
+label.sw{display:flex;gap:6px;align-items:center;font-size:.92rem;color:var(--fg)}
+#count{font-size:.85rem;color:var(--muted)}
+details summary{cursor:pointer;font-weight:600;color:var(--navy)}
+details[open] summary{margin-bottom:8px}
+#vocab{min-height:130px;font:13px/1.5 var(--f-mono)}
+.cmds{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0;padding:0;list-style:none}
+.cmds li{font-size:.85rem;background:var(--chip);border:1px solid var(--line);border-radius:99px;padding:2px 10px}
+footer{font-size:.85rem;color:var(--muted);max-width:70ch}
+#toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0B2E4A;color:#fff;padding:8px 14px;border-radius:9px;font-size:.92rem;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/" title="Back to all apps" aria-label="Dictate: back to all Notile apps"><span class="brand-dot" aria-hidden="true"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></span><span>Dic<em>tate</em></span></a>
+  <span class="pill">On-device · audio never leaves this computer</span>
+</header>
+<main>
+  <section class="card top" aria-label="Recorder">
+    <button id="mic" type="button" aria-pressed="false" aria-label="Start dictation" disabled>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    </button>
+    <div class="st">
+      <div><span id="status" role="status" aria-live="polite">Starting…</span><span id="timer"></span></div>
+      <div class="bar" id="bar" hidden><div></div></div>
+      <div class="hint">Press <kbd>Ctrl</kbd> + <kbd>Space</kbd> or the mic to start and stop (<kbd>Esc</kbd> also stops). Text goes in at the cursor and is copied, ready to paste into your notes.</div>
+    </div>
+  </section>
+
+  <section class="card" style="display:grid;gap:10px" aria-label="Dictated text">
+    <textarea id="out" placeholder="Your dictation appears here…" aria-label="Dictated text"></textarea>
+    <div class="row">
+      <button class="btn" id="copy" type="button">Copy all</button>
+      <button class="btn ghost" id="undo" type="button" disabled>Undo last</button>
+      <button class="btn ghost" id="clear" type="button">Clear</button>
+      <span id="count"></span>
+      <span class="sp"></span>
+      <label class="sw"><input type="checkbox" id="autocopy" checked> Copy each phrase</label>
+      <label class="sw"><input type="checkbox" id="commands" checked> Spoken punctuation</label>
+    </div>
+  </section>
+
+  <section class="card" style="display:grid;gap:12px">
+    <details>
+      <summary>Spoken commands and conversions</summary>
+      <ul class="cmds"><li>full stop</li><li>comma</li><li>question mark</li><li>colon / semicolon</li><li>new line</li><li>new paragraph</li><li>open / close bracket</li><li>“upper left six” → UL6</li><li>“G.I.C.” → GIC</li></ul>
+      <p class="hint">Whisper adds most punctuation by itself, so the commands are mainly for forcing layout.</p>
+    </details>
+    <details>
+      <summary>Custom vocabulary</summary>
+      <p class="hint">One rule per line: <code>heard =&gt; replace with</code>. Rules ignore capitals and match whole words. Use them for terms Dictate keeps getting wrong. Saved on this device only.</p>
+      <textarea id="vocab" spellcheck="false" aria-label="Custom vocabulary rules"></textarea>
+      <div class="row"><button class="btn ghost" id="saveVocab" type="button">Save rules</button><button class="btn ghost" id="resetVocab" type="button">Restore defaults</button></div>
+    </details>
+    <p class="hint">Speech is turned into text in this browser by OpenAI's Whisper model (base.en), served from this site. The first use downloads about 100 MB once (shared with Notile's Dictate buttons); after that it runs offline. Audio is held in memory only while it's transcribed. It is never saved or sent anywhere.</p>
+  </section>
+
+  <footer>Dictate is a writing aid, not a clinical record. Check every phrase before it goes into the notes; the clinician remains responsible for its accuracy. Do not dictate patient names, CHI or hospital numbers.</footer>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const mic=$('mic'),statusEl=$('status'),timerEl=$('timer'),bar=$('bar'),barFill=bar.firstElementChild,out=$('out');
+const store={get(k,d){try{const v=localStorage.getItem('dictate.'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('dictate.'+k,JSON.stringify(v))}catch(e){}}};
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),ms||1800)}
+function setStatus(s){statusEl.textContent=s}
+
+const S={ok:!!(window.Worker&&window.MediaRecorder&&window.WebAssembly&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&/^https?:$/.test(location.protocol)),
+  w:null,ready:false,loading:false,rec:null,stream:null,chunks:[],busy:false,n:0,cb:{},t0:0,tick:null,last:null};
+
+// ---------- speech engine (Notile's worker) ----------
+function engine(){
+  if(S.w)return S.w;
+  S.loading=true;
+  S.w=new Worker('/notile/dictate-worker.js',{type:'module'});
+  S.w.onmessage=e=>{const m=e.data||{};
+    if(m.type==='progress'&&m.total){bar.hidden=false;const p=Math.min(99,Math.round(100*m.loaded/m.total));barFill.style.width=p+'%';if(!S.rec&&!S.busy)setStatus('Downloading the speech model (first time only)… '+p+'%')}
+    else if(m.type==='ready'){S.ready=true;S.loading=false;bar.hidden=true;if(!S.rec&&!S.busy)setStatus('Ready. Press the mic or Ctrl+Space.')}
+    else if(m.type==='error'&&!m.id){S.loading=false;bar.hidden=true;setStatus('The speech model could not load: '+m.message)}
+    else if(m.id&&S.cb[m.id]){const f=S.cb[m.id];delete S.cb[m.id];f(m)}};
+  S.w.onerror=e=>{try{e.preventDefault()}catch(x){}S.ok=false;S.loading=false;bar.hidden=true;mic.disabled=true;
+    setStatus('The speech engine is not available here. Open Dictate from notile.co.uk in Chrome, Edge, Firefox or Safari.');
+    const cbs=Object.values(S.cb);S.cb={};cbs.forEach(f=>f({type:'error',message:'speech engine unavailable'}))};
+  S.w.postMessage({type:'load'});
+  return S.w;
+}
+
+// ---------- recording ----------
+function paint(){const r=!!S.rec;mic.classList.toggle('rec',r);mic.classList.toggle('busy',S.busy);mic.setAttribute('aria-pressed',r?'true':'false');
+  mic.setAttribute('aria-label',r?'Stop dictation':S.busy?'Writing…':'Start dictation');
+  if(r){const s=Math.floor((Date.now()-S.t0)/1000);timerEl.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}else timerEl.textContent=''}
+async function start(){
+  if(!S.ok||S.rec||S.busy)return;
+  S.pos=[out.selectionStart??out.value.length,out.selectionEnd??out.value.length];
+  try{S.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}})}
+  catch(err){S.stream=null;setStatus(err&&err.name==='NotAllowedError'?'Microphone blocked. Allow the microphone for this site in the browser, then try again.':'No microphone found.');return}
+  engine();S.chunks=[];
+  try{S.rec=new MediaRecorder(S.stream)}catch(err){S.stream.getTracks().forEach(t=>t.stop());S.stream=null;setStatus('Recording is not supported in this browser.');return}
+  S.rec.ondataavailable=e=>{if(e.data&&e.data.size)S.chunks.push(e.data)};S.rec.onstop=process;S.rec.start();
+  S.t0=Date.now();clearInterval(S.tick);S.tick=setInterval(paint,250);paint();
+  setStatus('Listening…');
+}
+function stop(){if(!S.rec)return;const r=S.rec;S.rec=null;S.busy=true;clearInterval(S.tick);try{r.stop()}catch(e){}if(S.stream){S.stream.getTracks().forEach(t=>t.stop());S.stream=null}paint();setStatus(S.ready?'Writing…':'Loading the speech model (first time only)…')}
+async function process(){
+  const blob=new Blob(S.chunks,{type:(S.chunks[0]&&S.chunks[0].type)||''});S.chunks=[];
+  const done=msg=>{S.busy=false;paint();setStatus(msg||(S.ready?'Ready. Press the mic or Ctrl+Space.':'Ready.'))};
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext,ac=new AC({sampleRate:16000});
+    const buf=await ac.decodeAudioData(await blob.arrayBuffer());try{ac.close()}catch(e){}
+    const a=buf.getChannelData(0).slice(0);
+    if(a.length<4800)return done('Too short. Press the mic, speak, then press it again.');
+    const n=++S.n;
+    S.cb[n]=m=>{if(m.type==='error')return done('Dictation failed: '+m.message);
+      const t=clean(m.text);if(!t)return done('No speech heard. Try again a little closer to the microphone.');
+      insert(t);done();if($('autocopy').checked)copy(t,'Copied: paste it into your notes')};
+    engine().postMessage({type:'run',id:n,audio:a},[a.buffer]);
+  }catch(err){done('Could not read the recording.')}
+}
+function toggle(){S.rec?stop():start()}
+mic.addEventListener('click',toggle);
+document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();toggle()}else if(e.key==='Escape'&&S.rec)stop()});
+
+// ---------- clean-up (same rules as Notile's Dictate buttons, plus custom vocabulary) ----------
+const NUM={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8};
+const CMDS=[
+  [/[,.]?\s*\bnew paragraph\b[,.]?\s*/gi,'\n\n'],[/[,.]?\s*\bnew line\b[,.]?\s*/gi,'\n'],
+  [/\s*\bfull stop\b[,.]?/gi,'.'],[/\s*\bquestion mark\b[,.]?/gi,'?'],[/\s*\bsemi-?colon\b[,.]?/gi,';'],[/\s*\bcolon\b[,.]?/gi,':'],[/\s*\bcomma\b[,.]?/gi,','],
+  [/\s*\bopen bracket\b[,.]?\s*/gi,' ('],[/\s*\bclose bracket\b[,.]?/gi,')']
+];
+const ALWAYS=[
+  [/\b(upper|lower)[\s-]+(right|left)[\s-]+([1-8]|one|two|three|four|five|six|seven|eight)\b/gi,(m,a,b,c)=>a[0].toUpperCase()+b[0].toUpperCase()+(NUM[c.toLowerCase()]||c)],
+  [/\b([ULul])\.?\s?([RLrl])\.?\s?([1-8])\b/g,(m,a,b,c)=>a.toUpperCase()+b.toUpperCase()+c],
+  [/\b(?:[A-Z]\.\s?){2,6}(?=(\s+[A-Z]|\s*$)?)/g,(m,end)=>m.replace(/[.\s]/g,'')+(end!==undefined?'. ':' ')]
+];
+const TIDY=[[/[ \t]+([.,;:?)])/g,'$1'],[/[ \t]{2,}/g,' '],[/ +\n/g,'\n'],[/\n +/g,'\n']];
+const DEFAULT_VOCAB=['cobalt chrome => cobalt-chrome','rubber dam => rubber dam','perio => perio'].join('\n');
+const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+function vocab(t){$('vocab').value.split('\n').forEach(line=>{const i=line.indexOf('=>');if(i<0)return;const from=line.slice(0,i).trim(),to=line.slice(i+2).trim();if(!from)return;
+  const pat=from.split(/\s+/).map(esc).join('[\\s.,-]*');try{t=t.replace(new RegExp('\\b'+pat+'\\b','gi'),to)}catch(e){}});return t}
+function clean(t){t=String(t||'').replace(/\[(?:BLANK_AUDIO|MUSIC|NOISE|INAUDIBLE|SILENCE)\]|\((?:[^)]*\b(?:music|silence|noise|inaudible|blank)\b[^)]*)\)/gi,'').trim();
+  if(/^\s*(?:you|thank you|thanks for watching|bye|\.+)[.!]?\s*$/i.test(t))return '';
+  if($('commands').checked)CMDS.forEach(([re,r])=>{t=t.replace(re,r)});
+  ALWAYS.forEach(([re,r])=>{t=t.replace(re,r)});t=vocab(t);TIDY.forEach(([re,r])=>{t=t.replace(re,r)});
+  return t.replace(/([.?!]\s+|\n)([a-z])/g,(m,a,b)=>a+b.toUpperCase()).trim()}
+window.dictateClean=clean;
+
+// ---------- text box ----------
+function count(){const w=(out.value.match(/\S+/g)||[]).length;$('count').textContent=w?w+(w===1?' word':' words'):''}
+function insert(t){const v=out.value,p=S.pos&&S.pos[1]<=v.length?S.pos:[v.length,v.length];const pre=v.slice(0,p[0]),post=v.slice(p[1]);
+  if(pre&&!/[.?!:\n]\s*$/.test(pre)&&/^[A-Z][a-z]/.test(t)&&!/^I\b/.test(t))t=t[0].toLowerCase()+t.slice(1);
+  const sep=pre&&!/\s$/.test(pre)?' ':'',tail=post&&!/^\s/.test(post)?' ':'';
+  S.last=v;$('undo').disabled=false;
+  out.value=pre+sep+t+tail+post;const c=(pre+sep+t).length;try{out.focus();out.setSelectionRange(c,c)}catch(e){}
+  store.set('draft',out.value);count()}
+async function copy(text,msg){try{await navigator.clipboard.writeText(text);toast(msg||'Copied')}catch(e){out.focus();out.select();toast('Press Ctrl+C to copy',2500)}}
+$('copy').onclick=()=>{if(!out.value.trim())return toast('Nothing to copy yet');copy(out.value,'All text copied')};
+$('undo').onclick=()=>{if(S.last===null)return;out.value=S.last;S.last=null;$('undo').disabled=true;store.set('draft',out.value);count();out.focus()};
+$('clear').onclick=()=>{if(!out.value)return;S.last=out.value;$('undo').disabled=false;out.value='';store.set('draft','');count();out.focus();toast('Cleared. Undo last brings it back.')};
+out.addEventListener('input',()=>{store.set('draft',out.value);count()});
+
+// ---------- settings ----------
+$('vocab').value=store.get('vocab',DEFAULT_VOCAB);
+$('saveVocab').onclick=()=>{store.set('vocab',$('vocab').value);toast('Rules saved')};
+$('resetVocab').onclick=()=>{$('vocab').value=DEFAULT_VOCAB;store.set('vocab',DEFAULT_VOCAB);toast('Defaults restored')};
+['autocopy','commands'].forEach(k=>{$(k).checked=store.get(k,true);$(k).onchange=e=>store.set(k,e.target.checked)});
+out.value=store.get('draft','');count();
+
+// ---------- start ----------
+if(!S.ok){setStatus(location.protocol==='file:'?'Dictate needs the website (notile.co.uk). It can’t run from a saved file.':'Dictation isn’t supported in this browser. Try Chrome, Edge, Firefox or Safari.')}
+else{mic.disabled=false;setStatus('Loading the speech model…');engine()}
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+})();
+</script>
+</body>
+</html>

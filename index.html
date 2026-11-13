@@ -5,7 +5,7 @@
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Notile</title>
-<meta name="description" content="Free browser-based tools for dental clinicians: clinical notes, charting, nurse set-up lists, lab card design, smile design, a dental materials reference, clinical audit, an implant component reference and a guidelines and classifications library.">
+<meta name="description" content="Free browser-based tools for dental clinicians: clinical notes, on-device dictation, charting, nurse set-up lists, lab card design, smile design, a dental materials reference, clinical audit, an implant component reference and a guidelines and classifications library.">
 <style>
 :root{--navy:#0B2E4A;--teal:#1C7293;--teal2:#3FA9A0;--bg:#F3F7F9;--card:#FFFFFF;--fg:#10273A;--muted:#566C7D;--line:#D5E0E7;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--navy:#CFE2EE;--teal:#4FB3C9;--teal2:#5CC3B7;--bg:#08141D;--card:#0F2130;--fg:#E3ECF2;--muted:#93A9B9;--line:#24394A;color-scheme:dark}}
@@ -40,6 +40,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted);max-width:70ch}
 <p class="lead">Browser-based tools for dental clinicians. Nothing is sent anywhere: everything runs and saves on your own device.</p>
 <nav class="apps" aria-label="Apps">
 <a class="app" href="/notile/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="18" height="24" rx="3"/><path d="M11 11h10M11 16h10M11 21h6"/></svg></span><b>Notile</b><small>Tap-through clinical note templates</small></a>
+<a class="app" href="/dictate/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="4" width="8" height="15" rx="4"/><path d="M8 15a8 8 0 0 0 16 0M16 23v5M12 28h8"/></svg></span><b>Dictate</b><small>On-device voice typing for clinical free text</small></a>
 <a class="app" href="/notile/chart/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16h24M16 5v22"/><rect x="7" y="8" width="5" height="5" rx="1"/><rect x="20" y="8" width="5" height="5" rx="1"/><rect x="7" y="19" width="5" height="5" rx="1"/><rect x="20" y="19" width="5" height="5" rx="1"/></svg></span><b>Notile Chart</b><small>Dental charting and 6PPC perio charting</small></a>
 <a class="app" href="/set-app/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l2 2 4-4M8 17l2 2 4-4M8 25l2 2 4-4M18 9h7M18 17h7M18 25h7"/></svg></span><b>Dental Set-App</b><small>Nurse surgery set-up lists, shared by QR code</small></a>
 <a class="app" href="/chrome-card/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12c0 8 4 14 10 14s10-6 10-14"/><path d="M10 12h12M9 18h14"/></svg></span><b>Chrome Card</b><small>Cobalt-chrome and acrylic denture design</small></a>
@@ -51,7 +52,7 @@ footer{margin-top:40px;font-size:.85rem;color:var(--muted);max-width:70ch}
 <a class="app" href="/guide-card/"><span class="ico" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6.5c3.5-1.5 7-1.5 10 1v19c-3-2.5-6.5-2.5-10-1z"/><path d="M26 6.5c-3.5-1.5-7-1.5-10 1v19c3-2.5 6.5-2.5 10-1z"/><path d="M9 12h4M9 16h4M19 12h4M19 16h4"/></svg></span><b>Guide Card</b><small>UK restorative guidelines, classifications and tools</small></a>
 </nav>
 <p class="signout"><a href="/cdn-cgi/access/logout">Sign out</a></p>
-<footer>These tools are writing and recording aids, not clinical decision tools. Check every note, chart and design before it goes into the record or to the lab, treat smile designs as a 2D simulation, not a promised outcome, and confirm implant torque and compatibility against the current manufacturer IFU, and open the source document before relying on any guideline or classification summary; the clinician remains responsible for its accuracy. Do not enter patient names, CHI or hospital numbers.</footer>
+<footer>These tools are writing and recording aids, not clinical decision tools. Check every note, dictation, chart and design before it goes into the record or to the lab, treat smile designs as a 2D simulation, not a promised outcome, and confirm implant torque and compatibility against the current manufacturer IFU, and open the source document before relying on any guideline or classification summary; the clinician remains responsible for its accuracy. Do not enter patient names, CHI or hospital numbers.</footer>
 </main>
 <script>if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
 </body>

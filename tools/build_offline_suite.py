@@ -16,6 +16,7 @@ How it works
     scripts an app loads lazily (DentalAudit's PDF/Word export libraries) from inline copies.
   * ImplantRef is included without its camera scanner (scan.js, ZXing, OCR model, GTIN table): it hides
     the Scan buttons when the scanner isn't present.
+Dictate (/dictate/) is left out: it needs the ~100 MB speech model served from the site.
 Data entered in the file is saved by the browser for that file on that computer only.
 """
 import argparse
