@@ -5,7 +5,7 @@
  */
 (() => {
   "use strict";
-  const APP_VERSION = "4.0.0";
+  const APP_VERSION = "4.1.0";
   const ROOT = document.querySelector(".app");
   if (!ROOT || ROOT.dataset.ready) return;
   ROOT.dataset.ready = "1";
@@ -37,6 +37,7 @@
      does not cover). Kept apart from `records`, so the 3,961 workbook rows, their filters and the implant finder are
      unaffected. Identity only; torque appears only where a curated manufacturer statement is bound to the exact REF. */
   const SUP = window.IMPLANTREF_SUPPLEMENT || { items: [], count: 0 };
+  const PICS = window.IMPLANTREF_PICTURES || null; // links to the manufacturers' own pages; no images are held
   const supItems = SUP.items || [];
   const supById = new Map(supItems.map((x) => [x.recordId, x]));
   let supTextCache = null; // built on first search: the 16k rows are not needed to draw the first screen
@@ -692,6 +693,27 @@ ${recent.length ? `<div class="panel"><div class="panel-head"><h2>Recently viewe
 
   /* =========================================================== record sheet */
   let lastFocus = null;
+  /* Where the manufacturer's own pages picture this REF. Links only: nothing is fetched or shown in-app. */
+  function pictureBlock(manufacturer, articleNumber, cataloguePagesText) {
+    const links = C.pictureLinks(manufacturer, articleNumber, PICS, cataloguePagesText);
+    if (!links.length)
+      return `<div class="pic-block none"><small>PICTURE</small><div class="secondary">No picture link for ${esc(manufacturer)} parts yet: its catalogues could not be indexed. Use the manufacturer's own catalogue.</div></div>`;
+    const btn = (l) =>
+      l.kind === "product"
+        ? `<a class="btn" data-pic="product" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">Product page · ${esc(l.label)} ↗</a>`
+        : l.kind === "catalogue"
+          ? `<a class="btn" data-pic="catalogue" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" title="${esc(l.title)} · ${esc(l.edition)}">${esc(l.label)} · PDF page ${l.page} ↗</a>`
+          : `<a class="btn" data-pic="lookup" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}${l.printedPages ? ` · printed page ${l.printedPages.join(", ")}` : ""} ↗</a>`;
+    const has = (k) => links.some((l) => l.kind === k);
+    const notes = [];
+    if (has("product")) notes.push("The product page address is built from the REF, so the shop may say “not found” for a part it does not sell in the UK.");
+    if (has("catalogue")) notes.push("The catalogue page has this REF's row beside the product picture; if your PDF viewer opens at page 1, go to the page number shown.");
+    const printed = links.find((l) => l.kind === "lookup" && l.printedPages);
+    if (printed) notes.push(`The printed page number is the one your workbook gives for this row; the catalogue itself could not be checked, so the link opens at its start. Go to the page with that number printed on it, or search for ${esc(articleNumber)}.`);
+    else if (has("lookup") && !has("product") && !has("catalogue")) notes.push(`No page could be indexed for ${esc(manufacturer)}: open the link and search it for ${esc(articleNumber)}.`);
+    return `<div class="pic-block"><small>PICTURE · ON THE MANUFACTURER'S OWN PAGES</small><div class="pic-links">${links.map(btn).join("")}</div><div class="footnote">${notes.join(" ")} ImplantRef holds no product images. A picture is not compatibility evidence.</div></div>`;
+  }
+
   function openSheet(id, mode = "record") {
     const r = findRecord(id);
     if (!r) return;
@@ -741,6 +763,7 @@ ${torque.conflicts.length ? `<div class="warning"><b>Conflicting verified values
     } — use the manufacturer's IFU.</div>
 ${scanned ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}. Check the REF matches the label.</div>` : ""}
 <div class="detail-grid"><div class="kv"><small>MANUFACTURER</small><b>${esc(x.manufacturer)}</b></div><div class="kv"><small>FDA DEVICE DESCRIPTION</small><b>${esc(x.description)}</b></div>${x.sizeText ? `<div class="kv"><small>${statesSystem ? "COMPATIBLE SYSTEM · SIZE (MANUFACTURER'S FDA TEXT)" : "SIZE TEXT (FDA RECORD)"}</small><b>${esc(x.sizeText)}</b></div>` : ""}${x.specs ? `<div class="kv"><small>DIMENSIONS (FDA RECORD)</small><b>${esc(x.specs)}</b></div>` : ""}${x.brand ? `<div class="kv"><small>BRAND NAME (FDA)</small><b>${esc(x.brand)}</b></div>` : ""}<div class="kv"><small>CATEGORY (FROM GMDN)</small><b>${esc(x.category)}</b></div>${(x.gmdn || []).length ? `<div class="kv"><small>GMDN TERM</small><b>${esc(x.gmdn.join("; "))}</b></div>` : ""}<div class="kv"><small>US DISTRIBUTION</small><b>${x.inCommercialDistribution ? "In commercial distribution" : "Not in commercial distribution" + (x.distributionEnd ? " (since " + esc(x.distributionEnd) + ")" : "")}</b></div></div>
+${pictureBlock(x.manufacturer, x.articleNumber)}
 ${torqueBlock}
 ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA records for this REF</b><br>${x.otherDescriptions.map(esc).join("<br>")}</div>` : ""}
 <div class="detail-actions">${portal ? `<a class="btn primary" href="${esc(portal)}" target="_blank" rel="noopener">Find IFU on the ${esc(x.manufacturer)} eIFU portal</a>` : ""}<button class="btn" id="supSave">${user.saved.includes(id) ? "★ Saved" : "☆ Save"}</button><button class="btn" data-copy="${esc(x.articleNumber)}">Copy REF</button></div>
@@ -856,6 +879,7 @@ ${(x.otherDescriptions || []).length ? `<div class="muted-box"><b>Other FDA reco
       .join("")}</div>
 ${ui.scanInfo && C.normalizeRef(ui.scanInfo.ref) === C.normalizeRef(r.articleNumber) && ui.scanInfo.manufacturer === r.manufacturer ? `<div class="notice exact scan-note"><b>From the scanned label</b>${ui.scanInfo.lot ? ` · LOT <b>${esc(ui.scanInfo.lot)}</b> <button class="btn small" data-copy="${esc(ui.scanInfo.lot)}">Copy LOT</button>` : ""}${ui.scanInfo.expiry ? ` · Use by ${esc(ui.scanInfo.expiry)}` : ""}${ui.scanInfo.gtin ? ` · GTIN ${esc(ui.scanInfo.gtin)}` : ""}</div>` : ""}
 <div class="muted-box"><b>Catalogue page reference</b><br>${esc(r.cataloguePages || "No page reference supplied")}</div>
+${pictureBlock(r.manufacturer, r.articleNumber, r.cataloguePages)}
 ${
   contexts.length > 1
     ? `<div class="section"><h3>Same REF in ${contexts.length} catalogue contexts</h3><div class="sub">Separate workbook rows. Listing under several systems is a catalogue association, not documented interchangeability.</div><div class="context-list">${contexts
@@ -1560,7 +1584,7 @@ ${queueHtml}
       `<div class="notice"><b>Imported dataset:</b> ${esc(DATA.source?.file || "User-supplied catalogue")} · ${esc(DATA.source?.sheet || "Catalogue")} · ${esc(DATA.source?.rowRange || "")}. All ${fmtN(records.length)} component-context rows are retained. Records are not independently IFU-verified.</div>
 <div class="dash-grid"><div class="panel"><h2>Export</h2><p class="sub">Full catalogue, or your personal data (saved, comparisons, notes, case lists, local evidence, settings).</p><div class="detail-actions"><button class="btn primary" id="exportUser">Export personal backup</button><button class="btn" id="exportJson">Full JSON dataset</button><button class="btn" id="exportAllCsv">All records as CSV</button>${hasV2 ? '<button class="btn" id="exportV2">Download retained 2.0 data</button>' : ""}</div></div>
 <div class="panel"><h2>Import personal backup</h2><p class="sub">Accepts ImplantRef 2.0 and 3.0 personal backups. Replaces current personal data after confirmation.</p><div class="field mt"><label for="userBackup">JSON backup</label><input type="file" id="userBackup" accept=".json,application/json"></div><button class="btn mt" id="importUser">Validate and restore</button></div></div>
-<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div>${BRANDS.map((b) => `<div class="list-row"><span>FDA-listed parts not in the workbook — ${esc(b.label)}</span><b>${fmtN(fdaCount[b.manufacturer])}</b></div>`).join("")}<div class="list-row"><span>FDA listing snapshot (GUDID)</span><b>${esc(SUP.builtAt || "?")}</b></div><div class="list-row"><span>Label scanning: UDI/GTIN → REF table</span><b>${fmtN(Object.keys(window.IMPLANTREF_GTIN || {}).length)} GTINs · FDA GUDID</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
+<div class="panel"><h2>Dataset quality and provenance</h2><div class="list-row"><span>Records retained</span><b>${fmtN(records.length)}</b></div><div class="list-row"><span>Unique article numbers — Straumann</span><b>${fmtN(summary.articleNumberContext.Straumann.uniqueArticleNumbers)}</b></div><div class="list-row"><span>Unique article numbers — Nobel Biocare</span><b>${fmtN(summary.articleNumberContext["Nobel Biocare"].uniqueArticleNumbers)}</b></div><div class="list-row"><span>REFs repeated across Straumann contexts</span><b>${summary.articleNumberContext.Straumann.articleNumbersRepeatedAcrossContexts}</b></div><div class="list-row"><span>REFs repeated across Nobel contexts</span><b>${summary.articleNumberContext["Nobel Biocare"].articleNumbersRepeatedAcrossContexts}</b></div>${BRANDS.map((b) => `<div class="list-row"><span>FDA-listed parts not in the workbook — ${esc(b.label)}</span><b>${fmtN(fdaCount[b.manufacturer])}</b></div>`).join("")}<div class="list-row"><span>FDA listing snapshot (GUDID)</span><b>${esc(SUP.builtAt || "?")}</b></div>${PICS ? Object.entries(PICS.pages || {}).map(([m, o]) => `<div class="list-row"><span>Picture links: catalogue pages indexed — ${esc(m)}</span><b>${fmtN(Object.keys(o).length)} REFs</b></div>`).join("") + `<div class="list-row"><span>Picture links: product pages built from the REF</span><b>${esc((PICS.productPages || []).map((p) => p.manufacturer).join(", ") || "none")}</b></div>` : ""}<div class="list-row"><span>Label scanning: UDI/GTIN → REF table</span><b>${fmtN(Object.keys(window.IMPLANTREF_GTIN || {}).length)} GTINs · FDA GUDID</b></div><div class="list-row"><span>Curated evidence registry</span><b>v${esc(CURATED.registryVersion || "?")} · ${CURATED.documents?.length || 0} docs · ${CURATED.claims?.length || 0} claims</b></div></div>
 <div class="panel mt"><h2>Local storage</h2><p class="sub">Personal data lives in this browser only (schema v${user.schemaVersion}${user.migratedFrom ? `, migrated from ${esc(user.migratedFrom)}` : ""}). ${hasV2 ? "Your ImplantRef 2.0 data is retained unchanged as a rollback copy." : ""} Export a backup to move devices.</p><div class="list-row"><span>Saved</span><b>${user.saved.length}</b></div><div class="list-row"><span>Case lists</span><b>${user.cases.length}</b></div><div class="list-row"><span>Notes</span><b>${Object.keys(user.notes).length}</b></div><div class="list-row"><span>Local evidence claims</span><b>${user.evidence.claims.length}</b></div><div class="detail-actions"><button class="btn danger" id="clearPersonal">Clear personal data…</button></div></div>`;
     $("#exportJson").onclick = () => download("implantref-full-dataset.json", JSON.stringify(DATA, null, 2), "application/json");
     $("#exportUser").onclick = () => download("implantref-personal-backup-" + today() + ".json", JSON.stringify({ application: "ImplantRef", version: APP_VERSION + "-personal", exportedAt: new Date().toISOString(), ...user }, null, 2), "application/json");

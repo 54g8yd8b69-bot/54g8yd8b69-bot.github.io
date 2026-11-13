@@ -73,6 +73,17 @@ run({name:'Landing page',fn:async()=>{
     const sh=await pg.innerText('#sheet');expect(sh.includes('32–40')&&sh.includes('CAT-8068-08')&&sh.includes('awaiting clinician review'),'Southern torque sheet');
     const man=await pg.evaluate(()=>ImplantRefCore.resolveBarcode('(01)04251574800008(10)X',IMPLANTREF_GTIN,ImplantRefCore.buildRefIndex(IMPLANTREF_DATA.records.concat(IMPLANTREF_SUPPLEMENT.items))).candidates[0].manufacturer);
     expect(man==='Medentika','Medentika barcode gave '+man);await noErrors(pg)});
+  await test('ImplantRef pictures: links to the manufacturers\' own pages, no images, under the CSP',async()=>{const pg=await page('/implantref/#/catalogue/r/cat-0749');
+    await pg.waitForSelector('#sheet:not(.hidden) .pic-block a',{timeout:15000});
+    const links=await pg.$$eval('#sheet .pic-block a',a=>a.map(x=>[x.dataset.pic,x.getAttribute('href'),x.target,x.rel]));
+    expect(links.length===2&&links[0][0]==='product'&&links[0][1]==='https://shop.straumann.com/gb/en_gb/p/022.4102','Straumann shop link: '+JSON.stringify(links));
+    expect(links[1][0]==='catalogue'&&/^https:\/\/www\.straumann\.com\/.+452\.201-en_low\.pdf#page=140$/.test(links[1][1]),'Straumann catalogue page link: '+links[1][1]);
+    expect(links.every(l=>l[2]==='_blank'&&/noopener/.test(l[3])&&/noreferrer/.test(l[3])),'picture links must open outside the app');
+    expect(await pg.locator('#sheet .pic-block img, #sheet .pic-block iframe').count()===0,'no image may be shown in the picture block');
+    expect((await pg.innerText('#sheet .pic-block')).includes('holds no product images'),'picture block wording');
+    await pg.goto(BASE+'/implantref/#/catalogue/r/fda-si-tsdc416');await pg.waitForSelector('#sheet:not(.hidden) .pic-block.none',{timeout:5000});
+    expect(await pg.locator('#sheet .pic-block a').count()===0,'Southern Implants must have no picture link');
+    expect(await pg.evaluate(()=>Object.keys(IMPLANTREF_PICTURES.pages).join())==='Astra Tech,Straumann','indexed brands');await noErrors(pg)});
   await test('Guide Card opens under the site CSP with its catalogue and search',async()=>{const pg=await page('/guide-card/');
     await pg.waitForFunction(()=>typeof REFS!=='undefined'&&document.querySelector('details.cat'),null,{timeout:15000});
     expect(await pg.evaluate(()=>REFS.length)>=150,'catalogue incomplete');

@@ -392,6 +392,50 @@
   }
 
   /** Manufacturer IFU portal search link for a REF. This is a search, not a verified document. */
+  /* ------------------------------------------------------------------ picture links
+   * ImplantRef holds no product images. P (data/pictures-data.js) holds links to the manufacturers' own pages:
+   *   product   - the manufacturer's shop page, address built from the REF (may answer "not found");
+   *   catalogue - a page of the manufacturer's catalogue PDF whose product table has this REF's row;
+   *   lookup    - a general catalogue or store link to search by hand.
+   * A picture link is never compatibility evidence. */
+  /* The workbook's own "Catalogue page reference" text ("452.201: p. 139, 141; 450.012: p. 30") as { code: [printed pages] }. */
+  function workbookPages(text) {
+    const out = {};
+    for (const part of String(text ?? "").split(";")) {
+      const m = part.match(/^\s*([\w.\-]+)\s*:\s*p\.\s*([\d,\s]+)$/);
+      if (!m) continue;
+      const pages = (m[2].match(/\d+/g) || []).map(Number).filter((n) => n > 0);
+      if (pages.length) out[m[1]] = [...new Set([...(out[m[1]] || []), ...pages])];
+    }
+    return out;
+  }
+
+  function pictureLinks(manufacturer, articleNumber, P, cataloguePagesText) {
+    const out = [];
+    const ref = String(articleNumber ?? "").trim();
+    if (!P || !manufacturer || !ref) return out;
+    for (const pp of P.productPages || []) {
+      if (pp.manufacturer === manufacturer && String(pp.pattern || "").includes("{ref}"))
+        out.push({ kind: "product", label: pp.label, url: pp.pattern.replace("{ref}", encodeURIComponent(ref)), checkedOn: pp.checkedOn || "" });
+    }
+    const flat = ((P.pages || {})[manufacturer] || {})[normalizeRef(ref)] || [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const cat = (P.catalogues || [])[flat[i]];
+      const page = flat[i + 1];
+      if (!cat || cat.manufacturer !== manufacturer || !Number.isInteger(page) || page < 1 || page > cat.pages) continue;
+      out.push({ kind: "catalogue", label: cat.short || cat.title, title: cat.title, edition: cat.edition || "", page, url: cat.url + "#page=" + page });
+    }
+    for (const l of P.lookups || []) {
+      if (l.manufacturer !== manufacturer) continue;
+      const link = { kind: "lookup", label: l.label, url: l.url, hint: l.hint || "" };
+      // A printed page is shown only when the workbook row itself cites this catalogue; it is never turned into a PDF page.
+      const cited = l.workbookCode ? workbookPages(cataloguePagesText)[l.workbookCode] : null;
+      if (cited && cited.length) link.printedPages = cited;
+      out.push(link);
+    }
+    return out;
+  }
+
   function ifuPortalUrl(manufacturer, ref) {
     if (manufacturer === "Nobel Biocare") return "https://ifu.nobelbiocare.com/en?sku=" + encodeURIComponent(String(ref || "").trim());
     if (manufacturer === "Straumann") return "https://ifu.straumann.com/";
@@ -700,6 +744,8 @@
     torqueText,
     pendingDisagreements,
     ifuPortalUrl,
+    pictureLinks,
+    workbookPages,
     detectIdentifiers,
     parseGS1,
     parseHIBC,

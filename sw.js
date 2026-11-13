@@ -1,6 +1,6 @@
 /* Notile service worker: network first, so updates show straight away; the last good copy is used when offline. */
-const CACHE='notile-v10'; // only old notile-vN caches are cleared on update; other caches (Dictate's speech model) are left alone
-const PRECACHE=['/','/notile/','/notile/chart/','/dictate/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/','/implantref/data/catalogue-data.js','/implantref/data/evidence-data.js','/implantref/data/gtin-data.js','/implantref/data/supplement-data.js','/implantref/src/scan.js','/implantref/src/vendor/zxing-0.21.3.min.js',
+const CACHE='notile-v11'; // only old notile-vN caches are cleared on update; other caches (Dictate's speech model) are left alone
+const PRECACHE=['/','/notile/','/notile/chart/','/dictate/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/','/implantref/data/catalogue-data.js','/implantref/data/evidence-data.js','/implantref/data/gtin-data.js','/implantref/data/supplement-data.js','/implantref/data/pictures-data.js','/implantref/src/scan.js','/implantref/src/vendor/zxing-0.21.3.min.js',
   '/fonts/fonts.css','/set-app/vendor/qrcode-generator-1.4.4.js','/manifest.webmanifest','/icons/icon-192.png'];
 const ok=r=>r&&r.ok&&r.type==='basic'&&!r.redirected;
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>Promise.allSettled(PRECACHE.map(u=>fetch(u,{cache:'no-cache',credentials:'same-origin'}).then(r=>ok(r)?c.put(u,r):null)))))});
