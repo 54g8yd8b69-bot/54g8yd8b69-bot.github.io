@@ -47,6 +47,9 @@ APPS = [
     ('guide-card', 'Guide Card', '/guide-card/', (None, 'guide-card/index.html'), {}),
 ]
 
+# Apps on the site that are not put in the file (see the note at the top).
+LEFT_OUT = ['/dictate/']
+
 warnings = []
 
 
@@ -153,6 +156,10 @@ def launcher(apps_shown):
     src = (SITE / 'index.html').read_text(encoding='utf-8')
     style = re.search(r'<style>(.*?)</style>', src, re.S).group(1)
     nav = re.search(r'<nav class="apps"[^>]*>.*?</nav>', src, re.S).group(0)
+    for href in LEFT_OUT:  # tiles for apps that cannot work from a single file are taken off the launcher
+        nav, n = re.subn(r'\s*<a class="app" href="' + re.escape(href) + r'".*?</a>', '', nav, count=1, flags=re.S)
+        if n:
+            warnings.append(f'launcher tile {href} left out')
     hrefs = re.findall(r'<a class="app" href="([^"]+)"', nav)
     missing = [h for h in hrefs if h not in {a[2] for a in apps_shown}]
     if missing:
