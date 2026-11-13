@@ -139,7 +139,7 @@ function engine(){
   S.loading=true;
   S.w=new Worker('/notile/dictate-worker.js',{type:'module'});
   S.w.onmessage=e=>{const m=e.data||{};
-    if(m.type==='progress'&&m.total){bar.hidden=false;const p=Math.min(99,Math.round(100*m.loaded/m.total));barFill.style.width=p+'%';if(!S.rec&&!S.busy)setStatus('Downloading the speech model (first time only)… '+p+'%')}
+    if(m.type==='progress'&&m.total){bar.hidden=false;const p=Math.min(99,Math.round(100*m.loaded/m.total));barFill.style.width=p+'%';if(!S.rec)setStatus('Downloading the speech model (first time only)… '+p+'% of '+Math.round(m.total/1048576)+' MB'+(S.busy?'. Your dictation will appear when it finishes.':''))}
     else if(m.type==='ready'){S.ready=true;S.loading=false;bar.hidden=true;if(!S.rec&&!S.busy)setStatus('Ready. Press the mic or Ctrl+Space.')}
     else if(m.type==='error'&&!m.id){S.loading=false;bar.hidden=true;setStatus('The speech model could not load: '+m.message)}
     else if(m.id&&S.cb[m.id]){const f=S.cb[m.id];delete S.cb[m.id];f(m)}};
@@ -174,8 +174,12 @@ async function process(){
     const buf=await ac.decodeAudioData(await blob.arrayBuffer());try{ac.close()}catch(e){}
     const a=buf.getChannelData(0).slice(0);
     if(a.length<4800)return done('Too short. Press the mic, speak, then press it again.');
-    const n=++S.n;
-    S.cb[n]=m=>{if(m.type==='error')return done('Dictation failed: '+m.message);
+    const n=++S.n,secs=a.length/16000;
+    // never sit on "Writing…" for ever: generous limits, longer while the model is still downloading
+    const limit=S.ready?20000+secs*3000:600000;
+    const dog=setTimeout(()=>{if(!S.cb[n])return;delete S.cb[n];try{S.w.terminate()}catch(e){}S.w=null;S.ready=false;bar.hidden=true;
+      done('That took too long, so it was stopped. Try again with a shorter phrase. If this keeps happening, this computer may be too slow for on-device dictation.');engine()},limit);
+    S.cb[n]=m=>{clearTimeout(dog);if(m.type==='error')return done('Dictation failed: '+m.message);
       const t=clean(m.text);if(!t)return done('No speech heard. Try again a little closer to the microphone.');
       insert(t);done();if($('autocopy').checked)copy(t,'Copied: paste it into your notes')};
     engine().postMessage({type:'run',id:n,audio:a},[a.buffer]);

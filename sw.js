@@ -1,10 +1,10 @@
 /* Notile service worker: network first, so updates show straight away; the last good copy is used when offline. */
-const CACHE='notile-v9';
+const CACHE='notile-v10'; // only old notile-vN caches are cleared on update; other caches (Dictate's speech model) are left alone
 const PRECACHE=['/','/notile/','/notile/chart/','/dictate/','/set-app/','/set-app/list.html','/chrome-card/','/ortho-card/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/','/implantref/data/catalogue-data.js','/implantref/data/evidence-data.js','/implantref/data/gtin-data.js','/implantref/data/supplement-data.js','/implantref/src/scan.js','/implantref/src/vendor/zxing-0.21.3.min.js',
   '/fonts/fonts.css','/set-app/vendor/qrcode-generator-1.4.4.js','/manifest.webmanifest','/icons/icon-192.png'];
 const ok=r=>r&&r.ok&&r.type==='basic'&&!r.redirected;
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>Promise.allSettled(PRECACHE.map(u=>fetch(u,{cache:'no-cache',credentials:'same-origin'}).then(r=>ok(r)?c.put(u,r):null)))))});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>/^notile-v\d+$/.test(k)&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 self.addEventListener('fetch',e=>{const req=e.request,url=new URL(req.url);
   if(req.method!=='GET'||url.origin!==location.origin||url.pathname.startsWith('/cdn-cgi/'))return;
   // Dictate's speech engine and model (~100 MB) are cached by the engine itself; don't keep a second copy here
