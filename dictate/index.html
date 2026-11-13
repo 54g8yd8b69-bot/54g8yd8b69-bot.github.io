@@ -61,6 +61,9 @@ button.btn{font:600 15px var(--f-body);border:1px solid transparent;border-radiu
 button.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
 button.btn:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
 label.sw{display:flex;gap:6px;align-items:center;font-size:.92rem;color:var(--fg)}
+select{font:inherit;font-size:.92rem;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 6px}
+.slow{font-size:.92rem;background:#FFF4E0;color:#6A4300;border:1px solid #F0D29A;border-radius:9px;padding:8px 10px}
+@media (prefers-color-scheme: dark){.slow{background:#2E2410;color:#F3D9A4;border-color:#5A4720}}
 #count{font-size:.85rem;color:var(--muted)}
 details summary{cursor:pointer;font-weight:600;color:var(--navy)}
 details[open] summary{margin-bottom:8px}
@@ -85,6 +88,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:70ch}
     <div class="st">
       <div><span id="status" role="status" aria-live="polite">Starting…</span><span id="timer"></span></div>
       <div class="bar" id="bar" hidden><div></div></div>
+      <div class="slow" id="slow" role="note" hidden></div>
       <div class="hint">Press <kbd>Ctrl</kbd> + <kbd>Space</kbd> or the mic to start and stop (<kbd>Esc</kbd> also stops). Text goes in at the cursor and is copied, ready to paste into your notes.</div>
     </div>
   </section>
@@ -97,6 +101,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:70ch}
       <button class="btn ghost" id="clear" type="button">Clear</button>
       <span id="count"></span>
       <span class="sp"></span>
+      <label class="sw">Mode <select id="mode" aria-label="Dictation mode"><option value="base">Accurate</option><option value="fast">Fast</option></select></label>
       <label class="sw"><input type="checkbox" id="autocopy" checked> Copy each phrase</label>
       <label class="sw"><input type="checkbox" id="commands" checked> Spoken punctuation</label>
     </div>
@@ -114,7 +119,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:70ch}
       <textarea id="vocab" spellcheck="false" aria-label="Custom vocabulary rules"></textarea>
       <div class="row"><button class="btn ghost" id="saveVocab" type="button">Save rules</button><button class="btn ghost" id="resetVocab" type="button">Restore defaults</button></div>
     </details>
-    <p class="hint">Speech is turned into text in this browser by OpenAI's Whisper model (base.en), served from this site. The first use downloads about 100 MB once (shared with Notile's Dictate buttons); after that it runs offline. Audio is held in memory only while it's transcribed. It is never saved or sent anywhere.</p>
+    <p class="hint"><b>Accurate</b> uses Whisper base.en (about 100 MB, downloaded once). <b>Fast</b> uses Whisper tiny.en (about 40 MB): roughly twice as fast, a little less accurate. The mode also applies to Notile's Dictate buttons. Both run in this browser from files on this site; after the first download they work offline. Audio is held in memory only while it's transcribed. It is never saved or sent anywhere.</p>
   </section>
 
   <footer>Dictate is a writing aid, not a clinical record. Check every phrase before it goes into the notes; the clinician remains responsible for its accuracy. Do not dictate patient names, CHI or hospital numbers.</footer>
@@ -131,7 +136,7 @@ function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');
 function setStatus(s){statusEl.textContent=s}
 
 const S={ok:!!(window.Worker&&window.MediaRecorder&&window.WebAssembly&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&/^https?:$/.test(location.protocol)),
-  w:null,ready:false,loading:false,rec:null,stream:null,chunks:[],busy:false,n:0,cb:{},t0:0,tick:null,last:null};
+  w:null,ready:false,loading:false,model:'base',rec:null,stream:null,chunks:[],busy:false,n:0,cb:{},t0:0,tick:null,last:null};
 
 // ---------- speech engine (Notile's worker) ----------
 function engine(){
@@ -140,13 +145,13 @@ function engine(){
   S.w=new Worker('/notile/dictate-worker.js',{type:'module'});
   S.w.onmessage=e=>{const m=e.data||{};
     if(m.type==='progress'&&m.total){bar.hidden=false;const p=Math.min(99,Math.round(100*m.loaded/m.total));barFill.style.width=p+'%';if(!S.rec)setStatus('Downloading the speech model (first time only)… '+p+'% of '+Math.round(m.total/1048576)+' MB'+(S.busy?'. Your dictation will appear when it finishes.':''))}
-    else if(m.type==='ready'){S.ready=true;S.loading=false;bar.hidden=true;if(!S.rec&&!S.busy)setStatus('Ready. Press the mic or Ctrl+Space.')}
+    else if(m.type==='ready'){if(m.model&&m.model!==S.model)return;S.ready=true;S.loading=false;bar.hidden=true;if(!S.rec&&!S.busy)setStatus('Ready. Press the mic or Ctrl+Space.')}
     else if(m.type==='error'&&!m.id){S.loading=false;bar.hidden=true;setStatus('The speech model could not load: '+m.message)}
     else if(m.id&&S.cb[m.id]){const f=S.cb[m.id];delete S.cb[m.id];f(m)}};
   S.w.onerror=e=>{try{e.preventDefault()}catch(x){}S.ok=false;S.loading=false;bar.hidden=true;mic.disabled=true;
     setStatus('The speech engine is not available here. Open Dictate from notile.co.uk in Chrome, Edge, Firefox or Safari.');
     const cbs=Object.values(S.cb);S.cb={};cbs.forEach(f=>f({type:'error',message:'speech engine unavailable'}))};
-  S.w.postMessage({type:'load'});
+  S.w.postMessage({type:'load',model:S.model});
   return S.w;
 }
 
@@ -181,10 +186,15 @@ async function process(){
       done('That took too long, so it was stopped. Try again with a shorter phrase. If this keeps happening, this computer may be too slow for on-device dictation.');engine()},limit);
     S.cb[n]=m=>{clearTimeout(dog);if(m.type==='error')return done('Dictation failed: '+m.message);
       const t=clean(m.text);if(!t)return done('No speech heard. Try again a little closer to the microphone.');
-      insert(t);done();if($('autocopy').checked)copy(t,'Copied: paste it into your notes')};
-    engine().postMessage({type:'run',id:n,audio:a},[a.buffer]);
+      insert(t);done(speed(secs,m.ms));if($('autocopy').checked)copy(t,'Copied: paste it into your notes')};
+    engine().postMessage({type:'run',id:n,audio:a,model:S.model},[a.buffer]);
   }catch(err){done('Could not read the recording.')}
 }
+const EDGE=/\bEdg\//.test(navigator.userAgent);
+function speed(secs,ms){if(!ms)return '';const s=$('slow');
+  if(ms>Math.max(8000,secs*2500)){s.hidden=false;s.textContent=(EDGE?'That was slower than it should be. In Microsoft Edge, click the padlock in the address bar, turn off “Use enhanced security for this site”, then reload: Edge runs the speech engine in a slow mode on sites it doesn’t know. ':'That was slower than it should be. Close other heavy tabs, plug a laptop in (power saving slows it down), or ')+(S.model==='base'?'Fast mode (below) is about twice as fast.':'try a shorter phrase.')}
+  else s.hidden=true;
+  return 'Wrote '+Math.max(1,Math.round(secs))+' s of speech in '+(ms/1000).toFixed(1)+' s. Ready.'}
 function toggle(){S.rec?stop():start()}
 mic.addEventListener('click',toggle);
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.code==='Space'){e.preventDefault();toggle()}else if(e.key==='Escape'&&S.rec)stop()});
@@ -231,6 +241,9 @@ out.addEventListener('input',()=>{store.set('draft',out.value);count()});
 $('vocab').value=store.get('vocab',DEFAULT_VOCAB);
 $('saveVocab').onclick=()=>{store.set('vocab',$('vocab').value);toast('Rules saved')};
 $('resetVocab').onclick=()=>{$('vocab').value=DEFAULT_VOCAB;store.set('vocab',DEFAULT_VOCAB);toast('Defaults restored')};
+S.model=store.get('model','base')==='fast'?'fast':'base';$('mode').value=S.model;
+$('mode').onchange=e=>{S.model=e.target.value==='fast'?'fast':'base';store.set('model',S.model);$('slow').hidden=true;S.ready=false;
+  if(S.ok&&S.w&&!S.rec&&!S.busy){setStatus('Loading '+(S.model==='fast'?'Fast':'Accurate')+' mode…');S.w.postMessage({type:'load',model:S.model})}};
 ['autocopy','commands'].forEach(k=>{$(k).checked=store.get(k,true);$(k).onchange=e=>store.set(k,e.target.checked)});
 out.value=store.get('draft','');count();
 

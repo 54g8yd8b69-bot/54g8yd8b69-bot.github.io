@@ -12,7 +12,8 @@ run({name:'Landing page',fn:async()=>{
     expect((await pg.request.get(BASE+'/dictate/manifest.webmanifest')).ok(),'Dictate manifest missing');
     const c=await pg.evaluate(()=>dictateClean('Pain from the upper left six full stop new line G.I.C. placed'));expect(c==='Pain from the UL6.\nGIC placed','clean-up: '+JSON.stringify(c));
     const engine=(await pg.request.get(BASE+'/notile/dictate-worker.js')).ok();
-    if(engine){await pg.waitForFunction(()=>/Ready/.test(document.getElementById('status').textContent),null,{timeout:120000});expect(!(await pg.isDisabled('#mic')),'mic disabled')}
+    if(engine){await pg.waitForFunction(()=>/Ready/.test(document.getElementById('status').textContent),null,{timeout:120000});expect(!(await pg.isDisabled('#mic')),'mic disabled');
+      await pg.selectOption('#mode','fast');await pg.waitForFunction(()=>/Ready/.test(document.getElementById('status').textContent),null,{timeout:120000});expect(await pg.evaluate(()=>localStorage.getItem('dictate.model'))==='"fast"','Fast mode not saved')}
     else{await pg.waitForFunction(()=>/not available/.test(document.getElementById('status').textContent),null,{timeout:15000})}
     await noErrors(pg)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
