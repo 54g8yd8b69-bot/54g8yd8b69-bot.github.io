@@ -60,7 +60,9 @@ run({name:'Landing page',fn:async()=>{
     expect(await pg.evaluate(()=>__wax.S.library&&__wax.S.library.sets.length===1),'library did not load');
     await pg.evaluate(()=>__wax.placeSet(__wax.S.library.sets[0]));await idle();
     expect(await pg.evaluate(()=>__wax.teeth().length)===2,'teeth not placed');
-    await pg.click('#tabs button[data-tab="export"]');
+    // the step bar: 6 steps, Save is the last
+    expect(await pg.evaluate(()=>document.querySelectorAll('#steps button').length)===6,'step bar missing');
+    await pg.click('#steps button[data-step="save"]');
     const [dl]=await Promise.all([pg.waitForEvent('download',{timeout:30000}),pg.click('[data-act="export"]')]);
     expect(/^waxup-.*\.zip$/.test(dl.suggestedFilename()),'export file '+dl.suggestedFilename());
     await noErrors(pg)});
