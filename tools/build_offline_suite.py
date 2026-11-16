@@ -14,6 +14,9 @@ How it works
     frame. The service worker is not used (registrations are already skipped on non-https pages).
   * A small shim at the top of each frame turns links to "/app/" into in-file navigation, and serves
     scripts an app loads lazily (DentalAudit's PDF/Word export libraries) from inline copies.
+  * Each app (and each lazily loaded script) is stored deflate-compressed and base64-encoded, and unpacked
+    the first time it is opened — with the browser's DecompressionStream, or a small built-in inflater on
+    browsers without it. That keeps the file well under 16 MiB.
   * ImplantRef is included without its camera scanner (scan.js, ZXing, OCR model, GTIN table): it hides
     the Scan buttons when the scanner isn't present.
 Dictate (/dictate/) is left out: it needs the ~100 MB speech model served from the site.
@@ -25,6 +28,7 @@ import json
 import mimetypes
 import re
 import sys
+import zlib
 from datetime import date
 from pathlib import Path
 
@@ -52,6 +56,31 @@ APPS = [
 LEFT_OUT = ['/dictate/']
 
 warnings = []
+
+
+def pack(text):
+    """Raw-deflate (RFC 1951) and base64, unpacked in the page by unz()."""
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 9)
+    return base64.b64encode(c.compress(text.encode('utf-8')) + c.flush()).decode()
+
+
+# Raw inflate for browsers without DecompressionStream('deflate-raw') (checked against zlib in tests).
+INFLATE_JS = r'''function inflateRaw(src){var out=new Uint8Array(Math.max(1024,src.length*4)),op=0,bb=0,bc=0,ip=0;
+function bits(n){while(bc<n){bb|=src[ip++]<<bc;bc+=8}var v=bb&((1<<n)-1);bb>>>=n;bc-=n;return v}
+function grow(n){if(op+n>out.length){var o=new Uint8Array(Math.max(out.length*2,op+n));o.set(out);out=o}}
+function build(L,n){var c=new Uint16Array(16),s=new Uint16Array(n),f=new Uint16Array(16),i;for(i=0;i<n;i++)c[L[i]]++;c[0]=0;for(i=1;i<16;i++)f[i]=f[i-1]+c[i-1];for(i=0;i<n;i++)if(L[i])s[f[L[i]]++]=i;return{c:c,s:s}}
+function dec(h){var code=0,first=0,idx=0;for(var l=1;l<16;l++){code|=bits(1);var k=h.c[l];if(code-k<first)return h.s[idx+code-first];idx+=k;first=(first+k)<<1;code<<=1}throw new Error('bad data')}
+var LB=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258],LE=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0],
+DB=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577],DE=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13],
+OR=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15],last,i,lh,dh;
+do{last=bits(1);var t=bits(2);
+if(t===0){bb=0;bc=0;var n=src[ip]|src[ip+1]<<8;ip+=4;grow(n);out.set(src.subarray(ip,ip+n),op);op+=n;ip+=n;continue}
+if(t===1){var fl=new Uint8Array(288);for(i=0;i<288;i++)fl[i]=i<144?8:i<256?9:i<280?7:8;lh=build(fl,288);var fd=new Uint8Array(30).fill(5);dh=build(fd,30)}
+else if(t===2){var hl=bits(5)+257,hd=bits(5)+1,hc=bits(4)+4,cl=new Uint8Array(19);for(i=0;i<hc;i++)cl[OR[i]]=bits(3);var ch=build(cl,19),ln=new Uint8Array(hl+hd);
+for(i=0;i<hl+hd;){var sy=dec(ch);if(sy<16)ln[i++]=sy;else{var r,v=0;if(sy===16){v=ln[i-1];r=3+bits(2)}else if(sy===17)r=3+bits(3);else r=11+bits(7);while(r--)ln[i++]=v}}
+lh=build(ln.subarray(0,hl),hl);dh=build(ln.subarray(hl),hd)}else throw new Error('bad block');
+for(;;){var s=dec(lh);if(s<256){grow(1);out[op++]=s}else if(s===256)break;else{s-=257;var len=LB[s]+bits(LE[s]),ds=dec(dh),d=DB[ds]+bits(DE[ds]);grow(len);for(var k=0;k<len;k++){out[op]=out[op-d];op++}}}
+}while(!last);return out.subarray(0,op)}'''
 
 
 def data_uri(path):
@@ -183,9 +212,9 @@ def main():
         if not f.is_file():
             sys.exit(f'missing {f}')
         html, lazy = inline_app(app_id, f, opts)
-        app_js[app_id] = {'path': path, 'html': html}
+        app_js[app_id] = {'path': path, 'z': pack(html)}
         if lazy:
-            lazy_js[app_id] = lazy
+            lazy_js[app_id] = {k: pack(v) for k, v in lazy.items()}
         names[app_id] = (name, opts.get('hidden', False))
 
     style, head, nav, footer = launcher(APPS)
@@ -212,6 +241,8 @@ html,body{{height:100%}}
 #frames{{position:relative;flex:1 1 auto}}
 #frames iframe{{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}}
 #frames iframe[hidden]{{display:none}}
+#opening{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.95rem}}
+#opening[hidden]{{display:none}}
 .offline{{margin:28px 0 0;font-size:.9rem;color:var(--muted)}}
 </style>
 </head>
@@ -222,7 +253,7 @@ html,body{{height:100%}}
 <p class="offline">Offline copy (built {built}): everything in this one file runs without the internet. Drafts and settings save in this browser on this computer only. ImplantRef's camera scanner is not included in this copy.</p>
 {footer}
 </main>
-<div id="view" hidden><div id="bar" role="toolbar" aria-label="Apps"></div><div id="frames"></div></div>
+<div id="view" hidden><div id="bar" role="toolbar" aria-label="Apps"></div><div id="frames"><div id="opening" hidden>Opening…</div></div></div>
 <script>
 var APPS={J(app_js)};
 var LAZY={J(lazy_js)};
@@ -230,6 +261,18 @@ var FONTS={J(fonts())};
 var NAMES={J({k: v[0] for k, v in names.items()})};
 var HIDDEN={J([k for k, v in names.items() if v[1]])};
 var bufs=null;
+{INFLATE_JS}
+function b64u8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}}
+function slowUnz(u){{return new TextDecoder('utf-8').decode(inflateRaw(u))}}
+/* unpack one stored app / script: the browser's own decompressor when it has one, else inflateRaw */
+function unz(s){{var u=b64u8(s);
+  try{{if(typeof DecompressionStream==='function')return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text().catch(function(){{return slowUnz(u)}})}}catch(e){{}}
+  return new Promise(function(res){{res(slowUnz(u))}})}}
+var ready={{}};
+function unpack(id){{if(ready[id])return ready[id];var a=APPS[id],L=LAZY[id]||{{}},keys=Object.keys(L);
+  ready[id]=Promise.all([unz(a.z)].concat(keys.map(function(k){{return unz(L[k])}}))).then(function(r){{
+    a.html=r[0];if(keys.length){{SUITE.lazy[id]={{}};keys.forEach(function(k,i){{SUITE.lazy[id][k]=r[i+1]}})}}return a.html}});
+  return ready[id]}}
 function fontBufs(){{if(bufs)return bufs;bufs=FONTS.map(function(f){{var b=atob(f.d),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return {{f:f.f,s:f.s,w:f.w,b:u.buffer}}}});return bufs}}
 function route(path){{var h=path.split('#'),p=h[0];
   for(var id in APPS)if(APPS[id].path===p)return {{id:id,hash:h[1]||''}};
@@ -237,19 +280,22 @@ function route(path){{var h=path.split('#'),p=h[0];
   for(var id2 in APPS)if(APPS[id2].path===p)return {{id:id2,hash:h[1]||''}};return null}}
 var frames={{}},current=null;
 window.SUITE={{
-  lazy:LAZY,
+  lazy:{{}},
   fonts:function(w){{try{{fontBufs().forEach(function(f){{var ff=new w.FontFace(f.f,f.b.slice(0),{{style:f.s,weight:f.w}});w.document.fonts.add(ff);ff.load().catch(function(){{}})}})}}catch(e){{}}}},
   go:function(path){{if(path==='/'||path===''){{location.hash='';return}}var r=route(path);if(!r)return;location.hash=r.id+(r.hash?'/'+r.hash:'')}}
 }};
 function show(id,sub){{var home=document.getElementById('home'),view=document.getElementById('view');
   if(!id||!APPS[id]){{home.hidden=false;view.hidden=true;current=null;document.title='Notile';return}}
   home.hidden=true;view.hidden=false;current=id;document.title=NAMES[id]+' · Notile';
-  var f=frames[id];
+  var f=frames[id],op=document.getElementById('opening');
   if(!f){{f=document.createElement('iframe');f.title=NAMES[id];f.setAttribute('allow','clipboard-read; clipboard-write');
     if(sub)f.addEventListener('load',function(){{try{{f.contentWindow.location.hash=sub}}catch(e){{}}}},{{once:true}});
-    f.srcdoc=APPS[id].html;document.getElementById('frames').appendChild(f);frames[id]=f}}
+    frames[id]=f;f.hidden=true;op.textContent='Opening '+NAMES[id]+'…';op.hidden=false;
+    unpack(id).then(function(html){{f.srcdoc=html;document.getElementById('frames').appendChild(f);if(current===id){{f.hidden=false;op.hidden=true}}}},
+      function(e){{op.textContent='Could not open '+NAMES[id]+' in this browser ('+(e&&e.message||e)+').'}})}}
   else if(sub){{try{{f.contentWindow.location.hash=sub}}catch(e){{}}}}
-  for(var k in frames)frames[k].hidden=(k!==id);
+  for(var k in frames)frames[k].hidden=(k!==id)||!f.parentNode;
+  if(f.parentNode)op.hidden=true;
   [].forEach.call(document.querySelectorAll('#bar button[data-id]'),function(b){{b.classList.toggle('on',b.dataset.id===id)}})}}
 (function(){{var bar=document.getElementById('bar');
   var h=document.createElement('button');h.className='home';h.textContent='← All apps';h.onclick=function(){{location.hash=''}};bar.appendChild(h);
