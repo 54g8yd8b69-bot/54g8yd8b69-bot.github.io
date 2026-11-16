@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all eleven apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all twelve apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -45,6 +45,25 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#exportTop');await pg.click('#expView button[data-v="report"]');
     const w=await pg.evaluate(()=>lastCanvas.width);expect(w===1240,'report not rendered');
     expect((await pg.request.get(BASE+'/smile-card/manifest.webmanifest')).ok(),'Smile Card manifest missing');await noErrors(pg)});
+  await test('Wax Card opens under the site CSP, loads a scan and a tooth library, places teeth and exports',async()=>{const pg=await page('/wax-card/');
+    await pg.waitForFunction(()=>window.__wax&&window.__wax.S,null,{timeout:15000});
+    expect((await pg.request.get(BASE+'/wax-card/manifest.webmanifest')).ok(),'Wax Card manifest missing');
+    // a small closed box stands in for the upper scan, and two boxes named 11 and 21 for a tooth library
+    const box=(w,h,d,ox=0)=>{const v=[[0,0,0],[w,0,0],[w,h,0],[0,h,0],[0,0,d],[w,0,d],[w,h,d],[0,h,d]].map(p=>[p[0]+ox,p[1],p[2]]);
+      const f=[[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]];
+      const b=Buffer.alloc(84+f.length*50);b.writeUInt32LE(f.length,80);let o=84;
+      for(const t of f){o+=12;for(const i of t){b.writeFloatLE(v[i][0],o);b.writeFloatLE(v[i][1],o+4);b.writeFloatLE(v[i][2],o+8);o+=12}o+=2}return b};
+    const idle=()=>pg.waitForFunction(()=>!document.querySelector('#busy').classList.contains('show'),null,{timeout:30000});
+    await pg.setInputFiles('#fileUpper',{name:'upper.stl',mimeType:'model/stl',buffer:box(50,20,40)});await idle();
+    expect(await pg.evaluate(()=>!!__wax.S.scans.upper),'scan did not load');
+    await pg.setInputFiles('#fileLibrary',[{name:'11.stl',mimeType:'model/stl',buffer:box(8,10,7)},{name:'21.stl',mimeType:'model/stl',buffer:box(8,10,7,9)}]);await idle();
+    expect(await pg.evaluate(()=>__wax.S.library&&__wax.S.library.sets.length===1),'library did not load');
+    await pg.evaluate(()=>__wax.placeSet(__wax.S.library.sets[0]));await idle();
+    expect(await pg.evaluate(()=>__wax.teeth().length)===2,'teeth not placed');
+    await pg.click('#tabs button[data-tab="export"]');
+    const [dl]=await Promise.all([pg.waitForEvent('download',{timeout:30000}),pg.click('[data-act="export"]')]);
+    expect(/^waxup-.*\.zip$/.test(dl.suggestedFilename()),'export file '+dl.suggestedFilename());
+    await noErrors(pg)});
   await test('ImplantRef opens under its CSP with all 3,961 records, exact REF lookup and torque evidence',async()=>{const pg=await page('/implantref/');
     await pg.waitForFunction(()=>window.IMPLANTREF_DATA&&window.ImplantRefCore&&document.querySelector('.page-head h1'),null,{timeout:15000});
     expect(await pg.evaluate(()=>IMPLANTREF_DATA.records.length)===3961,'catalogue incomplete');
@@ -97,7 +116,7 @@ run({name:'Landing page',fn:async()=>{
   await test('DentalAudit: a #/create?template= link starts an audit from that template',async()=>{const pg=await page('/dentalaudit/#/create?template=bpe');
     await pg.waitForFunction(()=>document.querySelector('input[data-bind="title"]'),null,{timeout:15000});await pg.waitForTimeout(300);
     expect(await pg.inputValue('input[data-bind="title"]')==='BPE recording at new patient examination','template not applied');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

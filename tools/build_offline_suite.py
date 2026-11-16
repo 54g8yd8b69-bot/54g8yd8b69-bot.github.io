@@ -4,7 +4,7 @@
 
     python3 tools/build_offline_suite.py --apps <dir containing notile/ set-app/ chrome-card/ ortho-card/> [-o Notile-Suite.html]
 
-Apps hosted in this repo (dentmat, dentalaudit, smile-card, implantref, guide-card) are read from here; the four
+Apps hosted in this repo (dentmat, dentalaudit, smile-card, wax-card, implantref, guide-card) are read from here; the four
 apps with their own repos are read from --apps (clone them next to each other).
 
 How it works
@@ -42,6 +42,7 @@ APPS = [
     ('dentalaudit', 'DentalAudit', '/dentalaudit/', (None, 'dentalaudit/index.html'),
      {'lazy': ['js/vendor/jspdf.umd.min.js', 'js/vendor/jspdf.plugin.autotable.min.js', 'js/vendor/docx.iife.min.js']}),
     ('smile-card', 'Smile Card', '/smile-card/', (None, 'smile-card/index.html'), {}),
+    ('wax-card', 'Wax Card', '/wax-card/', (None, 'wax-card/index.html'), {}),
     ('implantref', 'ImplantRef', '/implantref/', (None, 'implantref/index.html'),
      {'drop': ['src/scan.js', 'data/gtin-data.js']}),
     ('guide-card', 'Guide Card', '/guide-card/', (None, 'guide-card/index.html'), {}),
