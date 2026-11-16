@@ -60,8 +60,15 @@ run({name:'Landing page',fn:async()=>{
     expect(await pg.evaluate(()=>__wax.S.library&&__wax.S.library.sets.length===1),'library did not load');
     await pg.evaluate(()=>__wax.placeSet(__wax.S.library.sets[0]));await idle();
     expect(await pg.evaluate(()=>__wax.teeth().length)===2,'teeth not placed');
-    // the step bar: 6 steps, Save is the last
-    expect(await pg.evaluate(()=>document.querySelectorAll('#steps button').length)===6,'step bar missing');
+    // a smile photo opens under the site CSP (blob: image) and the photo view takes over
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8DwnwEJMDEgAaQ8AAA1pgIC8yQb9wAAAABJRU5ErkJggg==','base64');
+    await pg.setInputFiles('#filePhoto',{name:'smile.png',mimeType:'image/png',buffer:png});
+    await pg.waitForFunction(()=>__wax.S.photo.img&&__wax.S.photo.on,null,{timeout:10000});
+    expect(await pg.evaluate(()=>__wax.S.photo.iw===2&&document.querySelector('#view').classList.contains('photo')),'photo view did not open');
+    await pg.click('#photoBtn');
+    expect(await pg.evaluate(()=>!__wax.S.photo.on),'photo view did not close');
+    // the step bar: 7 steps, Save is the last
+    expect(await pg.evaluate(()=>document.querySelectorAll('#steps button').length)===7,'step bar missing');
     await pg.click('#steps button[data-step="save"]');
     const [dl]=await Promise.all([pg.waitForEvent('download',{timeout:30000}),pg.click('[data-act="export"]')]);
     expect(/^waxup-.*\.zip$/.test(dl.suggestedFilename()),'export file '+dl.suggestedFilename());
