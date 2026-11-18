@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all twelve apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all thirteen apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/tray-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -73,6 +73,23 @@ run({name:'Landing page',fn:async()=>{
     const [dl]=await Promise.all([pg.waitForEvent('download',{timeout:30000}),pg.click('[data-act="export"]')]);
     expect(/^waxup-.*\.zip$/.test(dl.suggestedFilename()),'export file '+dl.suggestedFilename());
     await noErrors(pg)});
+  await test('Tray Card opens under the site CSP, loads its solid engine, builds a tray from a scan, saves a design and keeps the ID label short',async()=>{const pg=await page('/tray-card/');
+    await pg.waitForFunction(()=>window.TC&&TC.mf(),null,{timeout:30000});
+    expect((await pg.request.get(BASE+'/tray-card/manifest.webmanifest')).ok(),'Tray Card manifest missing');
+    // a ridge round a horseshoe stands in for a lower scan: a height field, 1 mm grid
+    const N=61,h=(x,y)=>{const r=Math.hypot(x,y-8),a=Math.atan2(y-8,x);return (a<-0.35&&a>-2.8)?0:8*Math.exp(-((r-18)**2)/40)},P=(i,j)=>[i-30,j-30,h(i-30,j-30)];
+    const tris=[];for(let j=0;j<N-1;j++)for(let i=0;i<N-1;i++){tris.push([P(i,j),P(i+1,j),P(i+1,j+1)],[P(i,j),P(i+1,j+1),P(i,j+1)])}
+    const b=Buffer.alloc(84+tris.length*50);b.writeUInt32LE(tris.length,80);let o=84;for(const t of tris){o+=12;for(const v of t){b.writeFloatLE(v[0],o);b.writeFloatLE(v[1],o+4);b.writeFloatLE(v[2],o+8);o+=12}o+=2}
+    const idle=()=>pg.waitForFunction(()=>!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
+    const [fc]=await Promise.all([pg.waitForEvent('filechooser'),pg.click('#dropScan')]);await fc.setFiles({name:'lower.stl',mimeType:'model/stl',buffer:b});await pg.waitForFunction(()=>!!TC.S.scanGeo,null,{timeout:30000});await idle();
+    expect(await pg.evaluate(()=>!!TC.S.scanGeo),'scan did not load');
+    await pg.evaluate(()=>{const S=TC.S,pts=[];S.scanGeo.computeBoundingBox();const c=S.scanGeo.boundingBox.getCenter(new TC.V());for(let k=0;k<24;k++){const a=k/24*2*Math.PI;pts.push(new TC.V(c.x+24*Math.cos(a),c.y+24*Math.sin(a),S.scanGeo.boundingBox.max.z))}S.margin.pts=pts;S.margin.closed=true;TC.drawMargin()});
+    await pg.evaluate(()=>TC.generate());await idle();
+    expect(await pg.evaluate(()=>!!TC.S.trayMesh&&/generated/.test(document.getElementById('genInfo').textContent)),'tray not generated');
+    const saved=await pg.evaluate(async()=>{const d=await TC.saveData();return d.app==='Tray Card'&&d.margin.pts.length===24&&!!d.scan.b64});expect(saved,'design did not save');
+    await pg.evaluate(()=>TC.gotoStep(6));await pg.fill('#tText','');await pg.type('#tText','john smith 1234');
+    const label=await pg.inputValue('#tText');expect(label.length<=4&&/^[A-Z0-9-]*$/.test(label),'ID label not limited: '+label);
+    await noErrors(pg)});
   await test('ImplantRef opens under its CSP with all 3,961 records, exact REF lookup and torque evidence',async()=>{const pg=await page('/implantref/');
     await pg.waitForFunction(()=>window.IMPLANTREF_DATA&&window.ImplantRefCore&&document.querySelector('.page-head h1'),null,{timeout:15000});
     expect(await pg.evaluate(()=>IMPLANTREF_DATA.records.length)===3961,'catalogue incomplete');
@@ -125,7 +142,7 @@ run({name:'Landing page',fn:async()=>{
   await test('DentalAudit: a #/create?template= link starts an audit from that template',async()=>{const pg=await page('/dentalaudit/#/create?template=bpe');
     await pg.waitForFunction(()=>document.querySelector('input[data-bind="title"]'),null,{timeout:15000});await pg.waitForTimeout(300);
     expect(await pg.inputValue('input[data-bind="title"]')==='BPE recording at new patient examination','template not applied');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

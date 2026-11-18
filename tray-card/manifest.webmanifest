@@ -1,0 +1,22 @@
+{
+  "name": "Tray Card",
+  "short_name": "Tray Card",
+  "description": "Special trays and record bases with Gothic arch plates, for 3D printing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B2E4A",
+  "theme_color": "#0B2E4A",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
