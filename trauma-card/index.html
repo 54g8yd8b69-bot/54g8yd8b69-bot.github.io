@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+<meta name="description" content="Dental trauma record, splint and review planner based on the IADT 2020 guidelines. Runs on your own device.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Trauma Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Trauma Card</title>
+<style>
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --teal2:#3FA9A0;
+  --bg:#F3F7F9; --surface:#FFFFFF; --fg:#10273A; --muted:#566C7D; --line:#D5E0E7;
+  --chip:#FFFFFF; --sel:#1C7293; --sel-fg:#FFFFFF; --sug:#1C7293; --hi:#E8F2F6;
+  --warn-bg:#FFF4E0; --warn-fg:#7A4B00; --warn-line:#F0C77A;
+  --bad-bg:#FDECEC; --bad-fg:#8A1F1F; --bad-line:#F2B8B8;
+  --ok-bg:#E6F5F1; --ok-fg:#1D5F52; --ok-line:#A9DCCF;
+  --tab-on:#1C7293; --tab-on-fg:#FFFFFF; --head:#0B2E4A; --btn:#1C7293; --btn-fg:#FFFFFF;
+  --shadow:0 1px 2px rgba(34,52,61,.04);
+  --display:Cambria,Caladea,"Source Serif 4",Georgia,serif;
+  --body:Calibri,Carlito,"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  --mono:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --navy:#E3ECF2; --teal:#4FB3C9; --teal2:#5CC3B7;
+  --bg:#08141D; --surface:#0F2130; --fg:#E3ECF2; --muted:#93A9B9; --line:#24394A;
+  --chip:#0F2130; --sel:#4FB3C9; --sel-fg:#08141D; --sug:#4FB3C9; --hi:#13324A;
+  --warn-bg:#3A2A0C; --warn-fg:#F2CF8A; --warn-line:#6B5020;
+  --bad-bg:#3A1416; --bad-fg:#F5B3B3; --bad-line:#6E2A2E;
+  --ok-bg:#0F3330; --ok-fg:#9EE0D2; --ok-line:#22574F;
+  --tab-on:#4FB3C9; --tab-on-fg:#08141D; --head:#E3ECF2; --btn:#4FB3C9; --btn-fg:#08141D;
+  --shadow:0 1px 3px rgba(0,0,0,.5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --navy:#E3ECF2; --teal:#4FB3C9; --teal2:#5CC3B7;
+  --bg:#08141D; --surface:#0F2130; --fg:#E3ECF2; --muted:#93A9B9; --line:#24394A;
+  --chip:#0F2130; --sel:#4FB3C9; --sel-fg:#08141D; --sug:#4FB3C9; --hi:#13324A;
+  --warn-bg:#3A2A0C; --warn-fg:#F2CF8A; --warn-line:#6B5020;
+  --bad-bg:#3A1416; --bad-fg:#F5B3B3; --bad-line:#6E2A2E;
+  --ok-bg:#0F3330; --ok-fg:#9EE0D2; --ok-line:#22574F;
+  --tab-on:#4FB3C9; --tab-on-fg:#08141D; --head:#E3ECF2; --btn:#4FB3C9; --btn-fg:#08141D;
+  --shadow:0 1px 3px rgba(0,0,0,.5); color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.45}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:120px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin-bottom:16px}
+h1{font-family:var(--display);font-size:1.75rem;margin:0;color:var(--head)}
+h1 span{color:var(--teal2)}
+a.homelink{color:inherit;text-decoration:none}
+a.homelink[href]:hover{opacity:.85}
+.sub{color:var(--muted);font-size:.95rem;margin:0}
+.hbtns{display:flex;gap:6px;flex-wrap:wrap}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+.tab{border:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-weight:700;padding:8px 14px;border-radius:8px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--tab-on);color:var(--tab-on-fg);border-color:var(--tab-on)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,480px);gap:20px;align-items:start}
+@media (max-width:880px){.grid{grid-template-columns:minmax(0,1fr)}}
+.form{display:flex;flex-direction:column;gap:14px;min-width:0}
+section.card{background:var(--surface);border-radius:10px;box-shadow:var(--shadow);padding:16px 18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(--head)}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.cardhead h2 small{font-family:var(--body);font-weight:400;color:var(--muted);font-size:.85rem;margin-left:6px}
+section.tooth{border-left:4px solid var(--teal2)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.row2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.lbl{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.lbl small{text-transform:none;letter-spacing:0;font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--chip);color:var(--fg);font:inherit;font-size:.95rem;padding:7px 11px;border-radius:6px;cursor:pointer;line-height:1.2;text-align:left}
+.chip:hover{border-color:var(--teal2)}
+.chip.sg{border-color:var(--sug);box-shadow:inset 0 0 0 1px var(--sug)}
+.chip.sg::after{content:" ★";color:var(--sug)}
+.chip[aria-pressed="true"]{background:var(--sel);color:var(--sel-fg);border-color:var(--sel)}
+.chip.sg[aria-pressed="true"]::after{color:inherit}
+.chip.multi[aria-pressed="true"]::before{content:"✓ ";font-weight:700}
+input[type=text],input[type=number],input[type=date],textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+input.short{max-width:200px}
+textarea{min-height:64px;resize:vertical}
+:focus-visible{outline:2px solid var(--teal2);outline-offset:2px}
+.btn{font:inherit;font-weight:700;border:0;border-radius:6px;padding:8px 14px;cursor:pointer}
+.btn.primary{background:var(--btn);color:var(--btn-fg)}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn.small{padding:5px 10px;font-size:.85rem}
+.btn.link{background:none;border:0;color:var(--teal);padding:4px 6px;font-weight:700}
+/* tooth chart */
+.tq{display:grid;grid-template-columns:1fr 1fr}
+.qd{padding:8px;min-width:0}
+.qd.q0,.qd.q2{border-right:2px solid var(--line)}
+.qd.q0,.qd.q1{border-bottom:2px solid var(--line)}
+.qh{font-size:.72rem;font-weight:700;letter-spacing:.06em;color:var(--muted);margin:0 0 6px}
+.q0 .qh,.q2 .qh{text-align:right}
+.trow{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
+.trow.p5{grid-template-columns:repeat(5,minmax(0,1fr))}
+.tb{font:inherit;font-weight:700;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;min-height:44px;padding:2px 0;cursor:pointer}
+.tb[aria-pressed="true"]{background:var(--sel);color:var(--sel-fg);border-color:var(--sel)}
+.tb.inj{box-shadow:inset 0 -3px 0 var(--teal2)}
+@media (max-width:560px){.tq{grid-template-columns:1fr}.qd.q0,.qd.q2{border-right:0}.qd{border-bottom:2px solid var(--line)}.q0 .qh,.q2 .qh{text-align:left}}
+.hint{font-size:.88rem;color:var(--muted);margin:0}
+/* info boxes */
+.box{border:1px solid var(--line);background:var(--hi);border-radius:8px;padding:10px 12px;font-size:.9rem}
+.box ul{margin:4px 0 0;padding-left:18px}
+.box li{margin:2px 0}
+.box b{color:var(--head)}
+.box.warn{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-line)}
+.box.warn b{color:inherit}
+.box.bad{background:var(--bad-bg);color:var(--bad-fg);border-color:var(--bad-line)}
+.box.bad b{color:inherit}
+.box.ok{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-line)}
+.box.ok b{color:inherit}
+.splintline{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pill{display:inline-block;font-size:.78rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--hi);color:var(--teal);border:1px solid var(--line)}
+/* timeline */
+.tl{list-style:none;margin:0;padding:0;position:relative}
+.tl::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tl li{position:relative;padding:6px 0 10px 30px}
+.tl li::before{content:"";position:absolute;left:3px;top:11px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--teal2)}
+.tl li.sr::before{background:var(--teal2)}
+.tl li.ms::before{border-radius:2px;border-color:var(--teal);background:var(--hi)}
+.tl li.past{opacity:.55}
+.tl li.next .tld{color:var(--teal)}
+.tl li.next::after{content:"Next";position:absolute;right:0;top:6px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal)}
+.tl li.cur{background:var(--hi);border-radius:8px}
+.tl li.cur::after{content:"Today's visit";position:absolute;right:8px;top:6px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal)}
+.tld{font-weight:700}
+.tld small{font-weight:400;color:var(--muted)}
+.tlt{font-size:.9rem;color:var(--muted)}
+.tlt b{color:var(--fg);font-weight:700}
+/* note */
+.note{border:1px solid var(--line);position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--surface);border-radius:10px;box-shadow:var(--shadow);display:flex;flex-direction:column;height:calc(100vh - 24px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
+.note-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.note-head strong{font-family:var(--display);font-size:1.05rem}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+#out{display:block;margin:10px 12px;padding:12px;font-family:var(--mono);font-size:.82rem;line-height:1.55;white-space:pre-wrap;overflow:auto;flex:1;min-height:160px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;resize:none;width:auto}
+.edbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;padding:8px 14px;background:var(--hi);font-size:.85rem;border-bottom:1px solid var(--line)}
+.foot{font-size:.68rem;line-height:1.35;color:var(--muted);padding:6px 14px 8px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.mbar{display:none}
+@media (max-width:880px){
+  .note{position:static;height:auto}
+  #out{min-height:360px;flex:none}
+  .mbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;gap:8px;justify-content:space-between;align-items:center;background:#0B2E4A;color:#fff;
+    padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .mbar span{font-size:.9rem;opacity:.85}
+  .mbar .btn.primary{background:#3FA9A0;color:#08141D}
+}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom,0px));background:var(--sel);color:var(--sel-fg);font-weight:700;padding:8px 16px;border-radius:999px;z-index:9;max-width:calc(100vw - 32px);text-align:center}
+[hidden]{display:none!important}
+.empty{color:var(--muted);font-size:.95rem}
+/* patient advice sheet: preview dialog + print */
+dialog#advDlg{border:0;border-radius:12px;padding:0;width:min(760px,calc(100vw - 16px));max-height:calc(100vh - 24px);overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.3);background:var(--surface);color:var(--fg)}
+dialog#advDlg::backdrop{background:rgba(8,20,30,.55)}
+.dlghead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+.dlghead strong{font-family:var(--display);font-size:1.1rem}
+.sheet{background:#fff;color:#000;margin:16px;padding:24px;border-radius:6px;font-family:Calibri,Carlito,Arial,sans-serif;line-height:1.45;border:1px solid #D5E0E7}
+.sheet h1{font-family:Cambria,Georgia,serif;color:#0B2E4A;font-size:1.6rem;margin:0 0 6px}
+.sheet h2{font-family:Cambria,Georgia,serif;color:#1C7293;font-size:1.1rem;margin:18px 0 4px}
+.sheet .pline{border-bottom:1px solid #999;display:inline-block;min-width:200px}
+.sheet table{border-collapse:collapse;width:100%}
+.sheet td{border-bottom:1px solid #ccc;padding:5px 6px;vertical-align:top}
+.sheet .pfoot{margin-top:18px;font-size:.8rem;color:#555}
+#print{display:none}
+@media print{
+  body{background:#fff;color:#000}
+  .wrap,.mbar,.toast,dialog{display:none!important}
+  #print{display:block;font-family:Calibri,Carlito,Arial,sans-serif;color:#000;font-size:12pt;line-height:1.45;padding:0}
+  #print h1{font-family:Cambria,Georgia,serif;color:#0B2E4A;font-size:20pt;margin:0 0 4pt}
+  #print h2{font-family:Cambria,Georgia,serif;color:#1C7293;font-size:13pt;margin:14pt 0 4pt}
+  #print .pline{border-bottom:1px solid #999;display:inline-block;min-width:240px}
+  #print table{border-collapse:collapse;width:100%}
+  #print td{border-bottom:1px solid #ccc;padding:4pt 6pt;vertical-align:top}
+  #print .pfoot{margin-top:18pt;font-size:9pt;color:#555}
+  @page{size:A4;margin:18mm}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><a class="homelink" href="/" title="Back to all apps">Trauma <span>Card</span></a></h1>
+      <p class="sub">Dental trauma record, splint and review planner, based on IADT 2020</p>
+    </div>
+    <div class="hbtns">
+      <button class="btn ghost small" data-act="example">Load example</button>
+      <button class="btn ghost small" data-act="theme" id="themeBtn" aria-label="Switch colour theme">Theme: auto</button>
+      <button class="btn ghost small" data-act="reset">New patient</button>
+    </div>
+  </header>
+  <div class="tabs" role="tablist" aria-label="Visit type">
+    <button class="tab" role="tab" data-act="mode" data-mode="initial" aria-selected="true">New injury</button>
+    <button class="tab" role="tab" data-act="mode" data-mode="review" aria-selected="false">Review visit</button>
+  </div>
+  <div class="grid">
+    <main class="form" id="form"></main>
+    <aside class="note" aria-label="Clinical note">
+      <div class="note-head">
+        <strong>Clinical note</strong>
+        <div class="btns">
+          <button class="btn primary" data-act="copy">Copy note</button>
+          <button class="btn ghost" data-act="letter" title="Opens Letter Card with this note ready to import">Send to Letter Card</button>
+          <button class="btn ghost" data-act="print">Patient advice sheet</button>
+        </div>
+      </div>
+      <div class="edbar" id="edbar" hidden><span>Edited by hand. Form changes won't overwrite it.</span><button class="btn ghost small" data-act="regen">Rebuild from form</button></div>
+      <textarea id="out" spellcheck="false" aria-label="Generated clinical note"></textarea>
+      <div class="foot">
+        <span>Reference aid based on the IADT 2020 guidelines (Bourguignon et al.; Fouad et al.; Day et al., Dent Traumatol 36(4)). Clinical judgement applies.</span>
+        <span>No patient identifiers are asked for or stored. Nothing is kept when the page is closed.</span>
+      </div>
+    </aside>
+  </div>
+</div>
+<div class="mbar"><span id="mstat">Trauma note</span><button class="btn primary" data-act="copy">Copy note</button></div>
+<div id="print" aria-hidden="true"></div>
+<dialog id="advDlg" aria-label="Patient advice sheet">
+  <div class="dlghead"><strong>Patient advice sheet</strong>
+    <div class="btns"><button class="btn primary small" data-act="doprint">Print</button><button class="btn ghost small" data-act="copyadv">Copy text</button><button class="btn ghost small" data-act="closedlg">Close</button></div></div>
+  <div class="sheet" id="advView"></div>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(()=>{
+'use strict';
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const todayISO=()=>iso(new Date());
+const parseISO=s=>{if(!s||!/^\d{4}-\d{2}-\d{2}$/.test(s))return null;const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,12)};
+const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const addMonths=(d,n)=>{const x=new Date(d);const day=x.getDate();x.setDate(1);x.setMonth(x.getMonth()+n);const last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();x.setDate(Math.min(day,last));return x};
+const dayDiff=(a,b)=>Math.round((b-a)/864e5);
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const fmtL=d=>`${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`;
+const fmtS=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+const lc1=s=>s&&/^[A-Z][a-z]/.test(s)?s.charAt(0).toLowerCase()+s.slice(1):s;
+const sent=a=>a.map((x,i)=>i?lc1(x):x).join('; ');
+const uc1=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+const uniq=a=>[...new Set(a)];
+const listJoin=a=>a.length<2?(a[0]||''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+const onSite=(()=>{try{const h=location.hostname;return !!window.__SUITE_APP||/(^|\.)notile\.co\.uk$/.test(h)||h==='localhost'||h==='127.0.0.1'}catch(e){return false}})();
+if(!onSite)document.querySelectorAll('a.homelink').forEach(a=>{a.removeAttribute('href');a.removeAttribute('title')});
+function store(k,v){try{if(v===undefined)return localStorage.getItem(k);if(v===null)localStorage.removeItem(k);else localStorage.setItem(k,v)}catch(e){return null}}
+
+/* ---------- review time points ---------- */
+const PT={
+  w1:{u:'w',n:1,lab:'1 week',tol:2}, w2:{u:'w',n:2,lab:'2 weeks',tol:2}, w4:{u:'w',n:4,lab:'4 weeks',tol:3},
+  w68:{u:'w',n:7,lab:'6–8 weeks',lo:42,hi:56}, w8:{u:'w',n:8,lab:'8 weeks',tol:4}, w12:{u:'w',n:12,lab:'12 weeks',tol:5},
+  m1:{u:'m',n:1,lab:'1 month',tol:3}, m2:{u:'m',n:2,lab:'2 months',tol:5}, m3:{u:'m',n:3,lab:'3 months',tol:7},
+  m4:{u:'m',n:4,lab:'4 months',tol:7}, m6:{u:'m',n:6,lab:'6 months',tol:10}, y1:{u:'m',n:12,lab:'1 year',tol:14},
+  y2:{u:'m',n:24,lab:'2 years',tol:21}, y3:{u:'m',n:36,lab:'3 years',tol:21}, y4:{u:'m',n:48,lab:'4 years',tol:21}, y5:{u:'m',n:60,lab:'5 years',tol:21}
+};
+const Y5=['y1','y2','y3','y4','y5'];
+const durDays=s=>s.u==='w'?s.n*7:Math.round(s.n*30.44);
+const durLab=s=>s.u==='w'?`${s.n} week${s.n>1?'s':''}`:`${s.n} month${s.n>1?'s':''}`;
+
+/* ---------- injury definitions: permanent (Bourguignon 2020; Fouad 2020) ---------- */
+const RX1='1 periapical', RX3='1 periapical + 2 angled periapicals + occlusal', RX2='1 periapical + 2 angled periapicals';
+const PERM={
+  infraction:{n:'Enamel infraction',g:'hard',fu:[],rad:RX1,rads:['Periapical'],tx:['No treatment required','Etched and sealed'],
+    info:t=>['No follow-up needed for an isolated infraction (follow the luxation schedule if combined).']},
+  enamel:{n:'Enamel fracture',g:'hard',fu:['w68','y1'],rad:RX1,rads:['Periapical'],tx:['Fragment reattached','Sharp edges smoothed','Composite restoration'],
+    info:t=>['Account for missing fragments; soft tissue radiograph of the lip if lacerated and a fragment is missing.']},
+  ed:{n:'Enamel–dentine fracture',g:'hard',fu:['w68','y1'],rad:RX1,rads:['Periapical'],tx:['Fragment rehydrated and bonded','Dentine covered with GIC','Bonded composite restoration','Ca(OH)₂ liner (within 0.5 mm of pulp)'],
+    info:t=>['Rehydrate a dry fragment for 20 min in water or saline before bonding.','Ca(OH)₂ liner if within 0.5 mm of the pulp; replace temporary cover promptly.']},
+  edp:{n:'Enamel–dentine–pulp fracture',g:'hard',fu:['w68','m3','m6','y1'],rad:RX1,rads:['Periapical'],tx:['Partial pulpotomy','Direct pulp cap','Calcium silicate over pulp wound','Non-setting Ca(OH)₂ over pulp wound','Pulpectomy (post needed)','Fragment bonded','Composite restoration'],
+    info:t=>[t.apex==='immature'?'Immature: preserve the pulp (partial pulpotomy or pulp cap).':'Mature: conservative pulp treatment still preferred; RCT if a post is needed for retention.','Use non-setting Ca(OH)₂ or a non-staining calcium silicate on the pulp wound.']},
+  cr:{n:'Crown–root fracture, no pulp exposure',g:'hard',fu:['w1','w68','m3','m6',...Y5],rad:RX2,rads:['Periapical','2 angled periapicals'],tx:['Mobile fragment temporarily stabilised','Coronal fragment removed and restored','Exposed dentine covered','Definitive plan to follow'],
+    info:t=>['Temporary stabilisation of a mobile fragment until a definitive plan; assess sub- vs supra-alveolar extent (CBCT can help).','Later options: orthodontic/surgical extrusion, RCT and restoration, root submergence, intentional replantation, extraction, autotransplantation.']},
+  crp:{n:'Crown–root fracture, pulp exposed',g:'hard',fu:['w1','w68','m3','m6',...Y5],rad:RX3,rads:['Periapical','2 angled periapicals','Upper standard occlusal'],tx:['Mobile fragment temporarily stabilised','Partial pulpotomy','Pulpectomy','Exposed dentine covered','Definitive plan to follow'],
+    info:t=>[t.apex==='immature'?'Immature: partial pulpotomy (Ca(OH)₂ or calcium silicate) to preserve the pulp.':'Mature: pulp removal usually indicated.','Temporary stabilisation of a mobile fragment until a definitive plan.']},
+  root:{n:'Root fracture',g:'hard',fu:['w4','w68','m4','m6',...Y5],rad:RX3+' (CBCT if unclear)',rads:['Periapical','2 angled periapicals','Upper standard occlusal'],
+    tx:['Coronal segment repositioned','Position confirmed radiographically','Passive flexible splint'],
+    splint:t=>t.opts.level==='Cervical third'?{u:'m',n:4}:{u:'w',n:4},splintDef:true,
+    info:t=>['Reposition a displaced coronal segment; do not remove a cervical coronal fragment at the emergency visit.','No endodontics at the emergency visit. If necrosis develops, RCT of the coronal segment is usually all that is needed.',t.opts.level==='Cervical third'?'Cervical third: splint up to 4 months.':'Passive flexible splint 4 weeks.']},
+  alv:{n:'Alveolar fracture',g:'hard',fu:['w4','w68','m4','m6',...Y5],rad:RX3+' (± OPT/CBCT)',rads:['Periapical','2 angled periapicals','Upper standard occlusal','OPT'],
+    tx:['Segment repositioned under LA','Splinted','Gingival laceration sutured'],splint:{u:'w',n:4},splintDef:true,
+    info:t=>['Passive flexible splint 4 weeks. RCT is contraindicated at the emergency visit.','Monitor the pulp of every tooth in the segment; mild bone tenderness can persist for months.']},
+  conc:{n:'Concussion',g:'lux',fu:['w4','y1'],rad:RX1,rads:['Periapical'],tx:['No treatment required'],
+    info:t=>['Monitor pulp for at least 1 year.']},
+  sub:{n:'Subluxation',g:'lux',fu:['w2','w12','m6','y1'],rad:RX3,rads:['Periapical','2 angled periapicals','Upper standard occlusal'],tx:['No treatment required','Flexible splint for comfort'],
+    splint:{u:'w',n:2},splintDef:false,
+    info:t=>['Splint only if excessively mobile or tender on biting (up to 2 weeks).','Monitor pulp for at least 1 year.']},
+  ext:{n:'Extrusive luxation',g:'lux',fu:['w2','w4','w8','w12','m6',...Y5],rad:RX3,rads:['Periapical','2 angled periapicals','Upper standard occlusal'],
+    tx:['Repositioned under LA','Passive flexible splint'],dir:['Coronal (extruded)'],
+    splint:t=>t.opts.bone?{u:'w',n:6}:{u:'w',n:2},splintDef:true,
+    info:t=>['Reposition gently under LA; passive flexible splint 2 weeks'+(t.opts.bone?' + 4 weeks for marginal bone breakdown (6 weeks total).':'.'),
+      t.apex==='mature'?'Mature: if necrosis is anticipated, Ca(OH)₂ from 1–2 weeks (up to 1 month) or corticosteroid–antibiotic immediately (≥6 weeks). Keep medicament off the access walls (discolouration).':'Immature: monitor; treat necrosis with methods suited to root development.']},
+  lat:{n:'Lateral luxation',g:'lux',fu:['w2','w4','w8','w12','m6',...Y5],rad:RX3,rads:['Periapical','2 angled periapicals','Upper standard occlusal'],
+    tx:['Disimpacted and repositioned under LA','Passive flexible splint'],dir:['Palatal crown displacement','Labial crown displacement','Mesial','Distal'],
+    splint:t=>t.opts.bone?{u:'w',n:8}:{u:'w',n:4},splintDef:true,
+    info:t=>['Disimpact the apex then reposition under LA; passive flexible splint 4 weeks'+(t.opts.bone?' + 4 weeks for marginal bone / socket wall fracture (8 weeks total).':'.'),
+      'Endodontic assessment at about 2 weeks.',
+      t.apex==='mature'?'Mature: pulp likely to necrose. Start RCT with corticosteroid–antibiotic or Ca(OH)₂ to prevent inflammatory resorption.':'Immature: spontaneous revascularisation possible; treat promptly if necrosis with inflammatory resorption develops.']},
+  intr:{n:'Intrusive luxation',g:'lux',fu:['w2','w4','w8','w12','m6',...Y5],rad:RX3,rads:['Periapical','2 angled periapicals','Upper standard occlusal'],
+    tx:['Allowed to re-erupt spontaneously','Surgically repositioned','Orthodontic repositioning planned','Passive flexible splint'],
+    splint:{u:'w',n:4},splintDef:t=>t.apex==='mature'&&!!t.opts.depth&&t.opts.depth!=='Under 3 mm',
+    info:t=>{
+      if(t.apex==='immature')return['Immature: allow spontaneous re-eruption whatever the depth. If none by 8 weeks, start orthodontic repositioning.','Monitor the pulp; revascularisation can occur. Make sure parents know why follow-up matters.'];
+      const d=t.opts.depth, a=[];
+      if(d==='Under 3 mm')a.push('Under 3 mm: allow re-eruption. If none by 8 weeks, reposition surgically and splint, or orthodontically before ankylosis.');
+      else if(d==='3–7 mm')a.push('3–7 mm: reposition surgically (preferred) or orthodontically.');
+      else if(d==='Over 7 mm')a.push('Over 7 mm: reposition surgically.');
+      else a.push('Record the depth of intrusion to see the IADT repositioning advice.');
+      a.push('Mature: the pulp almost always necroses. Start RCT at 2 weeks or as soon as position allows (corticosteroid–antibiotic or Ca(OH)₂).');
+      a.push('Splint removal at 4 weeks per the IADT follow-up table (the text gives 2 weeks for <3 mm teeth repositioned surgically after failed re-eruption).');
+      return a;}},
+  avul:{n:'Avulsion',g:'lux',fu:t=>t.opts.scen==='Not replanted'?[]:(t.apex==='immature'?['w2','m1','m2','m3','m6',...Y5]:['w2','w4','m3','m6',...Y5]),
+    rad:RX3+' (confirm position after replantation)',rads:['Periapical','2 angled periapicals','Upper standard occlusal'],
+    tx:['Replanted with gentle digital pressure','Socket irrigated with saline','Position checked radiographically','Gingival lacerations sutured','Systemic antibiotics prescribed','Tetanus status checked'],
+    splint:t=>t.opts.alvfx?{u:'w',n:4}:{u:'w',n:2},splintDef:t=>t.opts.scen!=='Not replanted',
+    info:t=>{
+      const a=[], s=t.opts.scen;
+      if(s==='Not replanted'){a.push('Not replanted: plan space maintenance or replacement with the MDT (RBB, RPD, orthodontic space closure, autotransplantation; implant after growth).');return a}
+      if(s==='Dry over 60 min')a.push('Dry over 60 min: PDL likely non-viable and ankylosis expected, but replantation is still usually correct. In growing patients, warn that decoronation or autotransplantation may be needed later.');
+      else if(s==='Replanted before arrival')a.push('Replanted before arrival: leave in place, correct position with light digital pressure (re-site if wrong socket/rotated, up to 48 h).');
+      else if(s)a.push('Physiological storage, dry under 60 min: rinse, irrigate socket, replant slowly without force.');
+      a.push('Passive flexible splint (≤0.4 mm SS wire or 0.13–0.25 mm nylon) for 2 weeks'+(t.opts.alvfx?'; alveolar/jaw fracture: more rigid splint about 4 weeks.':'; longer for short immature roots.'));
+      a.push(t.apex==='immature'?'Open apex: aim for revascularisation. No RCT unless necrosis and infection are shown at follow-up.':'Closed apex: start RCT within 2 weeks. Ca(OH)₂ up to 1 month then obturate, or corticosteroid(–antibiotic) placed immediately and left ≥6 weeks.');
+      a.push('Systemic antibiotics (amoxicillin or penicillin first line; avoid tetracyclines under 12), check tetanus, chlorhexidine twice daily for 2 weeks.');
+      return a;}}
+};
+const HARD_P=['infraction','enamel','ed','edp','cr','crp','root','alv'];
+const LUX_P=['conc','sub','ext','lat','intr','avul'];
+
+/* ---------- primary dentition (Day 2020) ---------- */
+const RXP='Periapical or occlusal at presentation';
+const PRIM={
+  enamel:{n:'Enamel fracture',g:'hard',fu:[],rad:'No radiograph needed',rads:[],tx:['Sharp edges smoothed'],
+    info:t=>['No clinical or radiographic follow-up needed.']},
+  ed:{n:'Enamel–dentine fracture',g:'hard',fu:['w68'],rad:'Baseline radiograph optional',rads:[],tx:['Dentine covered with GIC','Composite restoration'],
+    info:t=>['Look for missing fragments, including any embedded in the lip.']},
+  edp:{n:'Enamel–dentine–pulp fracture',g:'hard',fu:['w1','w68','y1R'],rad:RXP,rads:['Periapical'],tx:['Partial pulpotomy under LA','Cervical pulpotomy','Observed: rapid referral to child-oriented team'],
+    info:t=>['Partial pulpotomy under LA (cervical pulpotomy for large exposures). Observation only with rapid referral (within days) to a child-oriented team.','Radiograph at 1 year after pulp treatment.']},
+  cr:{n:'Crown–root fracture',g:'hard',p:['Retained','Extracted'],fu:t=>t.opts.p==='Extracted'?[]:['w1','w68','y1R'],rad:RXP,rads:['Periapical'],
+    tx:['Loose fragment removed','Dentine covered with GIC','Pulpotomy','Pulpectomy','Tooth extracted','Firm root fragment left in situ'],
+    info:t=>['Remove the loose fragment and assess restorability; if unrestorable, extract (protect the successor) or leave a firm root fragment.']},
+  root:{n:'Root fracture',g:'hard',p:['Not displaced / spontaneous repositioning','Repositioned and splinted','Coronal fragment extracted'],
+    fu:t=>t.opts.p==='Repositioned and splinted'?['w1','w4','w8','y1']:t.opts.p==='Coronal fragment extracted'?['y1']:['w1','w68','y1'],
+    rad:RXP,rads:['Periapical'],tx:['Allowed to reposition spontaneously','Gently repositioned','Flexible splint','Coronal fragment extracted (apical left to resorb)'],
+    splint:{u:'w',n:4},splintDef:t=>t.opts.p==='Repositioned and splinted',concern:true,
+    info:t=>['Displaced and very mobile: extract the coronal fragment only (apical part left to resorb) or gently reposition and splint 4 weeks.']},
+  alv:{n:'Alveolar fracture',g:'hard',fu:['w1','w4R','w8','y1R','age6'],rad:RXP+' (lateral view can help)',rads:['Upper standard occlusal'],
+    tx:['Segment repositioned under LA','Flexible splint'],splint:{u:'w',n:4},splintDef:true,succ:true,
+    info:t=>['Reposition a mobile or occlusion-interfering segment under LA; flexible splint to uninjured teeth for 4 weeks.','Radiographs at 4 weeks and 1 year to check the primary tooth and permanent germs.']},
+  conc:{n:'Concussion',g:'lux',fu:['w1','w68'],rad:'No baseline radiograph',rads:[],tx:['Observation'],info:t=>['Observation only.']},
+  sub:{n:'Subluxation',g:'lux',fu:['w1','w68'],rad:RXP,rads:['Periapical'],tx:['Observation'],concern:true,info:t=>['Observation only.']},
+  ext:{n:'Extrusive luxation',g:'lux',p:['Spontaneous repositioning','Extracted'],fu:['w1','w68','y1'],rad:RXP,rads:['Periapical'],
+    tx:['Allowed to reposition spontaneously','Extracted under LA'],concern:true,
+    info:t=>['Extract under LA if excessively mobile or extruded more than 3 mm; otherwise allow spontaneous repositioning.']},
+  lat:{n:'Lateral luxation',g:'lux',p:['Spontaneous repositioning','Repositioned and splinted','Extracted'],
+    fu:t=>t.opts.p==='Repositioned and splinted'?['w1','w4','w8','m6','y1']:t.opts.p==='Extracted'?[]:['w1','w68','m6','y1'],
+    rad:RXP,rads:['Periapical'],tx:['Allowed to reposition spontaneously','Gently repositioned under LA','Flexible splint','Extracted (aspiration risk)'],
+    splint:{u:'w',n:4},splintDef:t=>t.opts.p==='Repositioned and splinted',concern:true,
+    info:t=>['Little or no occlusal interference: spontaneous repositioning, usually within 6 months.','Severe displacement: extract if aspiration risk, or reposition under LA and splint 4 weeks if unstable.']},
+  intr:{n:'Intrusive luxation',g:'lux',fu:t=>['w1','w68','m6','y1'].concat(t.opts.severe?['age6']:[]),rad:RXP,rads:['Periapical'],
+    tx:['Allowed to re-erupt spontaneously','Rapid referral to child-oriented team'],succ:true,
+    info:t=>['Allow spontaneous re-eruption in any direction (usually within 6 months, sometimes up to 1 year). Immediate extraction is no longer advised.','Rapid referral (within a couple of days) to a child-oriented team.']},
+  avul:{n:'Avulsion',g:'lux',fu:['w68','age6'],rad:'Radiograph essential if tooth not found (exclude intrusion)',rads:['Upper standard occlusal'],
+    tx:['Not replanted (IADT)','Socket checked','Radiograph to exclude intrusion of missing tooth'],succ:true,
+    info:t=>['Avulsed primary teeth are not replanted.','If the tooth is not found, radiograph to exclude intrusion; refer for medical evaluation if respiratory symptoms (possible aspiration).']}
+};
+const HARD_D=['enamel','ed','edp','cr','root','alv'];
+const LUX_D=['conc','sub','ext','lat','intr','avul'];
+
+/* ---------- teeth ---------- */
+const PQ={UR:[8,7,6,5,4,3,2,1],UL:[1,2,3,4,5,6,7,8],LR:[8,7,6,5,4,3,2,1],LL:[1,2,3,4,5,6,7,8]};
+const DQ={UR:['E','D','C','B','A'],UL:['A','B','C','D','E'],LR:['E','D','C','B','A'],LL:['A','B','C','D','E']};
+const ARCH_ORDER=d=>{const Q=d==='perm'?PQ:DQ;return{U:[...Q.UR.map(x=>'UR'+x),...Q.UL.map(x=>'UL'+x)],L:[...Q.LR.map(x=>'LR'+x),...Q.LL.map(x=>'LL'+x)]}};
+const TNAME={1:'central incisor',2:'lateral incisor',3:'canine',4:'first premolar',5:'second premolar',6:'first molar',7:'second molar',8:'third molar',A:'central incisor',B:'lateral incisor',C:'canine',D:'first molar',E:'second molar'};
+const SUCC={A:1,B:2,C:3,D:4,E:5};
+const plainTooth=c=>{const q=c.slice(0,2),x=c.slice(2);const side=(q[0]==='U'?'upper ':'lower ')+(q[1]==='R'?'right ':'left ');return side+(/[A-E]/.test(x)?'baby ':'')+TNAME[x]+' ('+c+')'};
+
+/* ---------- state ---------- */
+const DEF_ADV=['Soft diet for 2 weeks','Soft toothbrush after meals','Avoid contact sports until reviewed','Return if pain, swelling or discolouration'];
+const blankTooth=()=>({hard:'',lux:'',apex:'mature',opts:{dir:[],bone:false,level:'',depth:'',scen:'',med:'',dry:'',alvfx:false,p:'',severe:false},tx:[],splint:null,
+  f:{spl:'',sym:[],col:'',mob:'',perc:[],cold:'',ept:'',rad:[],note:''}});
+let S=null;
+function fresh(keepMode){
+  S={mode:keepMode&&S?S.mode:'initial',dent:'perm',date:todayISO(),since:'',mech:[],head:[],safe:'',tet:'',soft:[],teeth:[],t:{},
+    spl:{placed:'',mat:'',span:''},rx:[],adv:DEF_ADV.slice(),extra:'',visit:'',reviewRx:[]};
+}
+fresh();
+const getP=p=>p.split('.').reduce((o,k)=>o==null?o:o[k],S);
+const setP=(p,v)=>{const ks=p.split('.');const last=ks.pop();const o=ks.reduce((o,k)=>o[k],S);o[last]=v};
+const D=()=>S.dent==='perm'?PERM:PRIM;
+const val=(x,t)=>typeof x==='function'?x(t):x;
+
+/* ---------- planning ---------- */
+function toothPlan(code){
+  const t=S.t[code];if(!t)return null;
+  const Dx=D(), H=t.hard&&Dx[t.hard], L=t.lux&&Dx[t.lux];
+  if(!H&&!L)return null;
+  const perm=S.dent==='perm';
+  let keys;
+  if(L){keys=[...val(L.fu,t)];if(H&&(t.hard==='root'||t.hard==='alv'))keys=uniq([...keys,...val(H.fu,t)])}
+  else keys=[...val(H.fu,t)];
+  const splintables=[H,L].filter(x=>x&&x.splint);
+  const auto=splintables.some(x=>!!val(x.splintDef,t));
+  const on=splintables.length>0&&(t.splint===null?auto:t.splint);
+  let sd=null;
+  if(on){sd=splintables.map(x=>val(x.splint,t)).sort((a,b)=>durDays(b)-durDays(a))[0]}
+  const base=parseISO(S.date);
+  const pts=[];let age6=false;
+  keys.forEach(k=>{
+    if(k==='age6'){age6=true;return}
+    let rad=perm, kk=k;
+    if(!perm){rad=/R$/.test(k);kk=k.replace(/R$/,'')}
+    const p=PT[kk];if(!p)return;
+    pts.push({code,key:kk,u:p.u,n:p.n,lab:p.lab,lo:p.lo,hi:p.hi,tol:p.tol,rad,sr:false});
+  });
+  if(sd){
+    let hit=pts.find(p=>p.u===sd.u&&p.n===sd.n&&p.key!=='w68');
+    if(!hit){hit={code,key:'sr',u:sd.u,n:sd.n,lab:durLab(sd),tol:3,rad:perm,sr:true};pts.push(hit)}
+    hit.sr=true;
+  }
+  if(base)pts.forEach(p=>{
+    p.date=p.u==='w'?addDays(base,p.n*7):addMonths(base,p.n);
+    p.t=dayDiff(base,p.date);
+    if(p.lo!=null){p.a=p.lo;p.b=p.hi}else{p.a=p.t-p.tol;p.b=p.t+p.tol}
+  });
+  pts.sort((a,b)=>a.t-b.t);
+  // merge overlapping points for the same tooth (e.g. combined injuries, y1 + y1R)
+  const merged=[];
+  pts.forEach(p=>{
+    const m=merged[merged.length-1];
+    if(m&&p.date&&p.a<=m.b&&p.b>=m.a){
+      const take=p.sr||(!m.sr&&m.lo!=null&&p.lo==null);
+      const A=Math.max(m.a,p.a),B=Math.min(m.b,p.b),rad=m.rad||p.rad,sr=m.sr||p.sr;
+      if(take)Object.assign(m,{key:p.key,u:p.u,n:p.n,lab:p.lab,lo:p.lo,hi:p.hi,tol:p.tol,date:p.date,t:p.t});
+      Object.assign(m,{a:A,b:B,rad,sr});
+    }else merged.push(p);
+  });
+  pts.length=0;pts.push(...merged);
+  // milestones
+  const ms=[];
+  if(perm){
+    const mature=t.apex==='mature';
+    if(t.lux==='lat')ms.push({n:2,u:'w',txt:mature?'Endodontic assessment; start RCT (mature, pulp likely to necrose)':'Endodontic assessment (immature: revascularisation possible)'});
+    if(t.lux==='intr'){
+      if(mature)ms.push({n:2,u:'w',txt:'Start RCT (or as soon as position allows)'});
+      if(!mature)ms.push({n:8,u:'w',txt:'If no re-eruption: start orthodontic repositioning'});
+      else if(t.opts.depth==='Under 3 mm')ms.push({n:8,u:'w',txt:'If no re-eruption: surgical repositioning + splint, or orthodontic'});
+    }
+    if(t.lux==='avul'&&t.opts.scen!=='Not replanted'&&mature)ms.push({n:2,u:'w',txt:'Start RCT by this date (within 2 weeks of replantation)'});
+  }
+  if(base)ms.forEach(m=>{m.date=m.u==='w'?addDays(base,m.n*7):addMonths(base,m.n);m.t=dayDiff(base,m.date);m.code=code});
+  const info=[...(H?H.info(t):[]),...(L?L.info(t):[])];
+  const succ=!perm&&((H&&H.succ)||(L&&L.succ));
+  const concern=!perm&&((H&&H.concern)||(L&&L.concern));
+  return{code,t,H,L,pts,sd,on,auto,canSplint:splintables.length>0,ms,info,age6,succ,concern};
+}
+function allPlans(){return S.teeth.map(toothPlan).filter(Boolean)}
+function groupVisits(plans){
+  const items=plans.flatMap(p=>p.pts).filter(p=>p.date).sort((a,b)=>a.t-b.t);
+  const groups=[];
+  items.forEach(it=>{
+    const g=groups[groups.length-1];
+    if(g&&it.a<=g.B&&it.b>=g.A&&!g.codes.has(it.code)){
+      g.items.push(it);g.codes.add(it.code);g.A=Math.max(g.A,it.a);g.B=Math.min(g.B,it.b);
+    }else groups.push({items:[it],codes:new Set([it.code]),A:it.a,B:it.b});
+  });
+  const base=parseISO(S.date);
+  groups.forEach(g=>{
+    const sr=g.items.find(i=>i.sr);
+    let tgt=sr?sr.t:Math.max(...g.items.map(i=>i.t));
+    tgt=Math.min(Math.max(tgt,g.A),g.B);
+    g.t=tgt;g.date=addDays(base,tgt);
+    g.lab=uniq(g.items.map(i=>i.lab)).join(' / ');
+    g.key=iso(g.date);
+    g.span=g.B-g.A>7&&g.items.every(i=>i.lo!=null)?[addDays(base,g.A),addDays(base,g.B)]:null;
+  });
+  return groups;
+}
+function taskText(i){
+  const perm=S.dent==='perm';
+  const bits=[];
+  if(i.sr)bits.push('remove splint');
+  bits.push(i.rad?'clinical + radiograph':'clinical');
+  if(perm)bits.push('sensibility');
+  return i.code+' '+bits.join(', ');
+}
+function splintSpan(plans){
+  const on=plans.filter(p=>p.on).map(p=>p.code);if(!on.length)return'';
+  const ord=ARCH_ORDER(S.dent);const out=[];
+  ['U','L'].forEach(a=>{
+    const idx=on.map(c=>ord[a].indexOf(c)).filter(i=>i>=0);if(!idx.length)return;
+    const inj=plans.map(p=>p.code);
+    let lo=Math.max(0,Math.min(...idx)-1), hi=Math.min(ord[a].length-1,Math.max(...idx)+1);
+    while(lo>0&&inj.includes(ord[a][lo]))lo--;
+    while(hi<ord[a].length-1&&inj.includes(ord[a][hi]))hi++;
+    out.push(ord[a][lo]+'–'+ord[a][hi]);
+  });
+  return out.join(', ');
+}
+
+/* ---------- review assessment ---------- */
+function assess(code){
+  const t=S.t[code], f=t.f, perm=S.dent==='perm';
+  const bad=[],watch=[],good=[];
+  const neg=f.cold==='Negative'||(f.ept&&/^\s*(80|>80|no response|nr)\s*$/i.test(f.ept));
+  const signs=[];
+  if(f.col==='Grey')signs.push('grey discolouration');
+  if(f.rad.includes('Periapical radiolucency'))signs.push('periapical radiolucency');
+  if(f.sym.includes('Sinus'))signs.push('sinus');
+  if(f.sym.includes('Swelling'))signs.push('swelling');
+  if(f.perc.includes('TTP')||f.sym.includes('Tender to bite'))signs.push('tenderness to percussion');
+  if(f.rad.includes('Inflammatory resorption'))bad.push('Infection-related (inflammatory) resorption: IADT advises starting RCT immediately (corticosteroid–antibiotic then Ca(OH)₂, or Ca(OH)₂ alone).');
+  if(f.rad.includes('Replacement resorption')||f.perc.includes('High-pitched (metallic) note')||f.mob==='Reduced / none')
+    bad.push('Signs of ankylosis / replacement resorption. In a growing patient, watch for infraposition and plan timing of decoronation with the MDT.');
+  if(f.rad.includes('Fracture-line radiolucency'))bad.push('Radiolucency at the fracture line: suggests coronal pulp necrosis; RCT of the coronal segment usually suffices.');
+  if(f.rad.includes('Arrested root development'))bad.push('Arrested root development: pulp necrosis likely; consider treatment suited to the immature tooth.');
+  if(perm){
+    if(neg&&signs.length>=1)bad.push('Negative sensibility with '+listJoin(signs)+': pulp necrosis likely. Consider RCT.');
+    else if(signs.length>=2)bad.push('Two or more signs ('+listJoin(signs)+'): suggests pulp necrosis/infection.');
+    else if(neg)watch.push('Negative sensibility alone is not diagnostic (transient loss is common after luxation). IADT: don’t start RCT on this alone; re-test next review.');
+    else if(signs.length===1)watch.push('Single sign ('+signs[0]+'): monitor and re-assess.');
+  }else if(signs.length>=1){(signs.length>=2?bad:watch).push((signs.length>=2?'Signs of pulp necrosis/infection: ':'Monitor: ')+listJoin(signs)+'.')}
+  if(f.rad.includes('Pulp canal obliteration')||f.col==='Yellow (PCO)')watch.push('Pulp canal obliteration: usually a sign of pulp healing. Monitor; no treatment needed unless signs of infection.');
+  if(f.mob==='Grade II'||f.mob==='Grade III')watch.push('Increased mobility at this stage; check position and occlusion.');
+  if(f.rad.includes('Continued root development'))good.push('Continued root development.');
+  if(f.rad.includes('Hard-tissue healing at fracture'))good.push('Hard-tissue healing at the fracture.');
+  if(f.rad.includes('Re-eruption noted'))good.push('Re-eruption noted.');
+  if(f.cold==='Positive'||f.cold==='Delayed')good.push('Responds to sensibility testing.');
+  const any=f.spl||f.sym.length||f.col||f.mob||f.perc.length||f.cold||f.ept||f.rad.length;
+  if(any&&!bad.length&&!watch.length&&!good.length)good.push('No unfavourable signs recorded.');
+  return{bad,watch,good,any};
+}
+
+/* ---------- rendering ---------- */
+function chips(path,opts,o={}){
+  const cur=getP(path);const multi=!!o.multi;
+  return `<div class="chips"${o.label?` role="group" aria-label="${esc(o.label)}"`:''}>`+opts.map(op=>{
+    const[v,l]=Array.isArray(op)?op:[op,op];
+    const on=multi?(cur||[]).includes(v):cur===v;
+    const sg=o.sug&&o.sug.includes(v);
+    return `<button type="button" class="chip${multi?' multi':''}${sg?' sg':''}" data-k="${esc(path)}" data-v="${esc(v)}"${multi?' data-m="1"':''} aria-pressed="${on}">${esc(l)}</button>`;
+  }).join('')+'</div>';
+}
+const field=(lbl,inner,cls='')=>`<div class="field ${cls}"><span class="lbl">${lbl}</span>${inner}</div>`;
+const txt=(path,ph='',cls='',type='text')=>`<input type="${type}" class="${cls}" data-k="${esc(path)}" value="${esc(getP(path))}" placeholder="${esc(ph)}" aria-label="${esc(ph||path)}">`;
+
+function chartHTML(){
+  const perm=S.dent==='perm', Q=perm?PQ:DQ;
+  const q=(id,lab,cls)=>`<div class="qd ${cls}"><p class="qh">${lab}</p><div class="trow${perm?'':' p5'}">`+Q[id].map(x=>{
+    const c=id+x, on=S.teeth.includes(c), pl=toothPlan(c);
+    return `<button type="button" class="tb${pl?' inj':''}" data-act="tooth" data-c="${c}" aria-pressed="${on}" aria-label="${c}">${x}</button>`;
+  }).join('')+'</div></div>';
+  return `<div class="tq">${q('UR','UR','q0')}${q('UL','UL','q1')}${q('LR','LR','q2')}${q('LL','LL','q3')}</div>`;
+}
+
+function toothCard(code,plan){
+  const t=S.t[code], perm=S.dent==='perm', Dx=D();
+  const P=`t.${code}`;
+  const hardK=perm?HARD_P:HARD_D, luxK=perm?LUX_P:LUX_D;
+  let h=`<section class="card tooth" aria-label="${code}"><div class="cardhead"><h2>${code}<small>${esc(plainTooth(code).replace(/ \(.*\)$/,''))}</small></h2>
+    <button type="button" class="btn link" data-act="tooth" data-c="${code}">Remove</button></div>`;
+  if(perm)h+=field('Root development',chips(P+'.apex',[['immature','Immature (open apex)'],['mature','Mature (closed apex)']]));
+  h+=field('Hard tissue / bone <small>(one)</small>',chips(P+'.hard',hardK.map(k=>[k,Dx[k].n])));
+  h+=field('Periodontal / luxation <small>(one)</small>',chips(P+'.lux',luxK.map(k=>[k,Dx[k].n])));
+  // injury-specific options
+  if(perm&&t.hard==='root')h+=field('Fracture level',chips(P+'.opts.level',['Apical third','Middle third','Cervical third']));
+  if(perm&&(t.lux==='lat'||t.lux==='ext')){
+    if(t.lux==='lat')h+=field('Displacement',chips(P+'.opts.dir',PERM.lat.dir,{multi:true}));
+    h+=field('Marginal bone',`<div class="chips"><button type="button" class="chip multi" data-k="${P}.opts.bone" data-tg="1" aria-pressed="${!!t.opts.bone}">${t.lux==='lat'?'Marginal bone / socket wall fracture':'Marginal bone breakdown'} (+4 weeks splint)</button></div>`);
+  }
+  if(perm&&t.lux==='intr'&&t.apex==='mature')h+=field('Depth of intrusion',chips(P+'.opts.depth',['Under 3 mm','3–7 mm','Over 7 mm']));
+  if(perm&&t.lux==='avul'){
+    h+=field('Situation',chips(P+'.opts.scen',['Replanted before arrival','Physiological medium, dry under 60 min','Dry over 60 min','Not replanted']));
+    h+=`<div class="row2">${field('Stored in',chips(P+'.opts.med',['Milk','HBSS','Saline','Saliva','Water','Dry']))}${field('Extra-oral dry time <small>(min)</small>',txt(P+'.opts.dry','e.g. 20','short','text'))}</div>`;
+    h+=field('Bone',`<div class="chips"><button type="button" class="chip multi" data-k="${P}.opts.alvfx" data-tg="1" aria-pressed="${!!t.opts.alvfx}">Alveolar / jaw fracture (4-week splint)</button></div>`);
+  }
+  if(!perm){
+    [t.hard,t.lux].filter(Boolean).forEach(k=>{if(PRIM[k].p)h+=field(PRIM[k].n+': management',chips(P+'.opts.p',PRIM[k].p))});
+    if(t.lux==='intr')h+=field('Severity',`<div class="chips"><button type="button" class="chip multi" data-k="${P}.opts.severe" data-tg="1" aria-pressed="${!!t.opts.severe}">Severe intrusion</button></div>`);
+  }
+  if(plan){
+    if(S.mode==='initial'){
+      const tx=uniq([...(plan.H?plan.H.tx:[]),...(plan.L?plan.L.tx:[])]);
+      h+=field('Treatment today',chips(P+'.tx',tx,{multi:true}));
+    }
+    if(plan.canSplint){
+      h+=`<div class="splintline"><button type="button" class="chip multi" data-act="splint" data-c="${code}" aria-pressed="${plan.on}">Splinted</button>`+
+        (plan.on&&plan.sd?`<span class="pill">Splint ${durLab(plan.sd)}</span>`:'')+
+        (!plan.auto&&!plan.on?'<span class="hint">Optional for this injury</span>':'')+`</div>`;
+    }
+    h+=`<div class="box"><b>IADT key points</b><ul>${plan.info.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></div>`;
+    if(S.mode==='review')h+=reviewFields(code);
+  }else h+='<p class="hint">Pick the injury to see splinting, the review schedule and key points.</p>';
+  return h+'</section>';
+}
+
+function reviewFields(code){
+  const P=`t.${code}.f`, perm=S.dent==='perm', a=assess(code);
+  let h=`<div class="field"><span class="lbl">Findings today</span></div>`;
+  h+=field('Splint',chips(P+'.spl',['Splint removed today','Splint intact','Splint debonded, re-bonded','Not splinted']));
+  h+=field('Symptoms',chips(P+'.sym',['Asymptomatic','Tender to bite','Spontaneous pain','Swelling','Sinus'],{multi:true}));
+  h+=`<div class="row2">${field('Colour',chips(P+'.col',['Normal','Grey','Yellow (PCO)','Pink']))}${field('Mobility',chips(P+'.mob',['Physiological','Grade I','Grade II','Grade III','Reduced / none']))}</div>`;
+  h+=field('Percussion',chips(P+'.perc',['Not TTP','TTP','High-pitched (metallic) note'],{multi:true}));
+  if(perm)h+=`<div class="row2">${field('Cold test',chips(P+'.cold',['Positive','Negative','Delayed','Not tested']))}${field('EPT reading',txt(P+'.ept','e.g. 34 or no response','short'))}</div>`;
+  h+=field('Radiograph',chips(P+'.rad',['Not taken','No change','Continued root development','Pulp canal obliteration','PDL widening','Periapical radiolucency','Inflammatory resorption','Replacement resorption','Arrested root development','Fracture-line radiolucency','Hard-tissue healing at fracture','Re-eruption noted'],{multi:true}));
+  h+=field('Other findings',txt(P+'.note','Optional'));
+  if(a.any){
+    if(a.bad.length)h+=`<div class="box bad"><b>Unfavourable</b><ul>${a.bad.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    if(a.watch.length)h+=`<div class="box warn"><b>Watch</b><ul>${a.watch.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    if(a.good.length)h+=`<div class="box ok"><b>Favourable</b><ul>${a.good.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  }
+  return h;
+}
+
+function timelineHTML(plans,groups){
+  if(!groups.length&&!plans.some(p=>p.age6))return'<p class="empty">No formal review is needed for these injuries.</p>';
+  const today=parseISO(todayISO());
+  const ms=plans.flatMap(p=>p.ms).filter(m=>m.date);
+  const rows=[...groups.map(g=>({k:'g',t:g.t,g})),...ms.map(m=>({k:'m',t:m.t+0.1,m}))].sort((a,b)=>a.t-b.t);
+  let nextDone=false;
+  const li=rows.map(r=>{
+    if(r.k==='m'){const m=r.m;return `<li class="ms${m.date<today?' past':''}"><div class="tld">${fmtL(m.date)} <small>· ${durLab(m)}</small></div><div class="tlt"><b>${esc(m.code)}</b> ${esc(m.txt)}</div></li>`}
+    const g=r.g, past=g.date<today, cur=S.mode==='review'&&g.key===S.visit;
+    let cls=(g.items.some(i=>i.sr)?'sr ':'')+(past&&!cur?'past ':'')+(cur?'cur ':'');
+    if(!past&&!cur&&!nextDone&&S.mode==='initial'){cls+='next';nextDone=true}
+    const when=g.span?`${fmtL(g.span[0])} – ${fmtL(g.span[1])}`:fmtL(g.date);
+    return `<li class="${cls.trim()}"><div class="tld">${when} <small>· ${esc(g.lab)}</small></div><div class="tlt">${g.items.map(i=>esc(taskText(i)).replace(/^(\w+)/,'<b>$1</b>')).join('<br>')}</div></li>`;
+  }).join('');
+  const succ=plans.filter(p=>p.age6).map(p=>p.code);
+  const conc=plans.filter(p=>p.concern).map(p=>p.code);
+  let extra='';
+  if(succ.length)extra+=`<li class="ms"><div class="tld">Around age 6</div><div class="tlt">Review eruption of the permanent successor${succ.length>1?'s':''} (${succ.map(c=>c+' → '+c.slice(0,2)+SUCC[c[2]]).join(', ')})</div></li>`;
+  if(conc.length)extra+=`<li class="ms"><div class="tld">If concerns</div><div class="tlt">Clinical review yearly until the permanent successor erupts (${conc.join(', ')})</div></li>`;
+  return `<ul class="tl">${li}${extra}</ul>`;
+}
+
+function render(){
+  const plans=allPlans(), groups=groupVisits(plans), perm=S.dent==='perm';
+  if(S.mode==='review'&&groups.length&&!groups.some(g=>g.key===S.visit)){
+    const now=parseISO(todayISO());
+    let best=groups[0];groups.forEach(g=>{if(Math.abs(dayDiff(now,g.date))<Math.abs(dayDiff(now,best.date)))best=g});
+    S.visit=best.key;
+  }
+  const base=parseISO(S.date), since=base?dayDiff(base,parseISO(todayISO())):null;
+  let h='';
+  // Injury card
+  h+=`<section class="card"><h2>Injury</h2><div class="row2">
+    ${field('Dentition',chips('dent',[['perm','Permanent'],['prim','Primary']]))}
+    ${field('Date of injury'+(since!=null?` <small>(${since===0?'today':since>0?since+' day'+(since>1?'s':'')+' ago':'in the future'})</small>`:''),txt('date','','short','date'))}
+  </div>`;
+  if(S.mode==='initial'){
+    h+=`<div class="row2">${field('Time since injury',txt('since','e.g. 2 hours','short'))}</div>`;
+    h+=field('Mechanism',chips('mech',['Fall','Sport','Cycling / scooter','Assault','Road traffic collision','Collision with object or person','Seizure','Other'],{multi:true}));
+    h+=field('Head injury screen',chips('head',['Negative (no LOC, vomiting, amnesia or headache)','Loss of consciousness','Vomiting','Amnesia','Headache / visual disturbance','Neck pain'],{multi:true}));
+    if(S.head.some(x=>!/^Negative/.test(x)))h+=`<div class="box bad"><b>Head injury signs recorded.</b> Arrange medical assessment before or alongside dental care.</div>`;
+    h+=`<div class="row2">${field('Tetanus',chips('tet',['Up to date','Uncertain: advised to check with GP / A&E','Booster arranged']))}
+      ${field('History',chips('safe',['Consistent with injury','Safeguarding concern: escalated per local policy']))}</div>`;
+    h+=field('Soft tissues',chips('soft',['No soft tissue injury','Lip laceration','Gingival laceration','Intra-oral laceration','Facial abrasion','Lip radiograph for fragments'],{multi:true}));
+  }
+  h+='</section>';
+  // Teeth
+  h+=`<section class="card"><div class="cardhead"><h2>Injured teeth</h2><span class="hint">${perm?'Palmer: UR8 → LL8':'Primary: URE → LLE'}</span></div>${chartHTML()}
+    ${S.teeth.length?'':'<p class="hint">Tap each injured tooth.</p>'}</section>`;
+  // Review: visit picker
+  if(S.mode==='review'){
+    h+=`<section class="card"><h2>Today’s visit</h2>`;
+    if(groups.length){
+      h+=field('Which review is this?',chips('visit',groups.map(g=>[g.key,`${g.lab} · ${fmtS(g.date)}`])));
+      const g=groups.find(x=>x.key===S.visit);
+      if(g)h+=`<div class="box"><b>Due at this visit</b><ul>${g.items.map(i=>`<li>${esc(taskText(i))}</li>`).join('')}</ul></div>`;
+      h+=field('Radiographs taken today',chips('reviewRx',['Periapical','2 angled periapicals','Upper standard occlusal','None'],{multi:true}));
+    }else h+='<p class="hint">Add the injured teeth and injuries (as at presentation) to see the review schedule.</p>';
+    h+='</section>';
+  }
+  // Tooth cards
+  S.teeth.forEach(c=>{h+=toothCard(c,plans.find(p=>p.code===c))});
+  // Splint card
+  const splinted=plans.filter(p=>p.on);
+  if(splinted.length){
+    const sug=splintSpan(plans);
+    const placed=parseISO(S.spl.placed||S.date);
+    h+=`<section class="card"><h2>Splint</h2><div class="row2">
+      ${field('Placed on',`<input type="date" class="short" data-k="spl.placed" value="${esc(S.spl.placed||S.date)}" aria-label="Splint placed date">`)}
+      ${field('Span',txt('spl.span',sug?'Suggested: '+sug:'e.g. UR2–UL2',''))}</div>
+      ${field('Type',chips('spl.mat',['0.4 mm SS wire + composite','Nylon line 0.13–0.25 mm + composite','Titanium trauma splint','Rigid splint (alveolar / jaw fracture)'],{sug:['0.4 mm SS wire + composite']}))}
+      <div class="box"><b>Removal</b><ul>${splinted.map(p=>`<li>${p.code}: ${durLab(p.sd)}, ${placed?fmtL(p.sd.u==='w'?addDays(placed,p.sd.n*7):addMonths(placed,p.sd.n)):'set a date'}</li>`).join('')}</ul></div></section>`;
+  }
+  // Initial: radiographs + advice
+  if(S.mode==='initial'&&plans.length){
+    const sug=uniq(plans.flatMap(p=>[...(p.H?p.H.rads:[]),...(p.L?p.L.rads:[])]));
+    const sugTxt=uniq(plans.flatMap(p=>[p.H&&`${p.code} ${p.H.n.toLowerCase()}: ${p.H.rad}`,p.L&&`${p.code} ${p.L.n.toLowerCase()}: ${p.L.rad}`].filter(Boolean)));
+    h+=`<section class="card"><h2>Radiographs</h2><p class="hint">★ suggested by IADT for these injuries</p>
+      ${chips('rx',['Periapical','2 angled periapicals','Upper standard occlusal','Lower occlusal','Soft tissue (lip) radiograph','OPT','CBCT','None today'],{multi:true,sug})}
+      <div class="box"><ul>${sugTxt.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div></section>`;
+    const chx=perm?'Chlorhexidine 0.2% mouthwash twice daily for 2 weeks':'Chlorhexidine 0.1–0.2% (alcohol-free) on a swab twice daily for 1 week';
+    const avulsed=plans.some(p=>p.t.lux==='avul'&&perm&&p.t.opts.scen!=='Not replanted');
+    h+=`<section class="card"><h2>Advice and prescriptions</h2>${chips('adv',[...DEF_ADV,chx,'Analgesia as required','Mouthguard advised for sport','Systemic antibiotics prescribed'],{multi:true,sug:avulsed?[chx,'Systemic antibiotics prescribed']:[]})}</section>`;
+  }
+  // Timeline
+  if(plans.length){
+    h+=`<section class="card"><div class="cardhead"><h2>Review schedule</h2><span class="hint">${perm?'Clinical + radiographic, IADT 2020':'Radiographs only if pathosis suspected unless stated'}</span></div>${timelineHTML(plans,groups)}</section>`;
+  }
+  h+=`<section class="card"><h2>Additional notes</h2>${txt('extra','Anything else for the note')}</section>`;
+  const form=$('#form');
+  // keep focus across re-render
+  const ae=document.activeElement, fk=ae&&ae.dataset?(ae.dataset.k||'')+'|'+(ae.dataset.v||'')+'|'+(ae.dataset.act||'')+'|'+(ae.dataset.c||''):null;
+  form.innerHTML=h;
+  if(fk&&ae!==document.body){const el=[...form.querySelectorAll('button,input')].find(e=>(e.dataset.k||'')+'|'+(e.dataset.v||'')+'|'+(e.dataset.act||'')+'|'+(e.dataset.c||'')===fk);if(el)el.focus({preventScroll:true})}
+  document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.mode===S.mode)));
+  updateNote(plans,groups);
+  buildPrint();
+}
+window.addEventListener('beforeprint',()=>buildPrint());
+
+/* ---------- note ---------- */
+let edited=false;
+function injLine(p){
+  const t=p.t, bits=[];
+  if(p.L){let s=p.L.n;if(t.lux==='lat'&&t.opts.dir.length)s+=' ('+t.opts.dir.map(lc1).join(', ')+')';if(t.lux==='intr'&&t.opts.depth&&S.dent==='perm'&&t.apex==='mature')s+=' ('+t.opts.depth.toLowerCase()+')';bits.push(s)}
+  if(p.H){let s=p.H.n;if(t.hard==='root'&&t.opts.level)s+=' ('+t.opts.level.toLowerCase()+')';bits.push(s)}
+  let line=`${p.code} – ${bits.map((s,i)=>i?lc1(s):s).join(' + ')}.`;
+  if(S.dent==='perm')line+=` ${t.apex==='mature'?'Mature':'Immature'} apex.`;
+  if(t.opts.bone&&(t.lux==='lat'||t.lux==='ext'))line+=' Marginal bone involvement.';
+  if(t.lux==='avul'&&S.dent==='perm'){
+    const o=t.opts, a=[];
+    if(o.scen)a.push(o.scen.toLowerCase());if(o.med)a.push('stored in '+o.med.toLowerCase());if(o.dry)a.push('extra-oral dry time '+o.dry+(/\d$/.test(o.dry)?' min':''));
+    if(o.alvfx)a.push('alveolar fracture');
+    if(a.length)line+=' '+uc1(a.join('; '))+'.';
+  }
+  if(S.dent==='prim')[p.H,p.L].forEach((x,i)=>{const k=i?t.lux:t.hard;if(x&&x.p&&t.opts.p&&x.p.includes(t.opts.p))line+=' Management: '+t.opts.p.toLowerCase()+'.'});
+  if(t.lux==='intr'&&t.opts.severe&&S.dent==='prim')line+=' Severe.';
+  return line;
+}
+function buildNote(plans,groups){
+  const L=[], perm=S.dent==='perm', base=parseISO(S.date), today=parseISO(todayISO());
+  const since=base?dayDiff(base,today):null;
+  const dateLine=base?`Date of injury: ${fmtS(base)}${since===0?' (today)':since>0?` (${since} day${since>1?'s':''} ago)`:''}`:'Date of injury: not recorded';
+  if(S.mode==='initial'){
+    L.push(`DENTAL TRAUMA – INITIAL PRESENTATION${perm?'':' (PRIMARY DENTITION)'}`);
+    L.push(dateLine+(S.since?` · Time since injury: ${S.since}`:''));
+    if(S.mech.length)L.push('Mechanism: '+listJoin(S.mech.map(lc1))+'.');
+    if(S.head.length){const pos=S.head.filter(x=>!/^Negative/.test(x));L.push('Head injury screen: '+(pos.length?listJoin(pos.map(lc1))+' – medical assessment advised.':'negative (no LOC, vomiting, amnesia or headache).'))}
+    if(S.tet)L.push('Tetanus: '+lc1(S.tet)+'.');
+    if(S.safe)L.push('Injury history: '+lc1(S.safe)+'.');
+    if(S.soft.length)L.push('Soft tissues: '+listJoin(S.soft.map(lc1))+'.');
+  }else{
+    const g=groups.find(x=>x.key===S.visit);
+    L.push(`DENTAL TRAUMA REVIEW${g?' – '+g.lab+' post-injury':''}${perm?'':' (PRIMARY DENTITION)'}`);
+    L.push(dateLine);
+  }
+  if(!plans.length){L.push('','(Select injured teeth and injuries.)');if(S.extra)L.push('',S.extra);return L.join('\n')}
+  L.push('');
+  if(S.mode==='initial'){
+    L.push('INJURIES');
+    plans.forEach(p=>{
+      L.push(injLine(p));
+      const valid=uniq([...(p.H?p.H.tx:[]),...(p.L?p.L.tx:[])]);
+      const tx=p.t.tx.filter(x=>valid.includes(x));
+      if(tx.length)L.push('  Treatment: '+tx.map(lc1).join('; ')+'.');
+    });
+  }else{
+    L.push('FINDINGS');
+    plans.forEach(p=>{
+      L.push(injLine(p));
+      const f=p.t.f, b=[];
+      if(f.spl)b.push(f.spl);
+      if(f.sym.length)b.push(listJoin(f.sym.map(lc1)).replace(/^./,c=>c.toUpperCase()));
+      if(f.col)b.push('Colour: '+lc1(f.col));
+      if(f.mob)b.push('Mobility: '+lc1(f.mob));
+      if(f.perc.length)b.push('Percussion: '+f.perc.map(lc1).join(', '));
+      if(f.cold)b.push('Cold: '+lc1(f.cold));
+      if(f.ept)b.push('EPT: '+f.ept);
+      if(b.length)L.push('  '+b.join('. ')+'.');
+      if(f.rad.length)L.push('  Radiograph: '+f.rad.map(lc1).join('; ')+'.');
+      if(f.note)L.push('  '+f.note);
+      const a=assess(p.code);
+      if(a.any){
+        const s=a.bad.length?'Unfavourable – ':a.watch.length?'Monitor – ':'Favourable – ';
+        L.push('  Assessment: '+s+[...a.bad,...a.watch,...(a.bad.length||a.watch.length?[]:a.good)].join(' '));
+      }
+    });
+    if(S.reviewRx.length)L.push('Radiographs today: '+S.reviewRx.join(', ').toLowerCase()+'.');
+  }
+  const spl=plans.filter(p=>p.on);
+  if(spl.length){
+    const placed=parseISO(S.spl.placed||S.date);
+    const span=S.spl.span||splintSpan(plans);
+    L.push('','SPLINT');
+    L.push(`${S.spl.mat?S.spl.mat:'Passive flexible splint'}${span?' '+span:''}${placed?', placed '+fmtS(placed):''}.`);
+    spl.forEach(p=>{const d=placed?(p.sd.u==='w'?addDays(placed,p.sd.n*7):addMonths(placed,p.sd.n)):null;L.push(`  ${p.code}: remove at ${durLab(p.sd)}${d?' – '+fmtL(d):''}.`)});
+  }
+  if(S.mode==='initial'){
+    if(S.rx.length)L.push('','RADIOGRAPHS',sent(S.rx)+'.');
+    const kp=[];
+    plans.forEach(p=>{
+      if(!perm)return;
+      const t=p.t, mature=t.apex==='mature';
+      if(t.lux==='lat')kp.push(`${p.code}: endodontic assessment at 2 weeks${mature?'; mature – pulp likely to necrose, start RCT (corticosteroid–antibiotic or Ca(OH)₂)':'; immature – revascularisation possible, monitor'}.`);
+      if(t.lux==='intr')kp.push(`${p.code}: `+(mature?'mature – start RCT at 2 weeks or as soon as position allows'+(t.opts.depth==='Under 3 mm'?'; if no re-eruption by 8 weeks, reposition surgically or orthodontically':''):'immature – allow spontaneous re-eruption; orthodontic repositioning if none by 8 weeks')+'.');
+      if(t.lux==='avul'&&t.opts.scen!=='Not replanted')kp.push(`${p.code}: `+(mature?'closed apex – start RCT within 2 weeks of replantation':'open apex – aim for revascularisation; RCT only if necrosis and infection confirmed')+(t.opts.scen==='Dry over 60 min'?'; dry >60 min – poor long-term prognosis, ankylosis expected':'')+'.');
+      if(t.lux==='ext'&&mature)kp.push(`${p.code}: mature – monitor pulp; early endodontics if necrosis anticipated.`);
+      if(t.hard==='root')kp.push(`${p.code}: no endodontics at emergency visit; if necrosis, coronal segment RCT usually sufficient.`);
+      if(t.hard==='alv')kp.push(`${p.code}: RCT contraindicated at emergency visit; monitor pulp of all teeth in segment.`);
+    });
+    if(!perm){plans.filter(p=>p.succ).forEach(p=>kp.push(`${p.code}: parents informed of possible effects on the permanent successor (${p.code.slice(0,2)}${SUCC[p.code[2]]}).`));
+      plans.filter(p=>p.t.lux==='intr').forEach(p=>kp.push(`${p.code}: rapid referral to child-oriented team.`))}
+    if(kp.length)L.push('','KEY POINTS',...kp);
+    if(S.adv.length)L.push('','ADVICE',sent(S.adv)+'.');
+  }
+  // plan
+  const future=S.mode==='review'?groups.filter(g=>g.key>S.visit):groups;
+  const ms=plans.flatMap(p=>p.ms).filter(m=>m.date&&(S.mode==='initial'||iso(m.date)>S.visit));
+  if(future.length||ms.length||plans.some(p=>p.age6)){
+    L.push('',S.mode==='initial'?'REVIEW PLAN (IADT 2020)':'PLAN');
+    if(S.mode==='review'&&future.length)L.push('Next review: '+future[0].lab+' – '+fmtL(future[0].date)+'.');
+    const rows=[...future.map(g=>({t:g.t,s:`${fmtS(g.date)}${g.span?'–'+fmtS(g.span[1]):''} – ${g.lab}: ${g.items.map(taskText).join('; ')}`})),
+      ...ms.map(m=>({t:m.t+0.1,s:`${fmtS(m.date)} – ${m.code}: ${lc1(m.txt)}`}))].sort((a,b)=>a.t-b.t);
+    (S.mode==='initial'?rows:rows.slice(0,4)).forEach(r=>L.push('  '+r.s));
+    if(S.mode==='review'&&rows.length>4)L.push(`  …then as scheduled (${rows.length-4} further).`);
+    const succ=plans.filter(p=>p.age6);if(succ.length)L.push('  Around age 6 – review eruption of permanent successor ('+succ.map(p=>p.code.slice(0,2)+SUCC[p.code[2]]).join(', ')+').');
+    const conc=plans.filter(p=>p.concern);if(conc.length&&S.mode==='initial')L.push('  If concerns – clinical review yearly until successor erupts ('+conc.map(p=>p.code).join(', ')+').');
+  }
+  if(S.extra)L.push('',S.extra);
+  return L.join('\n');
+}
+function updateNote(plans,groups){
+  if(!edited)$('#out').value=buildNote(plans||allPlans(),groups||groupVisits(plans||allPlans()));
+  $('#edbar').hidden=!edited;
+  const n=S.teeth.length;
+  $('#mstat').textContent=n?`${n} ${n>1?'teeth':'tooth'} · ${S.mode==='initial'?'new injury':'review'}`:'Trauma note';
+}
+
+/* ---------- patient advice sheet ---------- */
+function buildPrint(){
+  const plans=allPlans(), groups=groupVisits(plans), base=parseISO(S.date);
+  const spl=plans.filter(p=>p.on), placed=parseISO(S.spl.placed||S.date);
+  const adv=S.adv.length?S.adv:DEF_ADV;
+  let h=`<h1>After your dental injury</h1><p>Name: <span class="pline">&nbsp;</span> &nbsp; Date of injury: <b>${base?fmtL(base):'—'}</b></p>`;
+  if(plans.length)h+=`<h2>Teeth injured</h2><p>${plans.map(p=>esc(uc1(plainTooth(p.code)))).join('<br>')}</p>`;
+  if(spl.length&&placed){const far=spl.map(p=>p.sd.u==='w'?addDays(placed,p.sd.n*7):addMonths(placed,p.sd.n)).sort((a,b)=>b-a)[0];
+    h+=`<h2>Your splint</h2><p>A splint is holding the injured tooth${spl.length>1?' teeth':''} still while ${spl.length>1?'they heal':'it heals'}. It is due to come off around <b>${fmtL(far)}</b>. If it comes loose or breaks, contact the clinic.</p>`;}
+  h+=`<h2>Looking after your mouth</h2><ul>${adv.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
+  h+=`<h2>Contact us sooner if</h2><ul><li>you have pain, swelling or a gum boil near the injured tooth</li><li>the tooth darkens or changes colour</li><li>the tooth becomes looser or moves position</li><li>the splint comes loose</li></ul>`;
+  if(groups.length){
+    h+=`<h2>Check-ups</h2><p>Injured teeth need checking for several years, even if they feel fine. The clinic will confirm exact times.</p><table>${groups.slice(0,10).map(g=>`<tr><td>${g.span?fmtL(g.span[0])+' – '+fmtL(g.span[1]):fmtL(g.date)}</td><td>Check-up, ${esc(g.lab)} after injury${g.items.some(i=>i.sr)?' (splint removal)':''}</td></tr>`).join('')}</table>`;
+    if(groups.length>10)h+=`<p>Then yearly checks as arranged.</p>`;
+  }
+  h+=`<p class="pfoot">Clinic contact: <span class="pline">&nbsp;</span></p>`;
+  $('#print').innerHTML=h;
+}
+
+/* ---------- example ---------- */
+function loadExample(){
+  fresh(true);
+  const d=addDays(parseISO(todayISO()),S.mode==='review'?-28:0);S.date=iso(d);
+  S.since='3 hours';S.mech=['Fall'];S.head=['Negative (no LOC, vomiting, amnesia or headache)'];S.tet='Up to date';S.safe='Consistent with injury';S.soft=['Lip laceration'];
+  S.teeth=['UR1','UL1'];
+  S.t.UL1=blankTooth();Object.assign(S.t.UL1,{lux:'lat',hard:'ed',tx:['Disimpacted and repositioned under LA','Passive flexible splint','Dentine covered with GIC']});S.t.UL1.opts.dir=['Palatal crown displacement'];
+  S.t.UR1=blankTooth();Object.assign(S.t.UR1,{lux:'sub',tx:['No treatment required']});
+  S.spl.mat='0.4 mm SS wire + composite';S.rx=['Periapical','2 angled periapicals','Upper standard occlusal'];
+  if(S.mode==='review'){Object.assign(S.t.UL1.f,{spl:'Splint removed today',sym:['Asymptomatic'],col:'Normal',mob:'Physiological',perc:['Not TTP'],cold:'Negative',rad:['No change']});
+    Object.assign(S.t.UR1.f,{spl:'Not splinted',sym:['Asymptomatic'],col:'Normal',mob:'Physiological',perc:['Not TTP'],cold:'Positive',ept:'28',rad:['No change']});S.reviewRx=['Periapical']}
+  edited=false;render();
+}
+
+/* ---------- events ---------- */
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2400)}
+async function copyText(s){
+  try{await navigator.clipboard.writeText(s);return true}catch(e){
+    const ta=document.createElement('textarea');ta.value=s;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+    let ok=false;try{ok=document.execCommand('copy')}catch(_){}ta.remove();return ok}
+}
+const THEMES=['auto','light','dark'];
+function applyTheme(m){if(m==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',m);$('#themeBtn').textContent='Theme: '+m}
+applyTheme(store('notile:theme')||'auto');
+
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.k){
+    const p=b.dataset.k, v=b.dataset.v;
+    if(b.dataset.m){const arr=(getP(p)||[]).slice();const i=arr.indexOf(v);if(i<0)arr.push(v);else arr.splice(i,1);
+      if(p==='head'){if(v.startsWith('Negative')&&i<0)arr.splice(0,arr.length,v);else if(i<0){const n=arr.findIndex(x=>x.startsWith('Negative'));if(n>=0)arr.splice(n,1)}}
+      if(p==='soft'){if(v==='No soft tissue injury'&&i<0)arr.splice(0,arr.length,v);else if(i<0){const n=arr.indexOf('No soft tissue injury');if(n>=0)arr.splice(n,1)}}
+      if(/\.f\.sym$/.test(p)){if(v==='Asymptomatic'&&i<0)arr.splice(0,arr.length,v);else if(i<0){const n=arr.indexOf('Asymptomatic');if(n>=0)arr.splice(n,1)}}
+      if(/\.f\.perc$/.test(p)&&i<0){if(v==='Not TTP'){const n=arr.indexOf('TTP');if(n>=0)arr.splice(n,1)}if(v==='TTP'){const n=arr.indexOf('Not TTP');if(n>=0)arr.splice(n,1)}}
+      setP(p,arr)}
+    else if(b.dataset.tg)setP(p,!getP(p));
+    else{
+      if(p==='dent'){if(S.dent!==v){S.dent=v;S.teeth=[];S.t={}}}
+      else if(p==='visit'||/\.apex$/.test(p))setP(p,v);
+      else setP(p,getP(p)===v?'':v);
+      if(/\.(hard|lux)$/.test(p)){const c=p.split('.')[1];S.t[c].splint=null;S.t[c].opts.p=''}
+    }
+    edited=false;render();return;
+  }
+  const act=b.dataset.act;if(!act)return;
+  if(act==='tooth'){const c=b.dataset.c;const i=S.teeth.indexOf(c);
+    if(i<0){S.teeth.push(c);S.t[c]=S.t[c]||blankTooth();const ord=ARCH_ORDER(S.dent);const all=[...ord.U,...ord.L];S.teeth.sort((a,b)=>all.indexOf(a)-all.indexOf(b))}
+    else{S.teeth.splice(i,1);delete S.t[c]}
+    edited=false;render();return}
+  if(act==='splint'){const c=b.dataset.c;const p=toothPlan(c);S.t[c].splint=!p.on;edited=false;render();return}
+  if(act==='mode'){S.mode=b.dataset.mode;edited=false;render();return}
+  if(act==='reset'){if(S.teeth.length&&!confirmReset())return;fresh(true);edited=false;render();toast('Cleared');return}
+  if(act==='example'){loadExample();toast(S.mode==='review'?'Example 4-week review loaded':'Example injury loaded');return}
+  if(act==='theme'){const cur=store('notile:theme')||'auto';const nx=THEMES[(THEMES.indexOf(cur)+1)%3];store('notile:theme',nx);applyTheme(nx);return}
+  if(act==='copy'){const ok=await copyText($('#out').value);toast(ok?'Note copied':'Copy failed – select the note and copy');return}
+  if(act==='regen'){edited=false;updateNote();return}
+  if(act==='letter'){
+    const text=$('#out').value;
+    store('notile:letterHandoff',JSON.stringify({source:'Trauma Card',title:S.mode==='initial'?'Dental trauma – initial presentation':'Dental trauma review',text,ts:Date.now()}));
+    await copyText(text);
+    if(onSite){const a=document.createElement('a');a.href='/letter-card/';a.hidden=true;document.body.appendChild(a);a.click();a.remove();return}
+    toast('Copied – paste it into Letter Card');return}
+  if(act==='print'){buildPrint();$('#advView').innerHTML=$('#print').innerHTML;const d=$('#advDlg');try{d.showModal()}catch(_){d.setAttribute('open','')}return}
+  if(act==='closedlg'){$('#advDlg').close();return}
+  if(act==='copyadv'){const ok=await copyText($('#advView').innerText);toast(ok?'Advice sheet copied':'Copy failed');return}
+  if(act==='doprint'){try{window.print()}catch(_){}let framed=false;try{framed=window.self!==window.top}catch(_){framed=true}if(framed)setTimeout(()=>toast('If nothing opened, printing is blocked here – use Copy text'),600);return}
+});
+let resetArm=0;
+function confirmReset(){const now=Date.now();if(now-resetArm<3000)return true;resetArm=now;toast('Tap “New patient” again to clear');return false}
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(el.id==='out'){edited=true;$('#edbar').hidden=false;return}
+  if(!el.dataset||!el.dataset.k||el.type==='date')return;
+  setP(el.dataset.k,el.value);edited=false;updateNote();
+});
+document.addEventListener('change',e=>{
+  const el=e.target;if(el.type!=='date'||!el.dataset.k)return;
+  if(el.value){setP(el.dataset.k,el.value);if(el.dataset.k==='date')S.visit='';edited=false;render()}
+});
+
+render();
+})();
+</script>
+<script>if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
+</body>
+</html>

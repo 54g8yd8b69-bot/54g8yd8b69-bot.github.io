@@ -1,0 +1,1133 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'; upgrade-insecure-requests">
+<meta name="description" content="Turns a clinical note into a referral, clinic, discharge, patient or MDT letter. Runs on your own device.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Letter Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Letter Card</title>
+<style>
+/* Letter Card — Notile suite. Paste a note on the left, live A4 letter on the right (stacks on phone with a sticky copy bar). */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --teal2:#3FA9A0;
+  --bg:#F3F7F9; --surface:#FFFFFF; --fg:#10273A; --muted:#566C7D; --line:#D5E0E7;
+  --sel:#1C7293; --sel-fg:#FFFFFF; --note-hi:#E8F2F6; --shadow:0 1px 2px rgba(34,52,61,.04);
+  --warn-bg:#FEF3C7; --warn-fg:#7C2D12; --warn-line:#D97706;
+  --display:Cambria,Caladea,"Source Serif 4",Georgia,serif;
+  --body:Calibri,Carlito,"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --navy:#E3ECF2; --teal:#4FB3C9; --teal2:#5CC3B7;
+  --bg:#08141D; --surface:#0F2130; --fg:#E3ECF2; --muted:#93A9B9; --line:#24394A;
+  --sel:#4FB3C9; --sel-fg:#08141D; --note-hi:#13324A; --shadow:0 1px 3px rgba(0,0,0,.5);
+  --warn-bg:#3A2A0C; --warn-fg:#F5D68A; --warn-line:#B7791F; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --navy:#E3ECF2; --teal:#4FB3C9; --teal2:#5CC3B7;
+  --bg:#08141D; --surface:#0F2130; --fg:#E3ECF2; --muted:#93A9B9; --line:#24394A;
+  --sel:#4FB3C9; --sel-fg:#08141D; --note-hi:#13324A; --shadow:0 1px 3px rgba(0,0,0,.5);
+  --warn-bg:#3A2A0C; --warn-fg:#F5D68A; --warn-line:#B7791F; color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.45}
+[hidden]{display:none!important}
+.wrap{max-width:1240px;margin:0 auto;padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:calc(40px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px 16px;margin-bottom:16px}
+.htxt{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;flex:1;min-width:0}
+header .btn{flex:none}
+h1{font-family:var(--display);font-size:1.75rem;margin:0;color:var(--navy);text-wrap:balance}
+h1 span{color:var(--teal2)}
+a.homelink{color:inherit;text-decoration:none}
+a.homelink:hover{opacity:.85}
+.sub{color:var(--muted);font-size:.95rem;margin:0}
+:focus-visible{outline:2px solid var(--teal2);outline-offset:2px}
+
+/* buttons, chips, inputs */
+.btn{font:inherit;font-weight:700;border:0;border-radius:6px;padding:8px 14px;min-height:40px;cursor:pointer;line-height:1.2}
+.btn.primary{background:var(--teal);color:var(--sel-fg)}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--teal2)}
+.btn.sm{min-height:34px;padding:6px 11px;font-size:.88rem}
+.btn.done{background:var(--teal2);color:#fff;border-color:var(--teal2)}
+.btn:disabled{opacity:.45;cursor:default}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-size:.95rem;padding:7px 11px;border-radius:6px;cursor:pointer;line-height:1.2;text-align:left;min-height:36px}
+.chip:hover{border-color:var(--teal2)}
+.chip[aria-pressed="true"]{background:var(--sel);color:var(--sel-fg);border-color:var(--sel)}
+.chip.multi[aria-pressed="true"]::before{content:"✓ ";font-weight:700}
+.chip.usc[aria-pressed="true"]{background:#B42318;border-color:#B42318;color:#fff}
+.chip.urgent[aria-pressed="true"]{background:#B45309;border-color:#B45309;color:#fff}
+input[type=text],textarea,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+textarea{resize:vertical;line-height:1.45}
+input.oth{font-size:.92rem;padding:6px 10px;background:transparent;border-style:dashed}
+input.oth:not(:placeholder-shown){border-style:solid;background:var(--bg)}
+.lbl{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.lbl small{text-transform:none;letter-spacing:0;font-weight:400}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.hint{margin:0;font-size:.85rem;color:var(--muted)}
+.hint.warn{color:var(--warn-fg);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:6px;padding:6px 10px}
+
+/* clinician settings (same pattern as Notile) */
+.clin{background:var(--surface);border-radius:10px;box-shadow:var(--shadow);margin-bottom:16px;border:1px solid var(--line)}
+.clin summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;cursor:pointer}
+.clin summary::-webkit-details-marker{display:none}
+.clsum{font-weight:700;min-width:0}
+.clsum small{font-weight:400;color:var(--muted)}
+.cledit{font-size:.85rem;font-weight:700;color:var(--teal);flex:none}
+.clin[open] .cledit{visibility:hidden}
+.clgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;padding:0 16px 10px}
+.clfoot{padding:0 16px 14px}
+
+/* letter type tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.tab{border:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-weight:700;padding:8px 13px;border-radius:8px;cursor:pointer;white-space:nowrap;min-height:40px}
+.tab:hover{border-color:var(--teal2)}
+.tab[aria-selected="true"]{background:var(--sel);color:var(--sel-fg);border-color:var(--sel)}
+@media (max-width:640px){.tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.tab{white-space:normal;text-align:left;line-height:1.2}}
+
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--note-hi);border:1px solid var(--teal2);border-radius:10px;padding:10px 14px;margin-bottom:16px}
+.banner .btxt{flex:1;min-width:200px}
+.banner small{display:block;color:var(--muted)}
+
+/* layout */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,520px);gap:20px;align-items:start}
+@media (max-width:880px){.grid{grid-template-columns:minmax(0,1fr)}}
+.form{display:flex;flex-direction:column;gap:14px;min-width:0}
+section.card{background:var(--surface);border-radius:10px;box-shadow:var(--shadow);padding:16px 18px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--line)}
+section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(--navy);letter-spacing:.01em}
+.chead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#paste{min-height:170px;font-size:.92rem}
+.privacy{font-size:.82rem;color:var(--muted);background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:0}
+.privacy b{color:var(--fg)}
+.metaline{font-size:.88rem;color:var(--muted);margin:0}
+.metaline b{color:var(--fg)}
+.idwarn{display:flex;flex-direction:column;gap:6px;color:var(--warn-fg);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:8px;padding:8px 12px;font-size:.9rem}
+.idwarn .row{gap:6px}
+.idwarn .btn{background:var(--surface);color:var(--fg);border:1px solid var(--warn-line)}
+
+/* parsed sections */
+.secs{display:flex;flex-direction:column;gap:10px}
+.sec{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);display:flex;flex-direction:column;gap:8px}
+.sec.off{border-style:dashed;background:transparent}
+.sec.off textarea{opacity:.5}
+.sec.off .sec-type,.sec.off .sec-title{opacity:.65}
+.sechead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sechead .sec-type{flex:1 1 180px;width:auto;font-weight:700;padding:6px 8px;background:var(--surface)}
+.sechead .sec-title{flex:1 1 140px;width:auto;padding:6px 8px;background:var(--surface)}
+.sec textarea{min-height:64px;background:var(--surface);font-size:.92rem}
+.ibtn{width:36px;height:36px;flex:none;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg);font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.ibtn:hover{border-color:var(--teal2)}
+.ibtn:disabled{opacity:.35;cursor:default}
+.ibtn.del:hover{border-color:#C2303A;color:#C2303A}
+.chip.inc{font-size:.85rem;padding:5px 10px;min-height:36px}
+.chip.inc[aria-pressed="false"]{color:var(--muted)}
+.empty{margin:0;color:var(--muted);font-size:.93rem;background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:14px}
+.addrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.addrow select{width:auto;max-width:100%}
+
+/* preview */
+.preview{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);display:flex;flex-direction:column;max-height:calc(100vh - 24px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);min-width:0}
+.pvhead{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.pvhead strong{font-family:var(--display);font-size:1.05rem;color:var(--navy)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.edbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;padding:8px 14px;background:var(--note-hi);font-size:.85rem;border-bottom:1px solid var(--line)}
+.pvscroll{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--bg)}
+.page{background:#FFFFFF;color:#111111;margin:0 auto;width:100%;aspect-ratio:210/297;padding:34px 36px 40px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 22px rgba(16,39,58,.10);border-radius:2px;overflow-wrap:break-word;color-scheme:light}
+.page:focus{outline:none}
+.page:focus-visible{outline:2px solid var(--teal2);outline-offset:3px}
+.page .ph{background:#FFF1B8;box-shadow:inset 0 0 0 1px #E9CF6A;border-radius:2px;padding:0 2px}
+.page .empty-body{color:#6B7B88;font-style:italic}
+.pvfoot{font-size:.72rem;line-height:1.35;color:var(--muted);padding:7px 14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.pvfoot label{display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--fg);cursor:pointer}
+.pvfoot input{accent-color:var(--teal);width:16px;height:16px;margin:0}
+.mbar{display:none}
+@media (max-width:880px){
+  .preview{position:static;max-height:none}
+  .pvscroll{overflow:visible;padding:12px}
+  .page{padding:24px 20px 30px}
+  .wrap{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
+  .mbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;gap:8px;justify-content:space-between;align-items:center;background:var(--surface);color:var(--fg);border-top:1px solid var(--line);box-shadow:0 -2px 10px rgba(11,46,74,.12);
+    padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .mbar span{font-size:.88rem;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mbar .btns{flex:none;flex-wrap:nowrap}
+}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--sel);color:var(--sel-fg);font-weight:700;padding:8px 16px;border-radius:999px;z-index:9;display:flex;gap:12px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:calc(100vw - 32px)}
+.toast button{font:inherit;font-weight:700;background:transparent;color:inherit;border:1px solid currentColor;border-radius:999px;padding:2px 10px;cursor:pointer}
+@media (prefers-reduced-motion:no-preference){
+  .chip,.tab,.btn,.ibtn{transition:background-color .16s ease,color .16s ease,border-color .16s ease}
+  .toast:not([hidden]){animation:tin .2s ease both}
+  @keyframes tin{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+}
+
+/* print: the letter only, on A4 */
+@media print{
+  @page{size:A4;margin:18mm 18mm 20mm}
+  html,body{background:#fff!important}
+  header,.clin,.tabs,.banner,.form,.pvhead,.edbar,.pvfoot,.mbar,.toast{display:none!important}
+  .wrap{padding:0;max-width:none}
+  .grid{display:block}
+  .preview{position:static;border:0;box-shadow:none;max-height:none;background:none}
+  .pvscroll{overflow:visible;padding:0;background:none}
+  .page{box-shadow:none;padding:0;aspect-ratio:auto;width:auto;border-radius:0}
+  .page .ph{background:none;box-shadow:none;padding:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="htxt">
+      <h1><a class="homelink" href="/" title="Back to all apps">Letter <span>Card</span></a></h1>
+      <p class="sub">Paste a note, pick a letter, copy it into the letter system.</p>
+    </div>
+    <button type="button" class="btn ghost sm" id="themeBtn">Dark theme</button>
+  </header>
+
+  <details class="clin" id="clin">
+    <summary><span class="clsum" id="clsum">Add your name, grade and department</span><span class="cledit">Edit</span></summary>
+    <div class="clgrid">
+      <div class="field"><label class="lbl" for="s-name">Your name</label><input type="text" id="s-name" data-set="name" autocomplete="name" placeholder="e.g. Dr A Clinician"></div>
+      <div class="field"><label class="lbl" for="s-grade">Grade</label><input type="text" id="s-grade" data-set="grade" list="gradeList" autocomplete="off"><datalist id="gradeList"><option>Dental Core Trainee</option><option>Specialty Registrar</option><option>Specialty Dentist</option><option>Associate Specialist</option><option>Consultant</option></datalist></div>
+      <div class="field"><label class="lbl" for="s-dept">Department</label><input type="text" id="s-dept" data-set="department" autocomplete="off"></div>
+      <div class="field"><label class="lbl" for="s-hosp">Hospital</label><input type="text" id="s-hosp" data-set="hospital" autocomplete="off"></div>
+      <div class="field"><label class="lbl" for="s-cons">Consultant</label><input type="text" id="s-cons" data-set="consultant" autocomplete="off" placeholder="e.g. Dr B Consultant"></div>
+      <div class="field"><label class="lbl" for="s-sign">Sign-off</label><input type="text" id="s-sign" data-set="signoff" list="signList" autocomplete="off"><datalist id="signList"><option>Yours sincerely</option><option>Kind regards</option><option>With best wishes</option></datalist></div>
+      <div class="field" style="grid-column:1/-1"><label class="lbl" for="s-contact">Department address and phone <small>(optional, for the letterhead)</small></label><textarea id="s-contact" data-set="contact" rows="2" placeholder="Street, City, Postcode&#10;Tel: department number"></textarea></div>
+    </div>
+    <p class="hint clfoot">Only these clinician details are remembered on this device. Patient details are never asked for or stored.</p>
+  </details>
+
+  <div class="banner" id="handoff" role="region" aria-label="Note waiting to import" hidden>
+    <span class="btxt">Import note from <b id="hoSrc">another app</b>?<small id="hoTitle"></small></span>
+    <button type="button" class="btn primary sm" id="hoImport">Import</button>
+    <button type="button" class="btn ghost sm" id="hoDismiss">Dismiss</button>
+  </div>
+
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Letter type"></nav>
+
+  <div class="grid" id="panel" role="tabpanel">
+    <div class="form">
+      <section class="card" aria-labelledby="h-paste">
+        <div class="chead"><h2 id="h-paste">Paste note</h2><span class="hint">From Notile, Notile Chart or Trauma Card</span></div>
+        <div class="field">
+          <label class="lbl" for="paste">Clinical note</label>
+          <textarea id="paste" spellcheck="false" placeholder="Paste the copied note here, then press Parse.&#10;Headings like PC, HPC, MH, SH, DH, E/O, I/O, Radiographs, Dx, Tx, Plan and Review are recognised."></textarea>
+        </div>
+        <div class="row">
+          <button type="button" class="btn primary" id="parseBtn">Parse</button>
+          <button type="button" class="btn ghost" id="exampleBtn">Load example</button>
+          <button type="button" class="btn ghost" id="clearBtn">Clear</button>
+        </div>
+        <p class="metaline" id="metaLine" hidden></p>
+        <div class="idwarn" id="idWarn" role="alert" hidden></div>
+        <p class="privacy"><b>No patient identifiers here.</b> There is nowhere to enter names, CHI or hospital numbers, dates of birth or addresses. The letter uses placeholders such as [Patient name], [DOB], [CHI], [Address] and [GDP name &amp; practice]; fill them in on the trust letter system after pasting. Nothing you paste is saved: it clears when you close this page.</p>
+      </section>
+
+      <section class="card" aria-labelledby="h-details">
+        <h2 id="h-details">Letter details</h2>
+        <div id="details" class="form"></div>
+      </section>
+
+      <section class="card" aria-labelledby="h-secs">
+        <div class="chead"><h2 id="h-secs">Note sections</h2><span class="hint" id="secHint"></span></div>
+        <div class="secs" id="secList"></div>
+        <div class="addrow">
+          <label class="lbl" for="addSec">Add section</label>
+          <select id="addSec"></select>
+        </div>
+      </section>
+    </div>
+
+    <aside class="preview" aria-labelledby="h-letter">
+      <div class="pvhead">
+        <strong id="h-letter">Letter</strong>
+        <div class="btns">
+          <button type="button" class="btn ghost sm" id="copyTxt">Copy as text</button>
+          <button type="button" class="btn primary sm" id="copyFmt">Copy formatted</button>
+          <button type="button" class="btn ghost sm" id="printBtn">Print</button>
+        </div>
+      </div>
+      <div class="edbar" id="edbar" hidden><span>Edited by hand. Changes on the left won't update it.</span><button type="button" class="btn ghost sm" id="discard">Discard edits</button></div>
+      <div class="pvscroll">
+        <div class="page" id="page" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Letter preview, editable"></div>
+      </div>
+      <div class="pvfoot">
+        <label><input type="checkbox" id="lhChk"> Include letterhead and date</label>
+        <span>Text in [brackets] is a placeholder to complete on the trust system. Check every letter before it is sent; you remain responsible for its content.</span>
+      </div>
+    </aside>
+  </div>
+</div>
+<div class="mbar" id="mbar"><span id="mlabel">Letter</span><div class="btns"><button type="button" class="btn ghost sm" id="copyTxt2">Copy text</button><button type="button" class="btn primary sm" id="copyFmt2">Copy formatted</button></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden><span id="toastMsg"></span><button type="button" id="toastAct" hidden></button></div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\\/]/g,'\\$&');
+const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+let NID=0;const uid=()=>'s'+(++NID);
+const MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+const longDate=d=>d.toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+function parseShortDate(s){const m=/(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})/.exec(s||'');if(!m)return null;const mi=MONTHS.indexOf(m[2].slice(0,3).toLowerCase());if(mi<0)return null;const d=new Date(+m[3],mi,+m[1]);return isNaN(d)?null:d}
+
+/* ---------- clinician settings: the only thing kept in localStorage ---------- */
+const SKEY='letterCard_settings_v1';
+const DEF_SET={name:'',grade:'Dental Core Trainee',department:'Restorative Dentistry',hospital:'Glasgow Dental Hospital',consultant:'',signoff:'Yours sincerely',contact:'',letterhead:true,theme:''};
+const SET=Object.assign({},DEF_SET);
+try{const o=JSON.parse(localStorage.getItem(SKEY)||'null');if(o&&typeof o==='object')Object.keys(DEF_SET).forEach(k=>{if(k in o&&typeof o[k]===typeof DEF_SET[k])SET[k]=o[k]})}catch(e){}
+function saveSet(){try{localStorage.setItem(SKEY,JSON.stringify(SET))}catch(e){}}
+const hosp=()=>SET.hospital.trim()||'[Hospital]';
+const dept=()=>SET.department.trim()||'[Department]';
+const me=()=>SET.name.trim()||'[Your name]';
+
+/* ---------- section vocabulary ---------- */
+const SD={pc:'Presenting complaint',hpc:'History of presenting complaint',mh:'Medical history',sh:'Social history',dh:'Dental history',eo:'Extra-oral examination',io:'Intra-oral examination',exam:'Examination',findings:'Findings',rad:'Radiographs / special investigations',dx:'Diagnosis',tx:'Treatment',advice:'Advice',ohi:'Oral hygiene instruction',plan:'Plan',review:'Review / follow-up',notes:'Notes'};
+const ORDER=['pc','hpc','mh','sh','dh','eo','io','exam','findings','rad','dx','tx','advice','ohi','plan','review','notes'];
+function norm(s){return String(s).toLowerCase().replace(/[’‘`]/g,"'").replace(/\s*\/\s*/g,'/').replace(/\s*&\s*/g,' & ').replace(/\s+/g,' ').replace(/[.\s]+$/,'').trim()}
+const ALIAS={},SUB={},CAPS={};
+const add=(map,key,list)=>list.forEach(a=>{map[norm(a)]=key});
+// full headings: the heading itself is dropped and only the content is kept
+add(ALIAS,'pc',['pc','p/c','c/o','co','complaint','complaints','presenting complaint','chief complaint','main complaint','reason for attendance','reason for visit','presenting problem','concerns','patient concerns']);
+add(ALIAS,'hpc',['hpc','hopc','history','history of presenting complaint','history of pc','hx','background','history of injury','trauma history','pre-op','preop']);
+add(ALIAS,'mh',['mh','pmh','mhx','med hx','medical hx','medical','medical history','past medical history','relevant medical history']);
+add(ALIAS,'sh',['sh','shx','social','social hx','social history']);
+add(ALIAS,'dh',['dh','dhx','dental hx','dental history','previous dental history','past dental history']);
+add(ALIAS,'eo',['e/o','eo','eoe','e/o exam','e/o examination','extra-oral','extraoral','extra oral','extra-oral examination','extraoral examination','extra oral examination','extra-oral findings']);
+add(ALIAS,'io',['i/o','io','ioe','i/o exam','i/o examination','intra-oral','intraoral','intra oral','intra-oral examination','intraoral examination','intra oral examination','intra-oral findings','periodontal examination']);
+add(ALIAS,'exam',['examination','exam','o/e','oe','on examination','clinical examination','assessment','clinical assessment','trauma assessment','examination findings']);
+add(ALIAS,'findings',['findings','clinical findings','trauma findings','dental charting','charting','injuries','injury findings']);
+add(ALIAS,'rad',['radiographs','radiograph','radiographic','radiographic findings','radiographic report','radiology','imaging','x-rays','x-ray','xr','xrs','special investigations','special tests','investigations','si','sensibility tests','clinical tests']);
+add(ALIAS,'dx',['diagnosis','dx','diagnoses','impression','differential diagnosis','ddx','provisional diagnosis','working diagnosis']);
+add(ALIAS,'tx',['treatment','tx','today','treatment today','treatment provided','treatment carried out','treatment done','tx today','tx provided','procedure','procedures','visit','anaesthesia & isolation','anaesthesia and isolation','anaesthesia']);
+add(ALIAS,'advice',['advice','advice given','post-op instructions','post-operative instructions','post-op advice','poi','instructions','post-op']);
+add(ALIAS,'ohi','ohi|oral hygiene instruction|oral hygiene instructions|oral hygiene advice|prevention|preventive advice'.split('|'));
+add(ALIAS,'plan',['plan','tx plan','treatment plan','tp','management','management plan','proposed treatment','proposed plan','risk & plan','risk and plan','plan going forward','future plan','next steps']);
+add(ALIAS,'review',['review','follow-up','follow up','followup','fu','f/u','r/v','review plan','review schedule']);
+add(ALIAS,'notes',['notes','note','other','comments','additional notes','misc']);
+add(ALIAS,'plan',['key points','endodontic plan']);
+// sub-labels: the line keeps its label and goes to this section
+add(SUB,'hpc',['onset','duration','onset/duration','character','triggers','trigger','site','pain score','pain','analgesia','analgesia taken','lingers after stimulus','wakes at night','since last visit','problems','mechanism','mechanism of injury','time of injury','date of injury','time since injury','tetanus','tetanus status','loss of consciousness','head injury','other injuries','previous trauma','previous dental trauma','first aid','referred by','referral reason','head injury screen','history']);
+add(SUB,'exam',['soft tissues','soft tissue']);
+add(SUB,'rad',['radiographs today']);
+add(SUB,'review',['next review']);
+add(SUB,'mh',['medications','medication','meds','allergies','allergy','drug history','drugs','anticoagulants','bisphosphonates','alerts','medical alerts','asa','asa grade']);
+add(SUB,'sh',['smoking','smoker','tobacco','alcohol','vaping','vapes','occupation','diet','sugar intake','lives with','carer']);
+add(SUB,'dh',['regular dentist','attendance','last visit','previous treatment','dental anxiety','brushing']);
+add(SUB,'eo',['tmj','lymph nodes','lymphadenopathy','facial swelling','muscles of mastication','face']);
+add(SUB,'io',['soft tissues','hard tissues','oral cancer screen','caries/defects','caries','bpe','oral hygiene','oh','calculus','plaque','periodontal','perio','occlusion','existing prostheses','prostheses','dentures','restorations','teeth present','gingivae','tongue','mucosa','plaque score','bleeding score']);
+add(SUB,'rad',['justification','report','quality','ir(me)r','sensibility','sensibility testing','vitality','vitality testing','pulp testing','ept','ethyl chloride','cold test','cbct','opt','bitewings']);
+add(SUB,'dx',['pulpal diagnosis','periapical diagnosis','diagnosis notes','prognosis']);
+add(SUB,'tx',['la','local anaesthetic','cartridges','topical','technique','isolation','clamp','materials','treatment details','tolerated','patient tolerated','splint']);
+add(SUB,'plan',['options','options discussed','referral','caries risk','perio risk','oral cancer risk']);
+add(SUB,'review',['recall','next visit','next appointment','nv']);
+add(SUB,'advice',['post-op','prescription','rx','antibiotics','analgesia advice']);
+add(SUB,'ohi',['toothpaste','interdental cleaning','fluoride']);
+add(CAPS,'io',['periodontal']);
+
+/* ---------- glossary: [abbreviation, clinical expansion, plain English, shorthand (replace without brackets)] ---------- */
+const GLOSS=[
+ ['OHI','oral hygiene instruction','advice on keeping your teeth clean'],
+ ['RCT','root canal treatment','root canal treatment'],
+ ['GA','general anaesthetic','general anaesthetic (being put to sleep)'],
+ ['LA','local anaesthetic','local anaesthetic (numbing injection)'],
+ ['BPE','Basic Periodontal Examination','gum health check (BPE)'],
+ ['PFM','porcelain-fused-to-metal','porcelain-fused-to-metal'],
+ ['RPD','removable partial denture','removable partial denture'],
+ ['CoCr','cobalt-chrome','cobalt-chrome (metal-framed)'],
+ ['F/F','complete upper and lower dentures','full upper and lower dentures'],
+ ['F/-','complete upper denture','full upper denture'],
+ ['-/F','complete lower denture','full lower denture'],
+ ['P/P','upper and lower partial dentures','upper and lower partial dentures'],
+ ['P/-','upper partial denture','upper partial denture'],
+ ['-/P','lower partial denture','lower partial denture'],
+ ['F/P','complete upper and partial lower dentures','full upper denture and lower partial denture'],
+ ['P/F','partial upper and complete lower dentures','upper partial denture and full lower denture'],
+ ['RBB','resin-bonded bridge','resin-bonded bridge (a bridge fixed to the back of a neighbouring tooth)'],
+ ['TMJ','temporomandibular joint','jaw joint'],
+ ['TMD','temporomandibular disorder','jaw joint problem'],
+ ['OPT','orthopantomogram','panoramic X-ray (OPT)'],
+ ['OPG','orthopantomogram','panoramic X-ray'],
+ ['CBCT','cone beam CT','3D X-ray scan (CBCT)'],
+ ['PA','periapical','close-up'],
+ ['PAs','periapical radiographs','close-up X-rays'],
+ ['BW','bitewing radiograph','bitewing X-ray'],
+ ['BWs','bitewing radiographs','bitewing X-rays'],
+ ['EPT','electric pulp test','electric pulp test (checks whether the nerve responds)'],
+ ['TTP','tender to percussion','tender when tapped'],
+ ['NAD','nothing abnormal detected','nothing abnormal found'],
+ ['GDP','general dental practitioner','your dentist'],
+ ['GMP','general medical practitioner','your GP'],
+ ['GIC','glass ionomer cement','glass ionomer (a tooth-coloured filling material)'],
+ ['RMGIC','resin-modified glass ionomer cement','resin-modified glass ionomer'],
+ ['MTA','mineral trioxide aggregate','MTA (a root repair material)'],
+ ['NaOCl','sodium hypochlorite','disinfectant solution (sodium hypochlorite)'],
+ ['HVS','high-volume suction','suction'],
+ ['WL','working length','working length'],
+ ['FV','fluoride varnish','fluoride varnish'],
+ ['SPT','supportive periodontal therapy','regular gum maintenance (supportive periodontal therapy)'],
+ ['RSD','root surface debridement','deep cleaning under the gums (root surface debridement)'],
+ ['PMPR','professional mechanical plaque removal','professional cleaning'],
+ ['BOP','bleeding on probing','bleeding when the gums were checked'],
+ ['PPD','probing pocket depth','gum pocket depth'],
+ ['CAL','clinical attachment loss','loss of gum attachment'],
+ ['OVD','occlusal vertical dimension','bite height'],
+ ['ICP','intercuspal position','normal bite'],
+ ['RCP','retruded contact position','retruded bite position'],
+ ['IOTN','Index of Orthodontic Treatment Need','orthodontic treatment need score (IOTN)'],
+ ['IADT','International Association of Dental Traumatology','International Association of Dental Traumatology'],
+ ['USC','urgent suspected cancer','urgent suspected cancer'],
+ ['MDT','multidisciplinary team','team of specialists'],
+ ['HNC','head and neck cancer','head and neck cancer'],
+ ['H&N','head and neck','head and neck'],
+ ['ORN','osteoradionecrosis','osteoradionecrosis (bone damage after radiotherapy)'],
+ ['MRONJ','medication-related osteonecrosis of the jaw','jaw bone damage linked to medication (MRONJ)'],
+ ['DXT','radiotherapy','radiotherapy'],
+ ['CRT','chemoradiotherapy','chemoradiotherapy'],
+ ['SCC','squamous cell carcinoma','squamous cell carcinoma'],
+ ['FOM','floor of mouth','floor of the mouth'],
+ ['XLA','extraction','extraction'],
+ ['MIH','molar–incisor hypomineralisation','weak enamel on the back and front teeth (molar–incisor hypomineralisation)'],
+ ['AI','amelogenesis imperfecta','amelogenesis imperfecta (a condition affecting the enamel)'],
+ ['DI','dentinogenesis imperfecta','dentinogenesis imperfecta (a condition affecting the dentine)'],
+ ['PDL','periodontal ligament','ligament around the root'],
+ ['CEJ','cemento-enamel junction','neck of the tooth'],
+ ['VFR','vacuum-formed retainer','clear plastic retainer'],
+ ['URA','upper removable appliance','upper removable brace'],
+ ['OMFS','Oral and Maxillofacial Surgery','Oral and Maxillofacial Surgery'],
+ ['NSAID','non-steroidal anti-inflammatory drug','anti-inflammatory painkiller'],
+ ['NSAIDs','non-steroidal anti-inflammatory drugs','anti-inflammatory painkillers'],
+ ['PRN','as required','when needed'],
+ ['BD','twice daily','twice a day'],['TDS','three times daily','three times a day'],['QDS','four times daily','four times a day'],
+ ['NKDA','no known drug allergies','no known drug allergies'],
+ ['PMH','past medical history','medical history'],
+ ['LOC','loss of consciousness','loss of consciousness'],
+ ['DNA','did not attend','did not attend'],
+ ['OH','oral hygiene','oral hygiene (tooth cleaning)'],
+ ['IANB','inferior alveolar nerve block','nerve block'],
+ ['Ca(OH)2','calcium hydroxide','calcium hydroxide (a medicated dressing)'],
+ ['Ca(OH)₂','calcium hydroxide','calcium hydroxide (a medicated dressing)'],
+ ['Tx','treatment','treatment',1],['tx','treatment','treatment',1],['Dx','diagnosis','diagnosis',1],['dx','diagnosis','diagnosis',1],
+ ['Hx','history','history',1],['hx','history','history',1],['Rx','prescription','prescription',1],['abx','antibiotics','antibiotics',1],['Abx','antibiotics','antibiotics',1],
+ ['C/O','complaining of','complained of',1],['c/o','complaining of','complained of',1],['O/E','on examination','when we examined you',1],['o/e','on examination','when we examined you',1],
+ ['E/O','extra-oral','outside the mouth',1],['e/o','extra-oral','outside the mouth',1],['EO','extra-oral','outside the mouth',1],
+ ['I/O','intra-oral','inside the mouth',1],['i/o','intra-oral','inside the mouth',1],['IO','intra-oral','inside the mouth',1],
+ ['F/U','follow-up','follow-up',1],['f/u','follow-up','follow-up',1],['R/V','review','review',1],['r/v','review','review',1],
+ ['wks','weeks','weeks',1],['adr','adrenaline','adrenaline',1],['Pt','Patient','you',1],['pt','patient','you',1]
+];
+const GL_MAP={};GLOSS.forEach(g=>{GL_MAP[g[0]]=g});
+const GL_RE=new RegExp('(?<![A-Za-z0-9])(?:'+GLOSS.map(g=>g[0]).sort((a,b)=>b.length-a.length).map(reEsc).join('|')+')(?![A-Za-z0-9])','g');
+const ABBR=new Set(GLOSS.map(g=>g[0].toUpperCase()));
+
+/* plain-English phrases for patient letters (applied before the glossary) */
+const LAY=[
+ [/\b(?:your|the|their|pt'?s|patient'?s) GDP\b/gi,'your dentist'],
+ [/\bRCT(?=\s+\u0001)/g,'root canal treatment on'],
+ [/\b(?:XLA|extraction)(?=\s+\u0001)/gi,'extraction of'],
+ [/\bTTP\s*(?:negative|-ve|−)/gi,'not tender when tapped'],
+ [/\bTTP\s*(?:positive|\+ve|\+)/gi,'tender when tapped'],
+ [/\btender to percussion\b/gi,'tender when tapped'],
+ [/\bethyl chloride\s*(?:positive|\+ve|\+)/gi,'responded normally to the cold test'],
+ [/\bethyl chloride\s*(?:negative|-ve|−)/gi,'no response to the cold test'],
+ [/\bethyl chloride delayed response\b/gi,'delayed response to the cold test'],
+ [/\bethyl chloride\b/gi,'cold test'],
+ [/\bEPT\s*(?:no response|NR)\b/gi,'no response to the electric pulp test'],
+ [/\bEPT \d{1,2}\b/g,'responded to the electric pulp test'],
+ [/\bmobility (?:grade )?0(?: \(physiological\))?/gi,'not loose'],
+ [/\bmobility (?:grade )?III\b/gi,'very loose'],
+ [/\bmobility (?:grade )?II\b/gi,'moderately loose'],
+ [/\bmobility (?:grade )?I\b/gi,'slightly loose'],
+ [/\bpercussion note (?:high \(metallic\)|metallic|high)/gi,'high-pitched sound when tapped'],
+ [/\bpercussion note dull\b/gi,'dull sound when tapped'],
+ [/\bpercussion note normal\b/gi,'normal sound when tapped'],
+ [/\bcolour normal\b/gi,'normal colour'],
+ [/\bcolour (grey|pink|yellow)\b/gi,(m,c)=>c.toLowerCase()+' discolouration'],
+ [/\bsinus \/ swelling present\b/gi,'gum boil or swelling present'],
+ [/\bno sinus or swelling\b/gi,'no gum boil or swelling'],
+ [/\bradiograph:\s*NAD\b/gi,'X-ray normal'],
+ [/\bradiograph:\s*(?:PA|periapical) radiolucency\b/gi,'dark area around the root tip on the X-ray'],
+ [/(?<=\u0002 )(?:PA|periapical) radiolucency\b/gi,'has a dark area around the root tip (periapical radiolucency)'],
+ [/\b(?:PA|periapical) radiolucency\b/gi,'a dark area around the root tip (periapical radiolucency)'],
+ [/(?<=\u0002 )pulp necrosis\b/gi,'has a dead nerve (pulp necrosis)'],
+ [/(?<=\u0002 )concussion\b/gi,'was bruised (concussion)'],
+ [/(?<=\u0002 )subluxation\b/gi,'was bruised and slightly loosened (subluxation)'],
+ [/(?<=\u0002 )NAD\b/g,'looked normal'],
+ [/\blabial(?:ly)? to\b/gi,'on the lip side of'],[/\bbuccal(?:ly)? to\b/gi,'on the cheek side of'],[/\bpalatal(?:ly)? to\b/gi,'on the palate side of'],[/\blingual(?:ly)? to\b/gi,'on the tongue side of'],
+ [/\bperiapical(?=[ \t]*(?:\n|$))/gi,'close-up (periapical) X-ray'],
+ [/\bPA radiographs?\b/g,m=>/s$/.test(m)?'close-up X-rays':'close-up X-ray'],
+ [/\bpulp necrosis\b/gi,'the nerve inside the tooth has died (pulp necrosis)'],
+ [/\b(?:symptomatic )?irreversible pulpitis\b/gi,'inflammation of the nerve that will not settle (irreversible pulpitis)'],
+ [/\breversible pulpitis\b/gi,'mild inflammation of the nerve that may settle (reversible pulpitis)'],
+ [/\bchronic apical abscess\b/gi,'a long-standing infection at the root tip (chronic apical abscess)'],
+ [/\bacute apical abscess\b/gi,'an infection at the root tip (acute apical abscess)'],
+ [/\b(?:symptomatic |asymptomatic )?apical periodontitis\b/gi,'inflammation around the root tip (apical periodontitis)'],
+ [/\blateral luxation\b/gi,'the tooth being knocked sideways (lateral luxation)'],
+ [/\bextrusive luxation\b/gi,'the tooth being partly knocked out of its socket (extrusion)'],
+ [/\bintrusive luxation\b/gi,'the tooth being pushed into the bone (intrusion)'],
+ [/\bsubluxation\b/gi,'bruising and slight loosening of the tooth (subluxation)'],
+ [/\bpulp extirpation\b/gi,'removal of the nerve from inside the tooth (pulp extirpation)'],
+ [/\bCa\(OH\)[2₂] dressing\b/gi,'medicated dressing (calcium hydroxide)'],
+ [/\bcarious\b/gi,'decayed'],[/\bcaries\b/gi,'decay'],
+ [/\bgingivae\b/gi,'gums'],[/\bgingival\b/gi,'gum'],
+ [/\bradiographs\b/gi,'X-rays'],[/\bradiograph\b/gi,'X-ray'],[/\bradiographic\b/gi,'X-ray'],
+ [/\banalgesia advice\b/gi,'advice on painkillers'],[/\banalgesia\b/gi,'pain relief'],[/\banalgesics\b/gi,'painkillers'],
+ [/\bTB technique\b/g,'toothbrushing technique'],
+ [/\binterdental cleaning\b/gi,'cleaning between your teeth'],
+ [/\bppm F\b/g,'ppm fluoride'],
+ [/\bspit,? don['’]t rinse\b/gi,'spit out after brushing but don’t rinse'],
+ [/\binternal bleaching\b/gi,'whitening from inside the tooth (internal bleaching)'],
+ [/\bsensibility testing\b/gi,'tests of how the nerve responds'],
+ [/(?<!maxillary\s)\bsinus\b(?!\s*lift)/gi,'gum boil (sinus)'],
+ [/\bosteoradionecrosis\b/gi,'osteoradionecrosis (bone damage after radiotherapy)'],
+ [/\bhypodontia\b/gi,'hypodontia (some teeth have not developed)'],
+ [/\bpontics\b/gi,'false teeth (pontics)'],[/\bpontic\b/gi,'false tooth (pontic)'],
+ [/\bortho\b(?!dontic)/gi,'orthodontic treatment']
+];
+// Notile labels reworded for patients ('' = drop the label, keep the value)
+const PTLAB={'treatment today':'','treatment details':'Details','mechanism of injury':'How the injury happened','since last visit':'Since your last visit','soft tissues':'Gums and soft tissues','oral hygiene':'Tooth cleaning','report':'What the X-rays showed','pulpal diagnosis':'The nerve of the tooth','periapical diagnosis':'Around the root tip','diagnosis notes':'','extra-oral':'Outside the mouth','bpe':'Gum health check','trauma findings':'','advice':'','advice given':'','radiographs':'X-rays taken','recall':'Next appointment','complaint':'','hard tissues':'Teeth','caries/defects':'Decay or damage','existing prostheses':'Dentures, crowns or bridges','oral cancer screen':'Mouth cancer check','calculus':'Tartar','treatment plan':'','diagnosis':'','findings':''};
+const TECH=new Set(['cartridges','topical','isolation','clamp','technique','ir(me)r','quality','justification','la','local anaesthetic','patient tolerated','tolerated','materials','working length','wl']);
+
+/* ---------- Palmer notation ---------- */
+const QUAD={UR:'upper right',UL:'upper left',LR:'lower right',LL:'lower left'};
+const PERM_C=['','central incisor','lateral incisor','canine','first premolar','second premolar','first molar','second molar','third molar'];
+const PERM_P=['','front tooth','side front tooth','canine','first premolar','second premolar','first molar','second molar','wisdom tooth'];
+const PRIM_C={A:'primary central incisor',B:'primary lateral incisor',C:'primary canine',D:'primary first molar',E:'primary second molar'};
+const PRIM_P={A:'baby front tooth',B:'baby side front tooth',C:'baby canine',D:'baby first molar',E:'baby second molar'};
+const TOOTH_RE=/(?<![A-Za-z0-9])(UR|UL|LR|LL)([1-8]|[A-E])(?![A-Za-z0-9])/g;
+const RANGE_RE=/(?<![A-Za-z0-9])(UR|UL|LR|LL)([1-8A-E])\s*(?:[–—-]|\bto\b)\s*(UR|UL|LR|LL)?([1-8A-E])(?![A-Za-z0-9])/g;
+const QUAD_RE=/(?<![A-Za-z0-9])(UR|UL|LR|LL)(?![A-Za-z0-9])/g;
+function toothName(q,n,plain,seen){const code=q+n;
+  if(!plain){if(seen.has('T'+code))return code;seen.add('T'+code)}
+  const name=/\d/.test(n)?(plain?PERM_P:PERM_C)[+n]:(plain?PRIM_P:PRIM_C)[n];
+  return `${QUAD[q]} ${name} (${code})`}
+
+/* ---------- wording transforms ---------- */
+function youify(s){
+  const P='(?:the\\s+)?(?:patient|pt)';
+  const R=[
+   [new RegExp(`\\b${P}(?:'|’)s\\b`,'gi'),'your'],
+   [new RegExp(`\\b${P}\\s+is\\b`,'gi'),'you are'],
+   [new RegExp(`\\b${P}\\s+was\\b`,'gi'),'you were'],
+   [new RegExp(`\\b${P}\\s+has\\b`,'gi'),'you have'],
+   [new RegExp(`\\b${P}\\s+(?:reports|reported|states|stated|says|said)\\b`,'gi'),'you told us'],
+   [new RegExp(`\\b${P}\\s+(?:complains|complained)\\s+of\\b`,'gi'),'you told us about'],
+   [new RegExp(`\\b${P}\\s+c\\/o\\b`,'gi'),'you told us about'],
+   [new RegExp(`\\b${P}\\s+(?:denies|denied)\\b`,'gi'),'you did not report'],
+   [new RegExp(`\\b${P}\\s+(advised|informed|given|told|shown|instructed|consented|reassured|happy|keen|aware|unhappy|anxious|seen|referred)\\b`,'gi'),(m,w)=>'you were '+w.toLowerCase()],
+   [new RegExp(`\\b${P}\\s+(would like|wishes|wants|prefers|declined|agreed|understands|understood|noticed|notices)\\b`,'gi'),(m,w)=>'you '+({wishes:'wish',wants:'want',prefers:'prefer',understands:'understand',notices:'noticed'}[w.toLowerCase()]||w.toLowerCase())],
+   [new RegExp(`\\b${P}\\b`,'gi'),'you']];
+  R.forEach(r=>{s=s.replace(r[0],r[1])});
+  s=s.replace(/(\byou (?:were|are|have)\b[^.\n]{0,80}?\band )(was|is|has)\b/gi,(m,a,v)=>a+({was:'were',is:'are',has:'have'}[v.toLowerCase()]));
+  return s.replace(/(^|\n\s*(?:[–—•·*-]\s*)?|[.!?:]\s+)(you|your)\b/g,(m,a,w)=>a+cap(w));
+}
+function ptLines(s,tech){
+  return s.split('\n').map(line=>{
+    const m=line.match(/^(\s*(?:[–—•·▪*-]\s+)?)([A-Za-z][A-Za-z0-9 \/&()'’.+-]{0,40}?)\s*:\s*(.*)$/);
+    if(!m)return line;const lab=norm(m[2]);
+    if(tech&&(TECH.has(lab)||(lab==='radiographs'&&/^not indicated/i.test(m[3]))))return null;
+    if(Object.prototype.hasOwnProperty.call(PTLAB,lab)){const nl=PTLAB[lab];return m[1]+(nl?nl+': '+m[3]:cap(m[3]))}
+    return line}).filter(l=>l!==null).join('\n');
+}
+// o: {patient, you, tech, teeth, expand}. 'seen' tracks first use across the whole letter.
+function xform(text,o,seen){
+  let s=String(text||'');
+  if(o.you)s=youify(s);
+  if(o.patient)s=ptLines(s,o.tech);
+  const store=[];
+  const startOf=(str,off,m)=>{const ls=str.lastIndexOf('\n',off-1)+1,pre=str.slice(ls,off);
+    if(/^\s*(?:[–—•·▪*-]\s*)?$/.test(pre)||/[.!?]\s+$/.test(pre))return true;
+    if(/^\s*(?:[–—•·▪*-]\s*)?[^:;\n]{1,48}:\s*$/.test(pre))return /^[A-Z]/.test(m);
+    return false};
+  const R=(re,fn)=>{s=s.replace(re,function(){const a=Array.prototype.slice.call(arguments),m=a[0],off=a[a.length-2],str=a[a.length-1];
+    const v=fn(m,a.slice(1,-2),off,str);if(v==null)return m;store.push(startOf(str,off,m)?cap(v):v);return '\u0001'+(store.length-1)+'\u0002'})};
+  if(o.teeth){
+    R(RANGE_RE,(m,g)=>toothName(g[0],g[1],o.patient,seen)+' to '+toothName(g[2]||g[0],g[3],o.patient,seen));
+    R(TOOTH_RE,(m,g)=>toothName(g[0],g[1],o.patient,seen));
+    if(o.patient)R(QUAD_RE,(m,g)=>QUAD[g[0]]);
+    s=s.replace(/\u0001\d+\u0002(?:(?: |, | and )\u0001\d+\u0002)+/g,run=>{const t=run.match(/\u0001\d+\u0002/g);return t.slice(0,-1).join(', ')+' and '+t[t.length-1]});
+  }
+  if(o.expand){
+    R(/(?<![\d\/])(\d{1,2})\/(52|12|7)(?![\d\/])/g,(m,g)=>{const n=+g[0],u={52:'week',12:'month',7:'day'}[g[1]];return `${n} ${u}${n===1?'':'s'}`});
+    if(o.patient)LAY.forEach(([re,v])=>R(re,(m,g)=>typeof v==='function'?v(m,...g):v));
+    R(GL_RE,(m,g,off,str)=>{if(str[off-1]==='('&&str[off+m.length]===')')return null;const e=GL_MAP[m];if(!e)return null;
+      if(o.patient)return e[2];
+      if(e[3])return e[1];
+      if(seen.has('G'+m))return null;seen.add('G'+m);return `${e[1]} (${m})`});
+  }
+  for(let i=0;i<4&&s.indexOf('\u0001')>-1;i++)s=s.replace(/\u0001(\d+)\u0002/g,(m,k)=>store[+k]);
+  return s.replace(/^(\s*(?:[–—•·▪*]\s*|-\s+)?)([a-z])/gm,(m,a,c)=>a+c.toUpperCase());
+}
+
+/* ---------- parser: splits a pasted note into sections ---------- */
+const BULLET_RE=/^(?:[–—•·▪*]|-(?=\s))\s*/;
+const TITLE_RE=/^(.{2,80}?)\s+[—–-]\s+(\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4})$/;
+const SIG_RE=/^[A-Za-z][A-Za-z .'’-]{1,60},\s*(?:DCT\s*\d?|Dental Core Trainee|StR|SpR|Specialty (?:Registrar|Dentist|Trainee)|Consultant|Dental student|Associate specialist|Dental (?:hygienist|therapist)[^,]*|Foundation dentist|FD\d?)\b.*$/i;
+function sentence(s){const t=s.toLowerCase();return t.charAt(0).toUpperCase()+t.slice(1)}
+function isCaps(s){if(s.length>40||/\d/.test(s)||!/^[A-Z][A-Z &\/()'’+,.-]*$/.test(s))return false;
+  return s.split(/\s+/).some(w=>{const L=w.replace(/[^A-Z]/g,'');return L.length>=4&&!ABBR.has(L)})}
+function headingOf(t){
+  let s=t.replace(/^[#>*_=\s]+/,'').replace(/[*_=\s]+$/,'');
+  s=s.replace(/\s*[:：]+\s*$/,'').replace(/\s+[-–—]+\s*$/,'').replace(/\s*\([^)]*\d[^)]*\)\s*$/,'');
+  if(!s||s.length>48)return null;
+  const n=norm(s);
+  if(ALIAS[n])return {key:ALIAS[n],title:''};
+  if(isCaps(s))return CAPS[n]?{key:CAPS[n],title:''}:{key:'custom',title:sentence(s)};
+  return null;
+}
+const KEEP=new Set(['radiographs','radiograph','x-rays','x-ray','xr','imaging','special investigations','investigations']);
+function inlineOf(t){
+  let m=t.match(/^([A-Za-z][A-Za-z0-9 \/&()'’.+,-]{0,44}?)\s*[:：]\s*(.*)$/);
+  if(m){const n=norm(m[1]),rest=m[2].trim();
+    if(ALIAS[n])return rest?{key:ALIAS[n],line:KEEP.has(n)?t:rest,main:true}:{key:ALIAS[n],heading:true};
+    if(SUB[n])return {key:SUB[n],line:t,main:false};
+    return {labelled:true}}
+  m=t.match(/^([A-Za-z][A-Za-z\/ ]{0,28}?)\s+[–—-]\s+(.+)$/);
+  if(m){const n=norm(m[1]);if(ALIAS[n])return {key:ALIAS[n],line:m[2].trim(),main:true}}
+  if(/^(?:review|recall|follow[- ]?up|f\/u|r\/v)\s+\S/i.test(t))return {key:'review',line:t,main:true};
+  m=t.match(/^(C\/O|c\/o|PC|P\/C|HPC|MH|PMH|SH|DH|E\/O|e\/o|EO|I\/O|i\/o|IO|O\/E|o\/e|Dx|DX|Tx|TX)\s+(\S.*)$/);
+  if(m&&ALIAS[norm(m[1])])return {key:ALIAS[norm(m[1])],line:m[2],main:true};
+  if(/^OHI\s+\S/.test(t))return {key:'ohi',line:t,main:true};
+  return null;
+}
+function tidy(lines){const out=[];lines.forEach(l=>{const t=l.replace(/\s+$/,'');if(!t.trim()){if(out.length&&out[out.length-1]!=='')out.push('')}else out.push(t.trim())});
+  while(out.length&&out[out.length-1]==='')out.pop();return out.join('\n')}
+function parseNote(raw){
+  const meta={};
+  const lines=String(raw||'').replace(/\r\n?/g,'\n').replace(/ /g,' ').split('\n');
+  const skip=new Set();let seen=0;
+  for(let i=lines.length-1;i>=0&&seen<3;i--){const t=lines[i].trim();if(!t)continue;seen++;let m;
+    if((m=t.match(/^supervisor\s*:\s*(.+)$/i))){meta.supervisor=m[1].trim();skip.add(i);continue}
+    if(SIG_RE.test(t)||/\(GDC\s*\d+\)\s*$/i.test(t)){meta.sig=t;skip.add(i);continue}
+    break}
+  const secs=[],byK={};let block=null,main=null,last=null,started=false;
+  const get=(key,title)=>{const k=key==='custom'?'custom:'+title.toLowerCase():key;let s=byK[k];
+    if(!s){s=byK[k]={id:uid(),key,title:key==='custom'?title:'',lines:[],ord:secs.length};secs.push(s)}return s};
+  const put=(tg,line)=>{get(tg.key,tg.title).lines.push(line);last=tg};
+  const NOTES={key:'notes',title:''};
+  lines.forEach((line,i)=>{
+    if(skip.has(i))return;
+    const t=line.trim();
+    if(!t){if(last)get(last.key,last.title).lines.push('');return}
+    let m;
+    if(!started){
+      if((m=t.match(TITLE_RE))&&!/:/.test(m[1])){meta.title=m[1].trim();meta.date=m[2];return}
+      if((m=t.match(/^clinic\s*:\s*(.+)$/i))){meta.clinic=m[1].trim();return}
+      if(!secs.length&&!meta.title&&/^[A-Z][A-Z ()\/&]{4,}\s+[–—]\s+\S/.test(t)){meta.title=t;return}
+    }
+    // indented lines (e.g. Trauma Card's per-tooth detail) stay with the line above
+    if(/^\s{2,}\S/.test(line)&&last){put(last,t);return}
+    if((m=t.match(/^supervisor\s*:\s*(.+)$/i))){meta.supervisor=m[1].trim();return}
+    const h=headingOf(t);
+    if(h){block=main=last=h;started=true;get(h.key,h.title);return}
+    if(!BULLET_RE.test(t)){
+      const r=inlineOf(t);
+      if(r&&r.key){started=true;const tg={key:r.key,title:''};
+        if(r.heading){block=main=last=tg;get(tg.key,'');return}
+        put(tg,r.line);if(r.main)main=tg;return}
+      if(r&&r.labelled){put(block||main||last||NOTES,t);return}
+    }
+    put(last||block||NOTES,t);
+  });
+  let lastRank=-1;
+  const out=secs.map(s=>({id:s.id,key:s.key,title:s.title,text:tidy(s.lines),inc:{},ord:s.ord})).filter(s=>s.text);
+  out.forEach(s=>{if(s.key==='custom')s.rank=lastRank+0.5;else{s.rank=ORDER.indexOf(s.key);if(s.key!=='notes')lastRank=s.rank}});
+  out.sort((a,b)=>a.rank-b.rank||a.ord-b.ord);
+  return {meta,sections:out};
+}
+
+/* ---------- letter options ---------- */
+const TYPES=[
+ {id:'referral',name:'Referral',full:'Referral letter'},
+ {id:'clinic',name:'Clinic letter to GDP',full:'Clinic letter to GDP'},
+ {id:'discharge',name:'Discharge to GDP',full:'Discharge letter to GDP'},
+ {id:'patient',name:'Patient letter',full:'Patient letter'},
+ {id:'mdt',name:'MDT / case summary',full:'MDT case summary'}];
+const TNAME=Object.fromEntries(TYPES.map(t=>[t.id,t.full]));
+const TSHORT={referral:'referral letter',clinic:'clinic letter',discharge:'discharge letter',patient:'patient letter',mdt:'MDT summary'};
+const DEPTS=['Restorative Dentistry','Oral Surgery','Oral and Maxillofacial Surgery','Oral Medicine','Orthodontics','Paediatric Dentistry','Periodontology','Prosthodontics','Endodontics','Special Care Dentistry','Dental Radiology','Head and neck oncology'];
+const MDTS=['Head and neck oncology MDT','Hypodontia MDT','Restorative MDT','Dental trauma MDT','Orthognathic MDT','Cleft lip and palate MDT'];
+const REASONS={referral:['Specialist restorative opinion','Endodontic management','Periodontal management','Prosthodontic rehabilitation','Implant assessment','Assessment for extraction','Orthodontic assessment','Oral medicine opinion on a soft tissue lesion','Suspected oral cancer','Dental assessment before radiotherapy','Hypodontia assessment','Management of dental trauma','Treatment under sedation or GA'],
+  mdt:['Treatment planning','Restorability and prognosis','Dental assessment before radiotherapy','Implant-retained rehabilitation','Combined orthodontic and restorative planning','Management of dental trauma','Surgical planning']};
+const QS={referral:['Please assess and advise on management','Please assess and treat as appropriate','Is this tooth restorable?','Is the patient suitable for dental implants?','Would you consider a biopsy?','Would you accept the patient for treatment?'],
+  mdt:['What is the preferred treatment option?','Is the patient suitable for dental implants?','Which teeth should be extracted before radiotherapy?','How should orthodontic and restorative treatment be sequenced?','Is surgical management indicated?']};
+const URG=['Routine','Soon','Urgent','Urgent suspected cancer (USC)'];
+const isUSC=u=>/^Urgent suspected/.test(u||'');
+const ACTS=['Please continue routine care','Please provide OHI and fluoride varnish','Please prescribe 5000 ppm fluoride toothpaste','Please arrange radiograph at next recall','Please provide supportive periodontal therapy','Please review soft tissues at each recall','Please provide the definitive restoration','Please re-refer if symptoms recur','No action needed – for your information'];
+const FU=['Review in 2 weeks','Review in 4 weeks','Review in 6–8 weeks','Review in 3 months','Review in 6 months','Review in 12 months','Added to treatment waiting list','Awaiting MDT discussion','Discharged back to GDP care'];
+const CCS={referral:['GDP','Patient','Consultant'],clinic:['Patient','Consultant','Referrer'],discharge:['Patient','Consultant','Referrer'],patient:['GDP','Consultant'],mdt:[]};
+const TOGS={clin:[['expand','Expand abbreviations'],['teeth','Spell out tooth names']],
+  patient:[['expand','Plain English (expand abbreviations and terms)'],['teeth','Name teeth in plain English'],['you','Write to the patient as “you”'],['tech','Leave out technical lines (LA, isolation, IR(ME)R)']]};
+const togList=T=>T==='patient'?TOGS.patient:TOGS.clin;
+
+/* ---------- state: memory only, never saved ---------- */
+function blankP(){const b=(o)=>Object.assign({dept:'',deptTxt:'',reason:[],reasonTxt:'',q:[],qTxt:'',fu:'',fuTxt:'',cc:[],tog:{expand:false,teeth:false}},o);
+  return {referral:b({cc:['GDP']}),clinic:b({cc:['Patient']}),discharge:b({cc:['Patient'],fu:'Discharged back to GDP care'}),
+    patient:b({cc:['GDP'],tog:{expand:true,teeth:true,you:true,tech:true}}),mdt:b({})}}
+const st={type:'clinic',sections:[],meta:{},edited:false,dirty:false,F:{urg:'Routine',act:[],actTxt:''},P:blankP()};
+const defInc=(key,T)=>T==='patient'?!['mh','sh','dh','notes'].includes(key):T==='discharge'?key!=='review':true;
+const isInc=(s,T)=>s.inc[T]!==undefined?s.inc[T]:defInc(s.key,T);
+const secName=s=>s.key==='custom'?(s.title||'Custom section'):SD[s.key];
+
+function teethFound(){const seen=[],src=[...st.sections].sort((a,b)=>(b.key==='dx')-(a.key==='dx'));
+  src.forEach(s=>{(s.text.match(TOOTH_RE)||[]).forEach(t=>{if(!seen.includes(t))seen.push(t)})});return seen}
+function actOptions(){const dyn=teethFound().slice(0,4).map(t=>`Please monitor ${t} vitality`);
+  const list=[ACTS[0],ACTS[1],...dyn,...ACTS.slice(2)];st.F.act.forEach(a=>{if(!list.includes(a))list.push(a)});return list}
+
+/* ---------- letter labels ---------- */
+const CLL={pc:['Presenting complaint',''],hpc:['History',''],mh:['Background','Medical history'],sh:['Background','Social history'],dh:['Background','Dental history'],eo:['Examination','Extra-oral'],io:['Examination','Intra-oral'],exam:['Examination',''],findings:['Examination','Findings'],rad:['Radiographs and special investigations',''],dx:['Diagnosis',''],tx:['Treatment',''],advice:['Advice given','Advice'],ohi:['Advice given','Oral hygiene'],plan:['Plan',''],review:['Follow-up',''],notes:['Additional notes','']};
+const CLSINGLE={mh:'Medical history',sh:'Social history',dh:'Dental history',eo:'Extra-oral examination',io:'Intra-oral examination',findings:'Findings',advice:'Advice given',ohi:'Oral hygiene instruction'};
+const PTL={pc:'Why you came to see us',hpc:'Why you came to see us',mh:'Your medical history',sh:'Your medical history',dh:'Your dental history',eo:'What we found',io:'What we found',exam:'What we found',findings:'What we found',rad:'Your X-rays',dx:'What this means',tx:'What we did',advice:'Looking after your mouth',ohi:'Looking after your mouth',plan:'What happens next',review:'Your next appointment',notes:'Other information'};
+const TYPE_OVER={referral:{tx:'Treatment to date',plan:'Current plan'},clinic:{tx:'Treatment today'},discharge:{tx:'Treatment provided'},mdt:{tx:'Treatment to date',plan:'Proposed plan',rad:'Imaging and investigations',_exam:'Clinical findings'}};
+const PT_SUB={eo:'Outside the mouth',io:'Inside the mouth',findings:'Your teeth'};
+function lab(T,key){if(T==='patient'){const h=PTL[key];return [h,PT_SUB[key]||'',h]}
+  const b=CLL[key],o=TYPE_OVER[T]||{};let head=o[key]||b[0];if(head==='Examination'&&o._exam)head=o._exam;
+  return [head,b[1],o[key]||CLSINGLE[key]||head]}
+
+/* ---------- letter builder: returns blocks rendered to HTML or plain text ---------- */
+function textToBlocks(t){const blocks=[];let para=[],list=[];
+  const fp=()=>{if(para.length){blocks.push({t:'p',text:para.join('\n')});para=[]}};
+  const fl=()=>{if(list.length){blocks.push({t:'ul',items:list});list=[]}};
+  String(t||'').split('\n').forEach(l=>{const s=l.trim();if(!s){fp();fl();return}
+    if(BULLET_RE.test(s)){fp();list.push(s.replace(BULLET_RE,''))}else{fl();para.push(s)}});
+  fp();fl();return blocks}
+function bodyBlocks(secs,T,X){
+  const groups=[];
+  secs.forEach(s=>{let head,sub,single;
+    if(s.key==='custom'){head=single=s.title||'Notes';sub=''}else{[head,sub,single]=lab(T,s.key)}
+    const g=groups[groups.length-1];
+    if(g&&g.head===head&&s.key!=='custom'&&!g.custom)g.m.push({s,sub,single});else groups.push({head,custom:s.key==='custom',m:[{s,sub,single}]})});
+  const out=[];
+  groups.forEach(g=>{
+    if(g.m.length===1){const bl=textToBlocks(X(g.m[0].s.text));if(bl.length)out.push({t:'h',text:g.m[0].single},...bl);return}
+    const all=[];g.m.forEach(m=>{const bl=textToBlocks(X(m.s.text));if(!bl.length)return;
+      if(m.sub){if(bl[0].t==='p'&&!bl[0].lead&&!/^[A-Za-z][^:\n]{0,40}:\s/.test(bl[0].text))bl[0].lead=m.sub+':';else bl.unshift({t:'p',lead:m.sub+':',text:'',tight:true})}
+      all.push(...bl)});
+    if(all.length)out.push({t:'h',text:g.head},...all)});
+  return out;
+}
+function fuSentence(opt,T){const pt=T==='patient',m=/^Review in (.+)$/.exec(opt);
+  if(m)return pt?`We will see you again in about ${m[1]}. We will send you the appointment details.`:T==='referral'?`We will continue to see [Patient name] here in the meantime; their next appointment is in ${m[1]}.`:`I will review [Patient name] again in ${m[1]}.`;
+  if(opt==='Added to treatment waiting list')return pt?'You have been added to our waiting list for treatment. We will contact you when an appointment is available.':'[Patient name] has been added to our treatment waiting list.';
+  if(opt==='Awaiting MDT discussion')return pt?'Your care will be discussed at a meeting of the specialist team, and we will write to you with the outcome.':'[Patient name]’s care will be discussed at our multidisciplinary team meeting and I will write again with the outcome.';
+  if(opt==='Discharged back to GDP care')return pt?'You do not need any more appointments with us. Please keep seeing your own dentist for regular check-ups.':(T==='clinic'||T==='discharge')?`I have discharged [Patient name] back to your care. No further appointments have been arranged at ${hosp()}.`:`[Patient name] has been discharged from ${hosp()} to the care of their general dental practitioner.`;
+  return opt}
+function ccText(c){return c==='GDP'?'[GDP name & practice]':c==='Patient'?'Patient':c==='Consultant'?(SET.consultant.trim()||'[Consultant]'):c==='Referrer'?'[Referring clinician]':c}
+function listOrPara(items){return items.length>1?[{t:'ul',items}]:items.length?[{t:'p',text:items[0]}]:[]}
+function splitLines(t){return String(t||'').split('\n').map(x=>x.trim()).filter(Boolean)}
+
+function buildLetter(){
+  const T=st.type,P=st.P[T],F=st.F,pt=T==='patient',tg=P.tog,seen=new Set();
+  const X=t=>xform(t,{patient:pt,you:pt&&tg.you,tech:pt&&tg.tech,teeth:!!tg.teeth,expand:!!tg.expand},seen);
+  const today=longDate(new Date());
+  const ad=parseShortDate(st.meta.date);const when=`on ${ad?longDate(ad):today}`;
+  const cl=(st.meta.clinic||'').trim();
+  const where=cl?`in the ${cl}${/clinic$/i.test(cl)?'':' clinic'} at ${hosp()}`:pt?`at the ${dept()} department, ${hosp()}`:`in the ${dept()} department at ${hosp()}`;
+  const secs=st.sections.filter(s=>isInc(s,T)&&s.text.trim());
+  const pull=T==='clinic'?['dx']:T==='discharge'?['dx','tx']:[];
+  const pulled=k=>secs.find(s=>s.key===k);
+  const flow=secs.filter(s=>!pull.includes(s.key)&&s.key!=='review');
+  const noBody=!st.sections.length;
+  const B=[];
+  if(SET.letterhead)B.push({t:'lh'});
+  const right=[];if(SET.letterhead)right.push(['Date',today]);
+  const urgent=(T==='referral'||T==='mdt')?F.urg:'';
+  // recipient + meta
+  if(T==='referral'){
+    const d=P.deptTxt.trim()||P.dept||'[Department]';
+    if(SET.consultant.trim())right.push(['Referring consultant',SET.consultant.trim()]);
+    right.push(['Priority',urgent]);
+    B.push({t:'top',left:['[Recipient name]',d,'[Hospital and address]'],right});
+  }else if(T==='patient'){
+    right.push(['CHI','[CHI]']);
+    B.push({t:'top',left:['[Patient name]','[Address]'],right});
+  }else if(T==='mdt'){
+    if(SET.consultant.trim())right.push(['Consultant',SET.consultant.trim()]);
+    right.push(['Priority',urgent]);
+    B.push({t:'top',left:[],right});
+    B.push({t:'title',text:'MDT case summary'});
+    B.push({t:'p',text:`For discussion at the ${P.deptTxt.trim()||P.dept||'[MDT]'} on [MDT date].`});
+  }else{
+    if(SET.consultant.trim())right.push(['Consultant',SET.consultant.trim()]);
+    if(cl)right.push(['Clinic',cl]);
+    B.push({t:'top',left:['[GDP name & practice]'],right});
+  }
+  if(!pt)B.push({t:'re',lines:['Re: [Patient name]','DOB: [DOB]    CHI: [CHI]','[Address]']});
+  if(isUSC(urgent))B.push({t:'banner',text:T==='mdt'?'URGENT SUSPECTED CANCER':'URGENT SUSPECTED CANCER REFERRAL',tone:'red'});
+  else if(urgent==='Urgent')B.push({t:'banner',text:T==='mdt'?'URGENT':'URGENT REFERRAL',tone:'amber'});
+  // salutation, summary and opening
+  if(T==='referral'){
+    B.push({t:'sal',text:'Dear Colleague,'});
+    let intro=isUSC(urgent)?`I would be grateful if you could see [Patient name] urgently under the urgent suspected cancer pathway. I saw them ${where} ${when}.`:`I would be grateful if you could see [Patient name], whom I saw ${where} ${when}.`;
+    if(urgent==='Urgent')intro+=' I would be grateful if they could be seen urgently.';else if(urgent==='Soon')intro+=' I would be grateful if they could be seen soon.';
+    B.push({t:'p',text:intro});
+    const rs=[...P.reason,...splitLines(P.reasonTxt).map(X)];
+    B.push({t:'h',text:'Reason for referral'},...(rs.length?listOrPara(rs):[{t:'p',text:'[Reason for referral]'}]));
+    const qs=[...P.q,...splitLines(P.qTxt).map(X)];
+    if(qs.length)B.push({t:'h',text:qs.length>1?'Questions for you':'Question for you'},...listOrPara(qs));
+  }else if(T==='clinic'||T==='discharge'){
+    B.push({t:'sal',text:'Dear [GDP name],'});
+    const box=[];const dx=pulled('dx');
+    if(dx)box.push({t:'h',text:'Diagnosis'},...textToBlocks(X(dx.text)));
+    if(T==='discharge'){const tx=pulled('tx');if(tx)box.push({t:'h',text:'Treatment completed'},...textToBlocks(X(tx.text)))}
+    const acts=[...F.act.map(a=>X(a)),...splitLines(F.actTxt).map(X)];
+    if(acts.length)box.push({t:'h',text:T==='discharge'?'Ongoing care requested':'Actions for you'},{t:'ul',items:acts});
+    if(box.length)B.push({t:'box',blocks:box});
+    B.push({t:'p',text:T==='clinic'?`I reviewed your patient [Patient name] ${where} ${when}. A summary of the appointment follows.`:`I saw [Patient name] ${where} ${when}. They have now completed their treatment with us.`});
+  }else if(pt){
+    B.push({t:'sal',text:'Dear [Patient name],'});
+    B.push({t:'p',text:`Thank you for coming to see us ${where} ${when}. I am writing to explain what we found and what happens next.`});
+  }else{
+    B.push({t:'p',lead:'Presenting clinician:',text:[me(),SET.grade.trim(),dept()].filter(Boolean).join(', ')});
+    const rs=[...P.reason,...splitLines(P.reasonTxt).map(X)];
+    B.push({t:'h',text:'Reason for discussion'},...(rs.length?listOrPara(rs):[{t:'p',text:'[Reason for discussion]'}]));
+    const qs=[...P.q,...splitLines(P.qTxt).map(X)];
+    B.push({t:'h',text:qs.length>1?'Questions for the MDT':'Question for the MDT'},...(qs.length?listOrPara(qs):[{t:'p',text:'[Question for the MDT]'}]));
+  }
+  // clinical body
+  if(noBody)B.push({t:'p',text:'[Paste a note and press Parse: the clinical sections appear here.]',muted:true});
+  else B.push(...bodyBlocks(flow,T,X));
+  // follow-up
+  const fs=[];if(P.fu&&T!=='mdt')fs.push(fuSentence(P.fu,T));if(T!=='mdt'&&P.fuTxt.trim())fs.push(X(P.fuTxt.trim()));
+  const rv=pulled('review'),rb=rv?textToBlocks(X(rv.text)):[];
+  if(T==='discharge'&&!fs.length&&!rb.length)fs.push(`No further appointments have been arranged at ${hosp()}.`);
+  if(fs.length||rb.length){B.push({t:'h',text:pt?'Your next appointment':T==='referral'?'Our follow-up':'Follow-up'});if(fs.length)B.push({t:'p',text:fs.join(' ')});B.push(...rb)}
+  // closing
+  if(T==='referral')B.push({t:'p',text:'Thank you for your help with [Patient name]’s care. Please do not hesitate to contact me if you need any further information.'});
+  else if(T==='clinic')B.push({t:'p',text:'Please do not hesitate to contact me if you have any questions.'});
+  else if(T==='discharge')B.push({t:'p',text:'We would be happy to see [Patient name] again should the need arise. Thank you for your continued care.'});
+  else if(pt)B.push({t:'p',text:SET.letterhead&&SET.contact.trim()?'If you have any questions, or if things get worse before your next appointment, please contact the department using the details at the top of this letter.':'If you have any questions, or if things get worse before your next appointment, please contact the department on [department telephone number].'});
+  else B.push({t:'h',text:'MDT outcome'},{t:'p',text:'[To be recorded at the MDT]'});
+  B.push({t:'sig',signoff:T==='mdt'?'':(SET.signoff.trim()||'Yours sincerely'),lines:[me(),[SET.grade.trim(),SET.department.trim()].filter(Boolean).join(', '),SET.hospital.trim()].filter(Boolean)});
+  const cc=(T==='mdt'?[]:P.cc).map(ccText);if(cc.length)B.push({t:'cc',items:cc});
+  return B;
+}
+
+/* ---------- renderers ---------- */
+const STY={base:'font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt;line-height:1.38;color:#111111',p:'margin:0 0 8pt',h:'margin:11pt 0 3pt;font-weight:bold',ul:'margin:0 0 8pt;padding-left:18pt',li:'margin:0 0 2pt'};
+function rich(s,ph){let h=esc(s).replace(/\n/g,'<br>').replace(/ {2,}/g,m=>'&nbsp;'.repeat(m.length-1)+' ');if(ph)h=h.replace(/\[[^\[\]<>\n]{1,52}\]/g,m=>`<span class="ph">${m}</span>`);return h}
+function lhLines(){return [hosp(),dept(),...splitLines(SET.contact)]}
+function blockHTML(b,ph,inBox,first){
+  switch(b.t){
+   case 'lh':{const L=lhLines();return `<p style="margin:0;text-align:right;font-family:Cambria,Georgia,serif;font-size:15pt;font-weight:bold;color:#0B2E4A">${rich(L[0],ph)}</p><p style="margin:0;text-align:right;font-size:11pt;font-weight:bold;color:#1C7293">${rich(L[1],ph)}</p>${L.slice(2).map(l=>`<p style="margin:0;text-align:right;font-size:9pt;color:#555555">${rich(l,ph)}</p>`).join('')}<p style="margin:4pt 0 12pt;border-bottom:1.5pt solid #0B2E4A;font-size:2pt;line-height:2pt">&nbsp;</p>`}
+   case 'top':if(!b.left.length&&!b.right.length)return '';return `<table style="width:100%;border-collapse:collapse;margin:0 0 12pt"><tr><td style="vertical-align:top;padding:0;width:55%;font-size:11pt">${b.left.map(l=>rich(l,ph)).join('<br>')}</td><td style="vertical-align:top;padding:0;text-align:right;font-size:10pt">${b.right.map(r=>`${esc(r[0])}: ${rich(r[1],ph)}`).join('<br>')}</td></tr></table>`;
+   case 're':return `<p style="margin:0 0 11pt"><b>${rich(b.lines[0],ph)}</b>${b.lines.slice(1).map(l=>'<br>'+rich(l,ph)).join('')}</p>`;
+   case 'banner':{const c=b.tone==='red'?'#B42318':'#B45309';return `<p style="margin:0 0 11pt;padding:4pt 8pt;border:1.5pt solid ${c};color:${c};font-weight:bold;text-align:center;letter-spacing:.5pt">${esc(b.text)}</p>`}
+   case 'title':return `<p style="margin:0 0 4pt;font-family:Cambria,Georgia,serif;font-size:14pt;font-weight:bold;color:#0B2E4A">${esc(b.text)}</p>`;
+   case 'sal':return `<p style="${STY.p}">${rich(b.text,ph)}</p>`;
+   case 'h':return `<p style="${inBox?(first?'margin:0 0 2pt':'margin:6pt 0 2pt'):STY.h};font-weight:bold">${rich(b.text,ph)}</p>`;
+   case 'p':return `<p style="${b.tight?'margin:0 0 1pt':inBox?'margin:0 0 4pt':STY.p}">${b.lead?`<b>${rich(b.lead,ph)}</b>${b.text?' ':''}`:''}${b.muted&&ph?`<span class="empty-body">${rich(b.text,false)}</span>`:rich(b.text,ph)}</p>`;
+   case 'ul':return `<ul style="${inBox?'margin:0 0 4pt;padding-left:18pt':STY.ul}">${b.items.map(i=>`<li style="${STY.li}">${rich(i,ph)}</li>`).join('')}</ul>`;
+   case 'box':return `<table style="width:100%;border-collapse:collapse;margin:0 0 12pt"><tr><td style="border:1pt solid #9FB3C2;background:#F3F7F9;padding:6pt 9pt">${b.blocks.map((x,i)=>blockHTML(x,ph,true,i===0)).join('')}</td></tr></table>`;
+   case 'sig':return `<p style="margin:14pt 0 0">${b.signoff?rich(b.signoff+',',ph):'<b>Prepared by</b>'}</p><p style="margin:${b.signoff?'30pt':'2pt'} 0 8pt">${b.lines.map((l,i)=>i?rich(l,ph):'<b>'+rich(l,ph)+'</b>').join('<br>')}</p>`;
+   case 'cc':return `<p style="margin:10pt 0 0;font-size:10pt">${b.items.map(i=>'cc: '+rich(i,ph)).join('<br>')}</p>`;
+  }return ''}
+function toHTML(B,ph){return `<div style="${STY.base}">${B.map(b=>blockHTML(b,ph)).join('')}</div>`}
+function blockText(b){
+  switch(b.t){
+   case 'lh':return lhLines().join('\n');
+   case 'top':return [b.right.map(r=>`${r[0]}: ${r[1]}`).join('\n'),b.left.join('\n')].filter(Boolean).join('\n\n');
+   case 're':return b.lines.join('\n');
+   case 'banner':case 'title':case 'sal':case 'h':return b.text;
+   case 'p':return (b.lead?b.lead+(b.text?' ':''):'')+b.text;
+   case 'ul':return b.items.map(i=>'• '+i.replace(/\n/g,'\n  ')).join('\n');
+   case 'box':return joinText(b.blocks);
+   case 'sig':return (b.signoff?b.signoff+',\n\n\n':'Prepared by\n')+b.lines.join('\n');
+   case 'cc':return b.items.map(i=>'cc: '+i).join('\n');
+  }return ''}
+function joinText(B){let out='',prev=null;B.forEach(b=>{const t=blockText(b);if(!t)return;if(out)out+=(prev&&(prev.t==='h'||prev.tight))?'\n':'\n\n';out+=t;prev=b});return out}
+
+/* ---------- UI ---------- */
+const page=$('page');
+let lastBlocks=[];
+let raf=0;const schedule=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;renderPreview()})};
+function renderPreview(){
+  $('mlabel').textContent=TNAME[st.type];
+  if(st.edited){$('edbar').hidden=false;return}
+  $('edbar').hidden=true;
+  lastBlocks=buildLetter();
+  page.innerHTML=toHTML(lastBlocks,true);
+}
+function renderTabs(){
+  $('tabs').innerHTML=TYPES.map(t=>`<button type="button" role="tab" class="tab" id="tab-${t.id}" data-type="${t.id}" aria-selected="${st.type===t.id}" aria-controls="panel" tabindex="${st.type===t.id?0:-1}">${esc(t.name)}</button>`).join('');
+  $('panel').setAttribute('aria-labelledby','tab-'+st.type);
+}
+function setType(T,focus){if(!TNAME[T])return;st.type=T;renderTabs();renderDetails();renderSections();schedule();if(focus){const b=$('tab-'+T);if(b)b.focus()}}
+$('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-type]');if(b)setType(b.dataset.type)});
+$('tabs').addEventListener('keydown',e=>{const i=TYPES.findIndex(t=>t.id===st.type);let j=null;
+  if(e.key==='ArrowRight'||e.key==='ArrowDown')j=(i+1)%TYPES.length;else if(e.key==='ArrowLeft'||e.key==='ArrowUp')j=(i-1+TYPES.length)%TYPES.length;else if(e.key==='Home')j=0;else if(e.key==='End')j=TYPES.length-1;
+  if(j!==null){e.preventDefault();setType(TYPES[j].id,true)}});
+
+/* letter details card */
+let gid=0;
+function chips(f,opts,sel,multi,labels,cls){const id='g'+(++gid);
+  return {id,html:`<div class="chips" role="group" aria-labelledby="${id}">${opts.map((o,i)=>{const on=multi?sel.includes(o):sel===o;const c=cls?cls(o):'';
+    return `<button type="button" class="chip${multi?' multi':''}${c?' '+c:''}" data-f="${f}" data-v="${esc(o)}" aria-pressed="${on}">${esc(labels?labels[i]:o)}</button>`}).join('')}</div>`}}
+function fld(label,f,opts,sel,multi,o={}){const c=chips(f,opts,sel,multi,o.labels,o.cls);
+  return `<div class="field"><span class="lbl" id="${c.id}">${label}</span>${c.html}${o.txt?`<input type="text" class="oth" data-ft="${o.txt}" value="${esc(o.val||'')}" placeholder="${esc(o.ph||'Other, not listed')}" aria-label="${esc(o.aria||label+': other')}">`:''}${o.after||''}</div>`}
+function renderDetails(){
+  gid=0;const T=st.type,P=st.P[T],F=st.F;let h='';
+  $('h-details').textContent=TNAME[T]+' details';
+  const urgCls=o=>isUSC(o)?'usc':o==='Urgent'?'urgent':'';
+  const uscHint=`<p class="hint warn" id="uscHint"${isUSC(F.urg)?'':' hidden'}>Send this through your local urgent suspected cancer pathway too (for example SCI Gateway), following the Scottish Referral Guidelines for Suspected Cancer.</p>`;
+  if(T==='referral'){
+    h+=fld('Refer to','dept',DEPTS,P.dept,false,{txt:'deptTxt',val:P.deptTxt,ph:'Other department or service',aria:'Refer to: other department or service'});
+    h+=fld('Reason for referral','reason',[...REASONS.referral,...P.reason.filter(r=>!REASONS.referral.includes(r))],P.reason,true,{txt:'reasonTxt',val:P.reasonTxt,ph:'Add detail, e.g. restorability of UL1 after trauma',aria:'Reason for referral: detail'});
+    h+=fld('Urgency','urg',URG,F.urg,false,{cls:urgCls,after:uscHint});
+    h+=fld('Question for the recipient','q',QS.referral,P.q,true,{txt:'qTxt',val:P.qTxt,ph:'Your own question',aria:'Question for the recipient: your own question'});
+    h+=fld('Our follow-up','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Other follow-up arrangements',aria:'Follow-up: other arrangements'});
+  }else if(T==='clinic'||T==='discharge'){
+    h+=fld(T==='discharge'?'Ongoing care for the GDP':'Actions requested of the GDP','act',actOptions(),F.act,true,{txt:'actTxt',val:F.actTxt,ph:'Another request (one per line)',aria:'Another request for the GDP'});
+    h+=fld('Follow-up','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Other follow-up arrangements',aria:'Follow-up: other arrangements'});
+  }else if(T==='patient'){
+    h+=fld('Next appointment','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Anything else about next steps, in plain English',aria:'Next appointment: other details'});
+  }else{
+    h+=fld('MDT','dept',MDTS,P.dept,false,{txt:'deptTxt',val:P.deptTxt,ph:'Other MDT',aria:'MDT: other'});
+    h+=fld('Reason for discussion','reason',[...REASONS.mdt,...P.reason.filter(r=>!REASONS.mdt.includes(r))],P.reason,true,{txt:'reasonTxt',val:P.reasonTxt,ph:'Add detail',aria:'Reason for discussion: detail'});
+    h+=fld('Urgency','urg',URG,F.urg,false,{cls:urgCls,after:uscHint});
+    h+=fld('Question for the MDT','q',QS.mdt,P.q,true,{txt:'qTxt',val:P.qTxt,ph:'Your own question',aria:'Question for the MDT: your own question'});
+  }
+  if(CCS[T].length)h+=fld('Copies to','cc',CCS[T],P.cc,true);
+  const tl=togList(T);h+=fld('Wording','tog',tl.map(x=>x[0]),tl.filter(x=>P.tog[x[0]]).map(x=>x[0]),true,{labels:tl.map(x=>x[1])});
+  $('details').innerHTML=h;
+}
+function fieldRef(f){const T=st.type;if(f==='urg'||f==='act'||f==='actTxt')return [st.F,f];return [st.P[T],f]}
+$('details').addEventListener('click',e=>{const b=e.target.closest('[data-f]');if(!b)return;const f=b.dataset.f,v=b.dataset.v,multi=b.classList.contains('multi');
+  if(f==='tog'){const P=st.P[st.type];P.tog[v]=!P.tog[v];b.setAttribute('aria-pressed',String(!!P.tog[v]))}
+  else{const [o,k]=fieldRef(f);
+    if(multi){const a=o[k];const i=a.indexOf(v);if(i>-1)a.splice(i,1);else a.push(v);b.setAttribute('aria-pressed',String(i<0))}
+    else{if(o[k]===v&&f!=='urg')o[k]='';else o[k]=v;b.parentNode.querySelectorAll('.chip').forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.v===o[k])))}
+    if(f==='urg'){const hnt=$('uscHint');if(hnt)hnt.hidden=!isUSC(st.F.urg)}}
+  st.dirty=true;schedule()});
+$('details').addEventListener('input',e=>{const t=e.target;if(!t.dataset.ft)return;const [o,k]=fieldRef(t.dataset.ft);o[k]=t.value;st.dirty=true;schedule()});
+
+/* sections card */
+function addOptions(){$('addSec').innerHTML='<option value="">Choose a heading…</option>'+ORDER.map(k=>`<option value="${k}">${esc(SD[k])}</option>`).join('')+'<option value="custom">Custom heading…</option>'}
+function autosize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight+2,560)+'px'}
+function renderSections(){
+  const T=st.type,L=$('secList');
+  $('secHint').textContent=st.sections.length?`Include toggles apply to the ${TSHORT[T]}`:'';
+  if(!st.sections.length){L.innerHTML='<p class="empty">Paste a note and press <b>Parse</b>, or use <b>Load example</b>. Each heading found (PC, HPC, MH, E/O, I/O, Dx, Tx, Plan…) becomes an editable section here; anything without a heading goes into Notes.</p>';return}
+  L.innerHTML=st.sections.map((s,i)=>{const on=isInc(s,T),nm=secName(s);
+    return `<div class="sec${on?'':' off'}" data-id="${s.id}">
+      <div class="sechead">
+        <select class="sec-type" aria-label="Heading for section ${i+1}">${ORDER.map(k=>`<option value="${k}"${s.key===k?' selected':''}>${esc(SD[k])}</option>`).join('')}<option value="custom"${s.key==='custom'?' selected':''}>Custom heading…</option></select>
+        ${s.key==='custom'?`<input type="text" class="sec-title" value="${esc(s.title)}" placeholder="Heading" aria-label="Custom heading for section ${i+1}">`:''}
+        <button type="button" class="chip multi inc" data-act="inc" aria-pressed="${on}" aria-label="Include ${esc(nm)} in this letter">${on?'Included':'Left out'}</button>
+        <button type="button" class="ibtn" data-act="up" aria-label="Move ${esc(nm)} up"${i===0?' disabled':''}>↑</button>
+        <button type="button" class="ibtn" data-act="down" aria-label="Move ${esc(nm)} down"${i===st.sections.length-1?' disabled':''}>↓</button>
+        <button type="button" class="ibtn del" data-act="del" aria-label="Remove ${esc(nm)} section">✕</button>
+      </div>
+      <textarea class="sec-text" rows="3" aria-label="${esc(nm)} text" spellcheck="true">${esc(s.text)}</textarea>
+    </div>`}).join('');
+  L.querySelectorAll('textarea').forEach(autosize);
+}
+const secById=id=>st.sections.find(s=>s.id===id);
+$('secList').addEventListener('input',e=>{const box=e.target.closest('.sec');if(!box)return;const s=secById(box.dataset.id);if(!s)return;
+  if(e.target.classList.contains('sec-text')){s.text=e.target.value;autosize(e.target)}
+  else if(e.target.classList.contains('sec-title'))s.title=e.target.value;
+  st.dirty=true;refreshActs();scheduleIds();schedule()});
+$('secList').addEventListener('change',e=>{if(!e.target.classList.contains('sec-type'))return;const box=e.target.closest('.sec'),s=secById(box.dataset.id);if(!s)return;
+  const v=e.target.value;if(v==='custom'){s.title=s.title||(s.key==='custom'?'':SD[s.key]);s.key='custom'}else{s.key=v;s.title=''}
+  renderSections();const nb=document.querySelector(`.sec[data-id="${s.id}"] ${v==='custom'?'.sec-title':'.sec-type'}`);if(nb)nb.focus();schedule()});
+$('secList').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const box=b.closest('.sec'),i=st.sections.findIndex(s=>s.id===box.dataset.id);if(i<0)return;
+  const s=st.sections[i],a=b.dataset.act;
+  if(a==='inc'){s.inc[st.type]=!isInc(s,st.type);renderSections();focusSec(s.id,'inc')}
+  else if(a==='up'||a==='down'){const j=a==='up'?i-1:i+1;if(j<0||j>=st.sections.length)return;st.sections.splice(i,1);st.sections.splice(j,0,s);renderSections();
+    const tgt=(a==='up'&&j===0)?'down':(a==='down'&&j===st.sections.length-1)?'up':a;focusSec(s.id,tgt)}
+  else if(a==='del'){st.sections.splice(i,1);renderSections();refreshActs();
+    toast(`Removed ${secName(s)}`,{label:'Undo',fn:()=>{st.sections.splice(i,0,s);renderSections();refreshActs();schedule()}});
+    const nxt=st.sections[Math.min(i,st.sections.length-1)];if(nxt)focusSec(nxt.id,'del');else $('addSec').focus()}
+  st.dirty=true;schedule()});
+function focusSec(id,act){const el=document.querySelector(`.sec[data-id="${id}"] [data-act="${act}"]`);if(el&&!el.disabled)el.focus()}
+$('addSec').addEventListener('change',e=>{const k=e.target.value;if(!k)return;e.target.value='';
+  const s={id:uid(),key:k,title:k==='custom'?'':'',text:'',inc:{}};
+  const r=k==='custom'?ORDER.length-1.5:ORDER.indexOf(k);
+  let at=st.sections.findIndex(x=>(x.key==='custom'?ORDER.length-1.5:ORDER.indexOf(x.key))>r);if(at<0)at=st.sections.length;
+  st.sections.splice(at,0,s);renderSections();const el=document.querySelector(`.sec[data-id="${s.id}"] ${k==='custom'?'.sec-title':'.sec-text'}`);if(el)el.focus();schedule()});
+let actKey='';
+function refreshActs(){if(st.type!=='clinic'&&st.type!=='discharge')return;const k=teethFound().slice(0,4).join('|');if(k===actKey)return;actKey=k;
+  const a=document.activeElement,keep=a&&a.dataset&&a.dataset.ft;renderDetails();if(keep){const el=document.querySelector(`[data-ft="${keep}"]`);if(el)el.focus()}}
+
+/* parse, example, clear */
+function renderMeta(){const m=st.meta,el=$('metaLine');
+  if(!st.sections.length){el.hidden=true;return}
+  const bits=[`<b>${st.sections.length}</b> section${st.sections.length===1?'':'s'} found`];
+  if(m.source)bits.push('from '+esc(m.source));
+  if(m.title)bits.push(esc(cap(m.title.toLowerCase())));
+  if(m.date)bits.push(esc(m.date));
+  if(m.clinic)bits.push('Clinic: '+esc(m.clinic));
+  if(m.sig||m.supervisor)bits.push('sign-off lines left out');
+  el.innerHTML=bits.join(' · ');el.hidden=false}
+function doParse(source){
+  const raw=$('paste').value;if(!raw.trim()){toast('Paste a note first');$('paste').focus();return}
+  const prev={sections:st.sections,meta:st.meta,edited:st.edited};
+  const r=parseNote(raw);st.sections=r.sections;st.meta=r.meta;if(source)st.meta.source=source;st.edited=false;st.dirty=true;actKey='';
+  renderSections();renderDetails();renderMeta();checkIds();schedule();
+  toast(`Parsed into ${r.sections.length} section${r.sections.length===1?'':'s'}`,prev.sections.length?{label:'Undo',fn:()=>{st.sections=prev.sections;st.meta=prev.meta;actKey='';renderSections();renderDetails();renderMeta();schedule()}}:null);
+}
+$('parseBtn').addEventListener('click',()=>doParse());
+$('paste').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();doParse()}});
+$('paste').addEventListener('paste',()=>{setTimeout(()=>{if(!st.sections.length&&$('paste').value.trim())doParse()},0)});
+$('paste').addEventListener('input',()=>{st.dirty=true;scheduleIds()});
+function exampleNote(){
+  const d=new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  return `DENTAL TRAUMA REVIEW — ${d}
+Clinic: Restorative trauma review
+
+HISTORY
+Medical history: Reviewed – no changes. Fit and well, no medications, NKDA
+Mechanism of injury: Fell from bicycle onto face 8 weeks ago. No LOC, tetanus up to date
+Since last visit: Flexible splint UR2–UL2 removed at 4 weeks. Now aware UL1 is darker than UR1, with intermittent tenderness biting on UL1 for the past week
+Smoking: Never
+Alcohol: Within 14 units/wk
+
+EXAMINATION
+Extra-oral: NAD. Upper lip laceration well healed
+Soft tissues: Sinus labial to UL1, otherwise NAD
+Trauma findings:
+– UR1: colour normal; mobility 0 (physiological); TTP negative; ethyl chloride positive; EPT 34; radiograph: NAD
+– UL1: colour grey; mobility grade I; TTP positive; percussion note dull; ethyl chloride negative; EPT no response; sinus / swelling present; radiograph: PA radiolucency
+– UL2: colour normal; mobility 0 (physiological); TTP negative; ethyl chloride positive; EPT 29; radiograph: NAD
+Oral hygiene: Fair
+BPE: 1 1 1 / 1 1 1
+
+RADIOGRAPHS
+Radiographs: Periapical
+Justification: Symptomatic UL1 following lateral luxation
+Report: UL1 periapical radiolucency approx. 3 × 4 mm, no signs of root resorption, root development complete. UR1 and UL2 NAD.
+
+DIAGNOSIS
+Pulpal diagnosis: Pulp necrosis
+Periapical diagnosis: Chronic apical abscess
+Diagnosis notes: UL1 pulp necrosis with infection following lateral luxation. UR1 concussion and UL2 subluxation, both responding normally.
+
+TREATMENT
+Treatment today: Pulp extirpation, Ca(OH)₂ dressing
+LA: Articaine 4% 1:100,000 adr
+Cartridges: 1 × 2.2 ml
+Isolation: Rubber dam, HVS
+Treatment details: UL1 accessed under rubber dam, single canal located. WL 23.0 mm (incisal edge). Irrigated with 3% NaOCl, Ca(OH)₂ placed, sealed with Cavit and GIC.
+Advice: Analgesia advice, return if swelling increases or difficulty swallowing or breathing
+
+RISK & PLAN
+Treatment plan: Complete RCT UL1 in 4/52, then reassess discolouration and consider internal bleaching. Continue IADT follow-up for UR1 and UL2 at 12 weeks, 6 months and 1 year with sensibility testing and PA radiographs.
+OHI: TB technique, interdental cleaning, 1450 ppm F toothpaste, spit don't rinse
+Recall: 4 weeks
+
+A Example, DCT3
+Supervisor: Dr B Example`}
+$('exampleBtn').addEventListener('click',()=>{$('paste').value=exampleNote();doParse('example note')});
+$('clearBtn').addEventListener('click',()=>{
+  $('paste').value='';st.sections=[];st.meta={};st.edited=false;st.dirty=false;actKey='';
+  st.F.actTxt='';st.F.act=[];Object.values(st.P).forEach(P=>{P.reasonTxt='';P.qTxt='';P.fuTxt='';P.deptTxt=''});
+  renderSections();renderDetails();renderMeta();checkIds();schedule();toast('Cleared. Nothing was saved.');$('paste').focus()});
+
+/* identifier check: warns if the pasted note looks like it holds patient identifiers */
+const IDS=[
+ ['CHI or NHS number',/\b\d{10}\b|\b\d{3}[ -]\d{3}[ -]\d{4}\b|\b\d{6}[ -]\d{4}\b/g,'[CHI]'],
+ ['date of birth',/\b(?:DOB|D\.O\.B\.?|date of birth)\b\s*[:\-]?\s*\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/gi,'DOB [DOB]'],
+ ['postcode',/\b(?!(?:UR|UL|LR|LL)\d)[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/g,'[Postcode]'],
+ ['phone number',/(?:\+44\s?|\b0)\d{2,4}[\s-]?\d{3}[\s-]?\d{3,4}\b/g,'[Phone]',m=>{const d=m.replace(/\D/g,'');return d.startsWith('44')?d.length===12:d.length===11}],
+ ['email address',/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g,'[Email]'],
+ ['name with a title (Mr, Mrs, Ms…)',/\b(?:Mr|Mrs|Ms|Miss|Mx|Master)\.?\s+[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+)?/g,'[Patient name]']];
+let idTimer=0;const scheduleIds=()=>{clearTimeout(idTimer);idTimer=setTimeout(checkIds,300)};
+function checkIds(){const t=$('paste').value+'\n'+st.sections.map(s=>s.text).join('\n'),found=[];
+  IDS.forEach(([n,re,,ok])=>{const m=(t.match(re)||[]).filter(x=>!ok||ok(x));if(m.length)found.push(`${n}${m.length>1?` (${m.length})`:''}`)});
+  const el=$('idWarn');if(!found.length){el.hidden=true;el.innerHTML='';return}
+  el.innerHTML=`<span><b>This note may contain patient identifiers:</b> ${esc(found.join(', '))}. Remove them before going further.</span><div class="row"><button type="button" class="btn sm" id="redactBtn">Replace with placeholders</button></div>`;el.hidden=false}
+const redact=t=>IDS.reduce((s,[,re,rep,ok])=>s.replace(re,m=>!ok||ok(m)?rep:m),t);
+$('idWarn').addEventListener('click',e=>{if(e.target.id!=='redactBtn')return;$('paste').value=redact($('paste').value);st.sections.forEach(s=>{s.text=redact(s.text)});
+  renderSections();checkIds();schedule();toast('Identifiers replaced with placeholders')});
+
+/* settings */
+function renderSettings(){document.querySelectorAll('[data-set]').forEach(el=>{el.value=SET[el.dataset.set]||''});$('lhChk').checked=!!SET.letterhead;updClSum()}
+function updClSum(){const n=SET.name.trim(),g=[SET.grade.trim(),SET.department.trim()].filter(Boolean).join(', ');
+  $('clsum').innerHTML=n?`${esc(n)} <small>${esc([g,SET.hospital.trim()].filter(Boolean).join(' · '))}</small>`:`Add your name, grade and department <small>${esc([g,SET.hospital.trim()].filter(Boolean).join(' · '))}</small>`}
+document.querySelectorAll('[data-set]').forEach(el=>el.addEventListener('input',()=>{SET[el.dataset.set]=el.value;saveSet();updClSum();schedule()}));
+$('lhChk').addEventListener('change',e=>{SET.letterhead=e.target.checked;saveSet();schedule()});
+
+/* theme */
+const mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+const isDark=()=>SET.theme?SET.theme==='dark':!!(mq&&mq.matches);
+function applyTheme(){const r=document.documentElement;if(SET.theme)r.setAttribute('data-theme',SET.theme);else r.removeAttribute('data-theme');
+  const d=isDark();$('themeBtn').textContent=d?'Light theme':'Dark theme';$('themeBtn').setAttribute('aria-label',d?'Switch to light theme':'Switch to dark theme')}
+$('themeBtn').addEventListener('click',()=>{SET.theme=isDark()?'light':'dark';saveSet();applyTheme()});
+try{if(mq)mq.addEventListener('change',applyTheme)}catch(e){}
+
+/* hand edits in the preview */
+page.addEventListener('input',()=>{if(!st.edited){st.edited=true;$('edbar').hidden=false}st.dirty=true});
+$('discard').addEventListener('click',()=>{st.edited=false;renderPreview();toast('Back to the generated letter')});
+
+/* copy and print */
+function letterText(){return st.edited?page.innerText.replace(/\n{3,}/g,'\n\n').trim():joinText(lastBlocks)}
+function letterHTML(){return st.edited?page.innerHTML.replace(/<span class="(?:ph|empty-body)">([\s\S]*?)<\/span>/g,'$1'):toHTML(lastBlocks,false)}
+function fallbackCopy(text,html){
+  const el=document.createElement(html?'div':'textarea');
+  if(html){el.contentEditable='true';el.innerHTML=html}else el.value=text;
+  el.setAttribute('aria-hidden','true');el.style.cssText='position:fixed;left:-9999px;top:0;opacity:0;white-space:pre-wrap;background:#fff;color:#000';
+  document.body.appendChild(el);let ok=false;
+  try{if(html){const r=document.createRange();r.selectNodeContents(el);const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r)}else el.select();ok=document.execCommand('copy')}catch(e){ok=false}
+  try{window.getSelection().removeAllRanges()}catch(e){}el.remove();return ok}
+async function writeClip(text,html){
+  try{
+    if(html&&window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
+      await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})})]);return true}
+    if(!html&&navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(text);return true}
+  }catch(e){}
+  return fallbackCopy(text,html)}
+function flash(btn){if(!btn)return;const t=btn.textContent;btn.classList.add('done');btn.textContent='Copied';setTimeout(()=>{btn.classList.remove('done');btn.textContent=t},1400)}
+async function copy(kind,btn){if(!st.edited)renderPreview();
+  const text=letterText(),html=kind==='fmt'?letterHTML():null;
+  const ok=await writeClip(text,html);
+  if(ok){flash(btn);st.dirty=false;toast(kind==='fmt'?'Copied with formatting: paste into the letter system or Word':'Copied as plain text')}
+  else toast('Copy was blocked. Click in the letter, press Ctrl+A then Ctrl+C.')}
+$('copyTxt').addEventListener('click',e=>copy('txt',e.currentTarget));
+$('copyFmt').addEventListener('click',e=>copy('fmt',e.currentTarget));
+$('copyTxt2').addEventListener('click',e=>copy('txt',e.currentTarget));
+$('copyFmt2').addEventListener('click',e=>copy('fmt',e.currentTarget));
+$('printBtn').addEventListener('click',()=>{if(!st.edited)renderPreview();try{window.print()}catch(e){}let fr=false;try{fr=window.self!==window.top}catch(e){fr=true}if(fr)setTimeout(()=>toast('If nothing opened, printing is blocked here – use Copy formatted and paste into Word'),600)});
+
+/* toast */
+let tTimer=0,tAct=null;
+function toast(msg,act){const t=$('toast');$('toastMsg').textContent=msg;const b=$('toastAct');tAct=act||null;b.hidden=!act;if(act)b.textContent=act.label;t.hidden=false;clearTimeout(tTimer);tTimer=setTimeout(()=>{t.hidden=true;tAct=null},act?6000:2600)}
+$('toastAct').addEventListener('click',()=>{const a=tAct;$('toast').hidden=true;tAct=null;if(a)a.fn()});
+
+/* handoff from other suite apps: localStorage "notile:letterHandoff" = {source,title,text,ts} */
+const HKEY='notile:letterHandoff';let pending=null;
+function checkHandoff(){let raw=null;try{raw=localStorage.getItem(HKEY)}catch(e){return}
+  if(raw==null)return;try{localStorage.removeItem(HKEY)}catch(e){}
+  let o=null;try{o=JSON.parse(raw)}catch(e){return}
+  if(!o||typeof o.text!=='string'||!o.text.trim())return;
+  let ts=typeof o.ts==='number'?o.ts:Date.parse(o.ts);if(ts&&ts<1e12)ts*=1000;
+  if(!isFinite(ts)||Date.now()-ts>15*60*1000||ts-Date.now()>5*60*1000)return;
+  pending=o;$('hoSrc').textContent=String(o.source||'another app').slice(0,60);
+  $('hoTitle').textContent=o.title?String(o.title).slice(0,120):'';$('handoff').hidden=false}
+$('hoImport').addEventListener('click',()=>{if(!pending)return;$('paste').value=pending.text;const src=String(pending.source||'').slice(0,60);pending=null;$('handoff').hidden=true;doParse(src||null);$('paste').focus()});
+$('hoDismiss').addEventListener('click',()=>{pending=null;$('handoff').hidden=true;toast('Note discarded')});
+window.addEventListener('storage',e=>{if(e.key===HKEY&&e.newValue)checkHandoff()});
+
+window.addEventListener('beforeunload',e=>{if(st.dirty&&($('paste').value.trim()||st.sections.length)){e.preventDefault();e.returnValue=''}});
+
+/* start */
+applyTheme();renderSettings();addOptions();renderTabs();renderDetails();renderSections();renderPreview();checkHandoff();
+})();
+</script>
+<script>
+/* Notile suite: the title links back to the launcher only where there is one (notile.co.uk, the offline suite, a local test server) */
+(function(){var on=false;try{var h=location.hostname;on=!!window.__SUITE_APP||/(^|\.)notile\.co\.uk$/.test(h)||h==='localhost'||h==='127.0.0.1'}catch(e){}
+if(!on)document.querySelectorAll('a.homelink').forEach(function(a){a.removeAttribute('href');a.removeAttribute('title')})})();
+</script>
+<script>if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));</script>
+</body>
+</html>

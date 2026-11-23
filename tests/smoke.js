@@ -1,8 +1,8 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all thirteen apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/tray-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all fifteen apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/tray-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -142,7 +142,28 @@ run({name:'Landing page',fn:async()=>{
   await test('DentalAudit: a #/create?template= link starts an audit from that template',async()=>{const pg=await page('/dentalaudit/#/create?template=bpe');
     await pg.waitForFunction(()=>document.querySelector('input[data-bind="title"]'),null,{timeout:15000});await pg.waitForTimeout(300);
     expect(await pg.inputValue('input[data-bind="title"]')==='BPE recording at new patient examination','template not applied');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card']])
+  await test('Trauma Card opens under the site CSP and builds a note, splint plan and IADT review schedule',async()=>{const pg=await page('/trauma-card/');
+    expect((await pg.request.get(BASE+'/trauma-card/manifest.webmanifest')).ok(),'Trauma Card manifest missing');
+    await pg.click('[data-act=example]');const n=await pg.inputValue('#out');
+    expect(/REVIEW PLAN \(IADT 2020\)/.test(n)&&/UL1: remove at 4 weeks/.test(n)&&/UR2–UL2/.test(n),'note incomplete: '+n.slice(0,200));
+    await pg.click('[data-mode=review]');await pg.click('[data-act=example]');const r=await pg.inputValue('#out');
+    expect(/REVIEW – 4 weeks post-injury/.test(r)&&/not diagnostic/.test(r),'review note incomplete');
+    await pg.click('[data-k=dent][data-v=prim]');await pg.click('[aria-label=ULA]');await pg.click('[data-k="t.ULA.lux"][data-v=avul]');
+    expect(/Around age 6/.test(await pg.inputValue('#out')),'primary successor review missing');await noErrors(pg)});
+  await test('Letter Card opens under the site CSP, parses a note and builds every letter type with placeholders only',async()=>{const pg=await page('/letter-card/');
+    expect((await pg.request.get(BASE+'/letter-card/manifest.webmanifest')).ok(),'Letter Card manifest missing');
+    await pg.click('#exampleBtn');await pg.waitForTimeout(300);expect(await pg.locator('.sec').count()>=8,'note not parsed into sections');
+    for(const t of ['referral','clinic','discharge','patient','mdt']){await pg.click('#tab-'+t);await pg.waitForTimeout(100);
+      const txt=await pg.innerText('#page');expect(/\[Patient name\]/.test(txt)&&txt.length>400,t+' letter incomplete')}
+    expect(await pg.evaluate(()=>Object.keys(localStorage).every(k=>!/handoff/i.test(k)&&!/UL1/.test(localStorage.getItem(k)||''))),'note text saved to the device');await noErrors(pg)});
+  await test('Trauma Card hands its note to Letter Card, which offers to import it',async()=>{const pg=await page('/trauma-card/');
+    await pg.click('[data-mode=review]');await pg.click('[data-act=example]');
+    await Promise.all([pg.waitForURL(BASE+'/letter-card/'),pg.click('[data-act=letter]')]);
+    await pg.waitForSelector('#handoff:not([hidden])',{timeout:5000});expect(/Trauma Card/.test(await pg.innerText('#hoSrc')),'wrong source');
+    await pg.click('#hoImport');await pg.waitForTimeout(300);
+    const txt=await pg.innerText('#page');expect(/Lateral luxation/.test(txt)&&/Assessment: Monitor/.test(txt),'trauma findings missing from the letter');
+    expect(await pg.evaluate(()=>localStorage.getItem('notile:letterHandoff'))===null,'handoff left on the device');await noErrors(pg)});
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});
