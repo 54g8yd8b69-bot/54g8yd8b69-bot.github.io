@@ -165,6 +165,14 @@ run({name:'Landing page',fn:async()=>{
     expect(/Urgent care[\s\S]*Decay control[\s\S]*Essential treatment[\s\S]*Crown[\s\S]*Longer term[\s\S]*implant/i.test(t),'treatment plan not staged');
     await pg.click('#tab-postop');await pg.waitForTimeout(150);t=await pg.innerText('#page');
     expect(/After your tooth extraction/.test(t)&&/While you are numb/.test(t)&&/stitches/.test(t)&&/call 111/.test(t),'post-op advice not picked');await noErrors(pg)});
+  await test('Letter Card offers Polish wording on the site, and explains when the browser cannot run it',async()=>{const pg=await page('/letter-card/');
+    expect(await pg.isVisible('#polBtn'),'Polish wording button missing');
+    expect((await pg.request.get(BASE+'/letter-card/polish-worker.js')).ok(),'polish worker missing');
+    await pg.click('#exampleBtn');await pg.waitForTimeout(200);await pg.click('#polBtn');await pg.waitForSelector('#polDlg[open] [data-pol]',{timeout:10000});
+    const t=await pg.innerText('#polBody');expect(/WebGPU|never leaves this device/.test(t),'polish dialog text: '+t.slice(0,120));
+    await pg.click('#polX');expect(!(await pg.isVisible('#polDlg')),'dialog did not close');
+    const hide=await pg.evaluate(()=>{const c=LetterCardPolish.check('UL1 TTP negative, EPT 34.','The tooth was tender, EPT 43.');return c.join('|')});
+    expect(/tooth missing: UL1/.test(hide)&&/number missing: 34/.test(hide)&&/new number: 43/.test(hide)&&/"not"/.test(hide),'checks did not flag a bad rewrite: '+hide);await noErrors(pg)});
   await test('Trauma Card hands its note to Letter Card, which offers to import it',async()=>{const pg=await page('/trauma-card/');
     await pg.click('[data-mode=review]');await pg.click('[data-act=example]');
     await Promise.all([pg.waitForURL(BASE+'/letter-card/'),pg.click('[data-act=letter]')]);

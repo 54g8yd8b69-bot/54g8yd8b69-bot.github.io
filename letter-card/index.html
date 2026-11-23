@@ -153,6 +153,29 @@ section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(-
 .pvhead{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .pvhead strong{font-family:var(--display);font-size:1.05rem;color:var(--navy)}
 .btns{display:flex;gap:6px;flex-wrap:wrap}
+.polbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;padding:8px 14px;background:var(--note-hi);font-size:.85rem;border-bottom:1px solid var(--line)}
+dialog.poldlg{border:0;border-radius:12px;padding:0;width:min(820px,calc(100vw - 16px));max-height:calc(100vh - 24px);background:var(--surface);color:var(--fg);box-shadow:0 12px 40px rgba(0,0,0,.3)}
+dialog.poldlg[open]{display:flex;flex-direction:column}
+dialog.poldlg::backdrop{background:rgba(8,20,30,.55)}
+.pdhead{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.pdhead strong{font-family:var(--display);font-size:1.15rem;flex:1}
+.pdpill{font-size:.75rem;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--teal2)}
+.pdbody{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px;font-size:.95rem}
+.pdbody p{margin:0}
+.pdbody ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.pdfoot{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+.pdprog{width:100%;height:10px;accent-color:var(--teal2)}
+.pitem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
+.pitem.flag{border-color:var(--warn-line)}
+.pchk{display:flex;align-items:center;gap:8px;font-weight:700;font-size:.9rem;cursor:pointer}
+.pchk input{width:18px;height:18px;accent-color:var(--teal)}
+.pdiff{line-height:1.6;font-size:.93rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.pdiff del{background:#FDE2E1;color:#8A1F1F;text-decoration:line-through;border-radius:3px}
+.pdiff ins{background:#DDF3EC;color:#14594C;text-decoration:none;border-radius:3px}
+:root[data-theme="dark"] .pdiff del{background:#4A1D20;color:#F5B3B3}
+:root[data-theme="dark"] .pdiff ins{background:#123F38;color:#A6E6D6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pdiff del{background:#4A1D20;color:#F5B3B3}:root:not([data-theme="light"]) .pdiff ins{background:#123F38;color:#A6E6D6}}
+.pflag{font-size:.85rem;color:var(--warn-fg);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:6px;padding:5px 9px}
 .edbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;padding:8px 14px;background:var(--note-hi);font-size:.85rem;border-bottom:1px solid var(--line)}
 .pvscroll{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--bg)}
 .page{background:#FFFFFF;color:#111111;margin:0 auto;width:100%;aspect-ratio:210/297;padding:34px 36px 40px;box-shadow:0 1px 3px rgba(0,0,0,.18),0 8px 22px rgba(16,39,58,.10);border-radius:2px;overflow-wrap:break-word;color-scheme:light}
@@ -186,7 +209,7 @@ section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(-
 @media print{
   @page{size:A4;margin:18mm 18mm 20mm}
   html,body{background:#fff!important}
-  header,.clin,.tabs,.banner,.form,.pvhead,.edbar,.pvfoot,.mbar,.toast{display:none!important}
+  header,.clin,.tabs,.sugs,.polbar,dialog,.banner,.form,.pvhead,.edbar,.pvfoot,.mbar,.toast{display:none!important}
   .wrap{padding:0;max-width:none}
   .grid{display:block}
   .preview{position:static;border:0;box-shadow:none;max-height:none;background:none}
@@ -269,8 +292,10 @@ section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(-
           <button type="button" class="btn ghost sm" id="copyTxt">Copy as text</button>
           <button type="button" class="btn primary sm" id="copyFmt">Copy formatted</button>
           <button type="button" class="btn ghost sm" id="printBtn">Print</button>
+          <button type="button" class="btn ghost sm" id="polBtn" hidden title="Rewrite the clinical paragraphs into smoother sentences with AI that runs on this computer">Polish wording</button>
         </div>
       </div>
+      <div class="polbar" id="polBar" hidden><span id="polMsg"></span><span class="btns"><button type="button" class="btn ghost sm" id="polToggle">Show original</button><button type="button" class="btn ghost sm" id="polRemove">Remove polish</button></span></div>
       <div class="edbar" id="edbar" hidden><span>Edited by hand. Changes on the left won't update it.</span><button type="button" class="btn ghost sm" id="discard">Discard edits</button></div>
       <div class="pvscroll">
         <div class="page" id="page" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Letter preview, editable"></div>
@@ -283,6 +308,11 @@ section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(-
   </div>
 </div>
 <div class="mbar" id="mbar"><span id="mlabel">Letter</span><div class="btns"><button type="button" class="btn ghost sm" id="copyTxt2">Copy text</button><button type="button" class="btn primary sm" id="copyFmt2">Copy formatted</button></div></div>
+<dialog class="poldlg" id="polDlg" aria-labelledby="polH">
+  <div class="pdhead"><strong id="polH">Polish wording</strong><span class="pdpill">On-device AI · beta</span><button type="button" class="ibtn" id="polX" aria-label="Close">✕</button></div>
+  <div class="pdbody" id="polBody"></div>
+  <div class="pdfoot" id="polFoot"></div>
+</dialog>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden><span id="toastMsg"></span><button type="button" id="toastAct" hidden></button></div>
 
 <script>
@@ -729,8 +759,8 @@ function bodyBlocks(secs,T,X){
     if(g&&g.head===head&&s.key!=='custom'&&!g.custom)g.m.push({s,sub,single});else groups.push({head,custom:s.key==='custom',m:[{s,sub,single}]})});
   const out=[];
   groups.forEach(g=>{
-    if(g.m.length===1){const bl=textToBlocks(X(g.m[0].s.text));if(bl.length)out.push({t:'h',text:g.m[0].single},...bl);return}
-    const all=[];g.m.forEach(m=>{const bl=textToBlocks(X(m.s.text));if(!bl.length)return;
+    if(g.m.length===1){const bl=textToBlocks(X(g.m[0].s.text));bl.forEach(b=>b.pol=true);if(bl.length)out.push({t:'h',text:g.m[0].single},...bl);return}
+    const all=[];g.m.forEach(m=>{const bl=textToBlocks(X(m.s.text));bl.forEach(b=>b.pol=true);if(!bl.length)return;
       if(m.sub){if(bl[0].t==='p'&&!bl[0].lead&&!/^[A-Za-z][^:\n]{0,40}:\s/.test(bl[0].text))bl[0].lead=m.sub+':';else bl.unshift({t:'p',lead:m.sub+':',text:'',tight:true})}
       all.push(...bl)});
     if(all.length)out.push({t:'h',text:g.head},...all)});
@@ -919,8 +949,9 @@ function buildLetter(){
   }else if(T==='clinic'||T==='discharge'){
     B.push({t:'sal',text:'Dear [GDP name],'});
     const box=[];const dx=pulled('dx');
-    if(dx)box.push({t:'h',text:'Diagnosis'},...textToBlocks(X(dx.text)));
-    if(T==='discharge'){const tx=pulled('tx');if(tx)box.push({t:'h',text:'Treatment completed'},...textToBlocks(X(tx.text)))}
+    const polB=t=>{const b=textToBlocks(t);b.forEach(x=>x.pol=true);return b};
+    if(dx)box.push({t:'h',text:'Diagnosis'},...polB(X(dx.text)));
+    if(T==='discharge'){const tx=pulled('tx');if(tx)box.push({t:'h',text:'Treatment completed'},...polB(X(tx.text)))}
     const acts=[...F.act.map(a=>X(a)),...splitLines(F.actTxt).map(X)];
     if(acts.length)box.push({t:'h',text:T==='discharge'?'Ongoing care requested':'Actions for you'},{t:'ul',items:acts});
     if(box.length)B.push({t:'box',blocks:box});
@@ -996,7 +1027,7 @@ function renderPreview(){
   $('mlabel').textContent=TNAME[st.type];
   if(st.edited){$('edbar').hidden=false;return}
   $('edbar').hidden=true;
-  lastBlocks=buildLetter();
+  lastBlocks=applyPolish(buildLetter());
   page.innerHTML=toHTML(lastBlocks,true);
 }
 function renderTabs(){
@@ -1134,7 +1165,7 @@ function doParse(source){
   const raw=$('paste').value;if(!raw.trim()){toast('Paste a note first');$('paste').focus();return}
   const prev={sections:st.sections,meta:st.meta,edited:st.edited,type:st.type,sug:st.sug};
   const r=parseNote(raw);st.sections=r.sections;st.meta=r.meta;if(source)st.meta.source=source;st.edited=false;st.dirty=true;actKey='';
-  const TP=st.P.tplan;TP.stage={};TP.skip=[];TP.extra=[];TP.opts=optsFromNote();st.P.postop.proc=detectProcs();
+  const TP=st.P.tplan;TP.stage={};TP.skip=[];TP.extra=[];TP.opts=optsFromNote();st.P.postop.proc=detectProcs();st.pol=null;
   st.sug=suggestTypes();const pick=st.sug.find(x=>x.t==='referral'||x.t==='discharge'||x.t==='mdt');
   if(pick){if(pick.t==='referral'&&pick.dept&&!st.P.referral.dept)st.P.referral.dept=pick.dept;st.type=pick.t}
   else if(st.autoType&&st.type===st.autoType)st.type='clinic';
@@ -1196,7 +1227,7 @@ A Example, DCT3
 Supervisor: Dr B Example`}
 $('exampleBtn').addEventListener('click',()=>{$('paste').value=exampleNote();doParse('example note')});
 $('clearBtn').addEventListener('click',()=>{
-  $('paste').value='';st.sections=[];st.meta={};st.edited=false;st.dirty=false;actKey='';st.sug=[];renderSugs();st.P.postop.proc=[];st.P.postop.extra='';st.P.tplan.opts='';
+  $('paste').value='';st.sections=[];st.meta={};st.edited=false;st.dirty=false;actKey='';st.sug=[];renderSugs();st.pol=null;st.P.postop.proc=[];st.P.postop.extra='';st.P.tplan.opts='';
   st.F.actTxt='';st.F.act=[];Object.values(st.P).forEach(P=>{P.reasonTxt='';P.qTxt='';P.fuTxt='';P.deptTxt=''});
   renderSections();renderDetails();renderMeta();checkIds();schedule();toast('Cleared. Nothing was saved.');$('paste').focus()});
 
@@ -1269,6 +1300,129 @@ $('printBtn').addEventListener('click',()=>{if(!st.edited)renderPreview();try{wi
 let tTimer=0,tAct=null;
 function toast(msg,act){const t=$('toast');$('toastMsg').textContent=msg;const b=$('toastAct');tAct=act||null;b.hidden=!act;if(act)b.textContent=act.label;t.hidden=false;clearTimeout(tTimer);tTimer=setTimeout(()=>{t.hidden=true;tAct=null},act?6000:2600)}
 $('toastAct').addEventListener('click',()=>{const a=tAct;$('toast').hidden=true;tAct=null;if(a)a.fn()});
+
+/* ---------- Polish wording: on-device AI rewrite of the note-derived paragraphs, every change reviewed ---------- */
+const POL={model:'onnx-community/Qwen3-1.7B-ONNX',revision:'3231b522c6e703b2f9b3cd8ea27426a1289a02f2',name:'Qwen3 1.7B',size:{q4f16:'about 1.4 GB',q4:'about 2.1 GB'},cache:'notile-polish-v1'};
+// the engine and worker are only on notile.co.uk (and a local test server): not in the offline file or a claude.ai artifact
+const polEngine=(()=>{try{const h=location.hostname;return !window.__SUITE_APP&&/^https?:$/.test(location.protocol)&&(/(^|\.)notile\.co\.uk$/.test(h)||h==='localhost'||h==='127.0.0.1')&&typeof Worker==='function'&&'caches' in window}catch(e){return false}})();
+const polKey=b=>b.t==='ul'?b.items.join('\n'):b.text;
+let polUsed=0;
+function applyPolish(B){polUsed=0;const P=st.pol,on=!!(P&&P.on);
+  const f=b=>{if(b.t==='box')return Object.assign({},b,{blocks:b.blocks.map(f)});
+    if(on&&b.pol){const v=P.map[polKey(b)];if(v!=null){polUsed++;const n=Object.assign({},b,{t:'p',text:v});delete n.items;return n}}return b};
+  const out=B.map(f);renderPolBar();return out}
+function renderPolBar(){const P=st.pol,bar=$('polBar');const n=P?Object.keys(P.map).length:0;
+  if(!n||st.edited){bar.hidden=true;return}bar.hidden=false;
+  $('polMsg').textContent=!P.on?'Showing the original wording.':polUsed?`AI-polished wording in ${polUsed} paragraph${polUsed===1?'':'s'}. Read it before you send.`:'The note or wording options changed, so the original wording is shown.';
+  $('polToggle').textContent=P.on?'Show original':'Show polished';$('polToggle').hidden=P.on&&!polUsed}
+$('polToggle').addEventListener('click',()=>{if(st.pol){st.pol.on=!st.pol.on;schedule()}});
+$('polRemove').addEventListener('click',()=>{const prev=st.pol;st.pol=null;schedule();toast('Polish removed',{label:'Undo',fn:()=>{st.pol=prev;schedule()}})});
+function polTargets(){const out=[],seen=new Set();
+  const walk=b=>{if(b.t==='box'){b.blocks.forEach(walk);return}if(!b.pol)return;const k=polKey(b);if(k.trim().length<20||seen.has(k)||/^\[[^\]]*\]\.?$/.test(k.trim()))return;seen.add(k);out.push(k)};
+  buildLetter().forEach(walk);return out}
+
+// checks on each rewrite: tooth codes, numbers and placeholders kept, negatives kept, no new clinical words
+const PNUM=/\d+(?:[.,:]\d+)*/g,PTOOTH=/\b(?:UR|UL|LR|LL)[1-8A-E]\b/g,PBR=/\[[^\]\n]{1,60}\]/g;
+const PNEG=/\b(no|not|nil|none|negative|absent|without|never|denies|don['’]?t|doesn['’]?t|isn['’]?t|wasn['’]?t|cannot|can['’]?t|unable)\b/gi;
+const PGLUE=new Set(('a an the and or but so as of to in on at for from by with into onto over under about after before during since until while when where which who whom whose that this these those there here it its they them their he she his her him we us our you your i me my is are was were be been being has have had having do does did done will would shall should can could may might must also both either neither each every all any some such than then thus however although though because if only just very more most less least further well already still now today currently recently previously again once twice per one two three first second third '+
+  'patient patients tooth teeth noted found seen shows showed shown show showing appears appeared appear remains remained remain reported reports report describes described describe presented presents present presenting consistent normal within around overall following follows follow given giving gave carried out made make making taken take took using used use underwent undergone left right upper lower front back side area region additionally furthermore mild slight slightly evidence sign signs '+
+  'placed performed applied established measured administered completed achieved obtained recorded undertaken provided undergo test tests testing response responded responds respond reading readings level levels result results value').split(' '));
+const pStem=w=>w.toLowerCase().replace(/[’']s$/,'').replace(/ies$/,'y').replace(/(ing|ed|es|s|ly)$/,'');
+function pBag(re,s){const m={};(s.match(re)||[]).forEach(x=>{x=x.replace(/,/g,'');m[x]=(m[x]||0)+1});return m}
+function polNovel(orig,out){
+  let src=orig.toLowerCase();(orig.match(GL_RE)||[]).forEach(a=>{const g=GL_MAP[a];if(g)src+=' '+g[1]+' '+g[2]});
+  const S=new Set((src.match(/[a-z][a-z’'-]+/g)||[]).map(pStem)),res=[];
+  (out.match(/[A-Za-z][A-Za-z’'-]+/g)||[]).forEach(w=>{const lw=w.toLowerCase();if(lw.length<3||PGLUE.has(lw)||PGLUE.has(pStem(lw)))return;const st2=pStem(lw);
+    if(S.has(st2)||[...S].some(x=>x.length>4&&st2.length>4&&(x.startsWith(st2)||st2.startsWith(x))))return;if(!res.includes(lw))res.push(lw)});
+  return res}
+function polCheck(orig,out){const issues=[];
+  if(!out.trim())return ['no text came back'];
+  const noT=t=>t.replace(PTOOTH,' ');
+  for(const [re,label,fx] of [[PTOOTH,'tooth',x=>x],[PNUM,'number',noT],[PBR,'placeholder',x=>x]]){const a=pBag(re,fx(orig)),b=pBag(re,fx(out));
+    const miss=Object.keys(a).filter(k=>!b[k]),add=Object.keys(b).filter(k=>!a[k]);
+    if(miss.length)issues.push(`${label}${miss.length>1?'s':''} missing: ${miss.join(', ')}`);if(add.length)issues.push(`new ${label}${add.length>1?'s':''}: ${add.join(', ')}`)}
+  const na=(orig.match(PNEG)||[]).length,nb=(out.match(PNEG)||[]).length;if(na&&nb<na)issues.push('a "no" or "not" may have been dropped');
+  const r=out.length/Math.max(1,orig.length);if(r<0.6)issues.push('much shorter than the original');if(r>2.3)issues.push('much longer than the original');
+  const nv=polNovel(orig,out);if(nv.length>2)issues.push('new words: '+nv.slice(0,6).join(', '));
+  if(/\b(dear|yours|regards|sincerely)\b/i.test(out)&&!/\b(dear|yours|regards|sincerely)\b/i.test(orig))issues.push('added a greeting or sign-off');
+  return issues}
+function wdiff(a,b){const A=a.split(/(\s+)/),Bt=b.split(/(\s+)/),n=A.length,m=Bt.length;
+  if(n*m>400000)return `<del>${esc(a)}</del> <ins>${esc(b)}</ins>`;
+  const dp=[];for(let i=0;i<=n;i++)dp.push(new Uint16Array(m+1));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)dp[i][j]=A[i]===Bt[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+  let i=0,j=0,h='';
+  while(i<n&&j<m){if(A[i]===Bt[j]){h+=esc(A[i]);i++;j++}else if(dp[i+1][j]>=dp[i][j+1]){if(A[i].trim())h+=`<del>${esc(A[i])}</del>`;i++}else{h+=Bt[j].trim()?`<ins>${esc(Bt[j])}</ins>`:esc(Bt[j]);j++}}
+  while(i<n){if(A[i].trim())h+=`<del>${esc(A[i])}</del>`;i++}while(j<m){h+=Bt[j].trim()?`<ins>${esc(Bt[j])}</ins>`:esc(Bt[j]);j++}
+  return h.replace(/<\/del><del>/g,'').replace(/<\/ins>(\s*)<ins>/g,'$1').replace(/<\/del><ins>/g,'</del> <ins>').replace(/<\/ins><del>/g,'</ins> <del>')}
+
+// worker plumbing: one request at a time
+let pw=null,pend=null,polRunning=false;
+function polWorker(){if(pw)return pw;pw=new Worker('/letter-card/polish-worker.js',{type:'module'});
+  pw.onmessage=e=>{const d=e.data||{};if(d.type==='progress'){polProgress(d.loaded,d.total);return}if(!pend)return;const p=pend;pend=null;if(d.type==='error')p.rej(new Error(d.message));else p.res(d)};
+  pw.onerror=e=>{if(pend){const p=pend;pend=null;p.rej(new Error((e&&e.message)||'the AI engine could not start'))}};return pw}
+const polCall=msg=>new Promise((res,rej)=>{pend={res,rej};polWorker().postMessage(msg)});
+function polStop(){if(pw){pw.terminate();pw=null}if(pend){const p=pend;pend=null;p.rej(new Error('cancelled'))}polRunning=false}
+async function polIsCached(c){try{const k=await (await caches.open(POL.cache)).keys();return k.some(r=>r.url.includes(`${c.model}/resolve/${c.revision}/onnx/model_${c.dtype}.onnx`))}catch(e){return false}}
+const mb=n=>n>=1e9?(n/1e9).toFixed(2)+' GB':Math.round(n/1e6)+' MB';
+
+const polDlg=$('polDlg');
+function polShow(body,foot){$('polBody').innerHTML=body;$('polFoot').innerHTML=foot||'';if(!polDlg.open){try{polDlg.showModal()}catch(e){polDlg.setAttribute('open','')}}}
+function polClose(){if(polRunning)polStop();try{polDlg.close()}catch(e){polDlg.removeAttribute('open')}$('polBtn').focus()}
+$('polX').addEventListener('click',polClose);
+polDlg.addEventListener('cancel',e=>{e.preventDefault();polClose()});
+function polProgress(l,t){const b=$('polProg');if(!b)return;b.max=t;b.value=l;const s=$('polStat');if(s)s.textContent=`Downloading the model: ${mb(l)} of ${mb(t)}. This happens once; after that it is kept on this computer.`}
+
+let polState=null;
+async function polOpen(){
+  if(st.edited){toast('Discard your hand edits first, then polish.');return}
+  const targets=polTargets();
+  if(!targets.length){toast(st.type==='postop'?'Post-op instructions use fixed advice, so there is nothing to polish.':'Nothing to polish yet: parse a note first.');return}
+  polShow('<p>Checking this computer…</p>');
+  const T=window.__POLISH_TEST||null;let dtype='q4f16',device='webgpu';
+  if(T){dtype=T.dtype||dtype;device=T.device||device}
+  if(device==='webgpu'){let a=null;try{a=navigator.gpu?await navigator.gpu.requestAdapter():null}catch(e){a=null}
+    if(!a){polShow(`<p><b>This computer or browser can’t run it.</b> Polish wording needs WebGPU, which is in recent versions of Chrome and Edge on most laptops and desktops (not Firefox or older browsers yet).</p><p>Everything else in Letter Card works as normal.</p>`,'<button type="button" class="btn primary" data-pol="close">Close</button>');return}
+    if(!T&&!a.features.has('shader-f16'))dtype='q4'}
+  const cfg={model:(T&&T.model)||POL.model,revision:(T&&T.revision)||POL.revision,dtype,device};
+  const cached=await polIsCached(cfg),pt=PTISH.has(st.type);
+  polState={cfg,targets,audience:pt?'patient':'clinician'};
+  polShow(`<p>Rewrites the clinical paragraphs of this ${esc(TSHORT[st.type])} into smoother sentences${pt?', in plain English for the patient':''}, using a small language model (${esc(POL.name)}) that runs on this computer. <b>Your letter never leaves this device.</b></p>
+    <ul>${cached?'<li>The model is already on this computer.</li>':`<li>First use downloads the model (${POL.size[dtype]||'about 1.5 GB'}) from Hugging Face. After that it is kept in this browser, so it starts much faster.</li>`}
+    <li>It takes a few seconds per paragraph (${targets.length} to do). The fixed wording of the letter is left alone.</li>
+    <li>AI can still get things wrong, for example by merging two findings or changing a detail. You will see every change side by side, and nothing goes into the letter until you accept it.</li></ul>`,
+    `<button type="button" class="btn ghost" data-pol="close">Cancel</button><button type="button" class="btn primary" data-pol="go">${cached?`Polish ${targets.length} paragraph${targets.length===1?'':'s'}`:'Download model and polish'}</button>`);
+}
+async function polGo(){const S=polState;if(!S)return;polRunning=true;S.results=[];
+  polShow(`<p id="polStat">Getting the model ready…</p><progress class="pdprog" id="polProg"></progress>`,'<button type="button" class="btn ghost" data-pol="close">Cancel</button>');
+  try{
+    await polCall(Object.assign({type:'init'},S.cfg));
+    for(let i=0;i<S.targets.length;i++){
+      if(!polRunning)return;
+      const st2=$('polStat'),pr=$('polProg');if(st2)st2.textContent=`Polishing paragraph ${i+1} of ${S.targets.length}…`;if(pr){pr.max=S.targets.length;pr.value=i}
+      const r=await polCall({type:'run',id:i,text:S.targets[i],audience:S.audience});
+      const out=String(r.text||'').trim();S.results.push({orig:S.targets[i],out,issues:polCheck(S.targets[i],out)});
+    }
+    polRunning=false;polReview();
+  }catch(e){polRunning=false;if(String(e.message)==='cancelled')return;
+    polShow(`<p><b>Polishing stopped.</b> ${esc(String(e.message||e)).slice(0,300)}</p><p>This usually means the computer ran short of graphics memory or the download was interrupted. Close other tabs and try again.</p>`,'<button type="button" class="btn ghost" data-pol="close">Close</button><button type="button" class="btn primary" data-pol="go">Try again</button>')}
+}
+const pSame=(a,b)=>a.replace(/\s+/g,' ').trim()===b.replace(/\s+/g,' ').trim();
+function polReview(){const S=polState,ch=S.results.map((r,i)=>[r,i]).filter(([r])=>r.out&&!pSame(r.out,r.orig));
+  const same=S.results.length-ch.length;
+  if(!ch.length){polShow('<p>The AI suggested no changes to these paragraphs, so the letter is as it was.</p>','<button type="button" class="btn primary" data-pol="close">Close</button>');return}
+  polShow(`<p>Red is removed, green is added. <b>Read each change against the note.</b> Changes the automatic checks flagged are unticked.</p>`+
+    ch.map(([r,i])=>`<div class="pitem${r.issues.length?' flag':''}"><label class="pchk"><input type="checkbox" data-pi="${i}"${r.issues.length?'':' checked'}> Use this wording</label><div class="pdiff">${wdiff(r.orig,r.out)}</div>${r.issues.length?`<p class="pflag">Check carefully: ${esc(r.issues.join('; '))}</p>`:''}</div>`).join('')+
+    (same?`<p class="hint">${same} paragraph${same===1?' was':'s were'} left unchanged.</p>`:''),
+    `<button type="button" class="btn ghost" data-pol="close">Cancel</button><button type="button" class="btn primary" data-pol="apply" id="polApply"></button>`);
+  polCount()}
+function polCount(){const n=[...document.querySelectorAll('#polBody [data-pi]')].filter(c=>c.checked).length,b=$('polApply');if(b){b.textContent=n?`Use ${n} change${n===1?'':'s'}`:'Use none';b.disabled=false}}
+$('polBody').addEventListener('change',e=>{if(e.target.dataset.pi!=null)polCount()});
+function polApply(){const S=polState,map={};document.querySelectorAll('#polBody [data-pi]').forEach(c=>{if(c.checked){const r=S.results[+c.dataset.pi];map[r.orig]=r.out}});
+  const n=Object.keys(map).length;if(n){st.pol={on:true,map};st.dirty=true}polClose();schedule();
+  if(n)toast(`AI wording used in ${n} paragraph${n===1?'':'s'}. Read the letter before you send it.`)}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-pol]');if(!b)return;const a=b.dataset.pol;if(a==='close')polClose();else if(a==='go')polGo();else if(a==='apply')polApply()});
+if(polEngine){$('polBtn').hidden=false;$('polBtn').addEventListener('click',polOpen)}
+window.LetterCardPolish={check:polCheck,diff:wdiff}; // for the site's browser tests
 
 /* handoff from other suite apps: localStorage "notile:letterHandoff" = {source,title,text,ts} */
 const HKEY='notile:letterHandoff';let pending=null;
