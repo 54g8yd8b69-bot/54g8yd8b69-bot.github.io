@@ -4,7 +4,7 @@
 // The letter text stays inside this worker: nothing but the model download goes over the network.
 import { pipeline, env } from '/notile/vendor/transformers/transformers.min.js';
 
-const CACHE = 'notile-polish-v1'; // bump when the model or revision changes
+const CACHE = 'notile-polish-v2'; // bump when the model or revision changes (v1 held the single-file model)
 const ENGINE = new URL('/notile/vendor/transformers/', self.location.href).href;
 
 env.allowLocalModels = false;
@@ -27,18 +27,22 @@ async function download(url, cache) {
   if (!res.ok || !res.body) return res;
   const total = Number(res.headers.get('content-length')) || 0;
   const name = url.split('/').pop();
-  const reader = res.body.getReader();
-  const parts = []; let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parts.push(value); loaded += value.length;
+  // count bytes as they stream past, without keeping a copy in memory
+  let loaded = 0;
+  const counter = new TransformStream({ transform(chunk, ctl) {
+    loaded += chunk.length;
     if (total > 2e6 || loaded > 2e6) { progress[name] = [loaded, Math.max(total, loaded)]; report(); }
+    ctl.enqueue(chunk);
+  } });
+  const headers = { 'content-type': res.headers.get('content-type') || 'application/octet-stream' };
+  if (total) headers['content-length'] = String(total);
+  const streamed = new Response(res.body.pipeThrough(counter), { status: 200, headers });
+  if (cache) {
+    // stream straight into the Cache API (on disk), then hand back the stored copy
+    try { await cache.put(url, streamed); const hit = await cache.match(url); if (hit) return hit; } catch (e) { /* storage full or private mode: fetch again without keeping it */ }
+    return fetch(url, { credentials: 'omit' });
   }
-  const blob = new Blob(parts);
-  const keep = new Response(blob, { status: 200, headers: { 'content-type': res.headers.get('content-type') || 'application/octet-stream', 'content-length': String(blob.size) } });
-  if (cache) { try { await cache.put(url, keep.clone()); } catch (e) { /* storage full: still works this time, just not kept */ } }
-  return keep;
+  return streamed;
 }
 async function cachedFetch(input, init) {
   const url = new URL(typeof input === 'string' ? input : (input.url || String(input)), self.location.href).href;
@@ -51,6 +55,8 @@ async function cachedFetch(input, init) {
   return res.clone();
 }
 env.fetch = cachedFetch;
+// free the space used by older versions of this feature (v1 kept the 1.4 GB single-file model)
+caches.keys().then(ks => ks.filter(k => k.startsWith('notile-polish-') && k !== CACHE).forEach(k => caches.delete(k))).catch(() => {});
 
 // ---- prompt (tested against Qwen3 1.7B: keeps facts, tooth codes and numbers; flags are checked again on the page) ----
 function messages(text, audience, noThink) {
@@ -98,7 +104,7 @@ self.onmessage = async (e) => {
     if (m.type === 'cached') {
       const cache = await openCache();
       const keys = cache ? await cache.keys() : [];
-      const want = `${m.model}/resolve/${m.revision}/onnx/model_${m.dtype}.onnx`;
+      const want = `${m.model}/resolve/${m.revision}/onnx/model_${m.dtype}.onnx_data`;
       postMessage({ type: 'cached', yes: keys.some(r => r.url.includes(want)) });
     } else if (m.type === 'init') {
       await load(m);
