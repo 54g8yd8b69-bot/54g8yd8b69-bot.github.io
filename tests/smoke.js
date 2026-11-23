@@ -153,9 +153,18 @@ run({name:'Landing page',fn:async()=>{
   await test('Letter Card opens under the site CSP, parses a note and builds every letter type with placeholders only',async()=>{const pg=await page('/letter-card/');
     expect((await pg.request.get(BASE+'/letter-card/manifest.webmanifest')).ok(),'Letter Card manifest missing');
     await pg.click('#exampleBtn');await pg.waitForTimeout(300);expect(await pg.locator('.sec').count()>=8,'note not parsed into sections');
-    for(const t of ['referral','clinic','discharge','patient','mdt']){await pg.click('#tab-'+t);await pg.waitForTimeout(100);
-      const txt=await pg.innerText('#page');expect(/\[Patient name\]/.test(txt)&&txt.length>400,t+' letter incomplete')}
+    for(const t of ['referral','clinic','discharge','patient','tplan','postop','mdt']){await pg.click('#tab-'+t);await pg.waitForTimeout(100);
+      const txt=await pg.innerText('#page');expect(/\[Patient name\]/.test(txt)&&txt.length>300,t+' letter incomplete')}
     expect(await pg.evaluate(()=>Object.keys(localStorage).every(k=>!/handoff/i.test(k)&&!/UL1/.test(localStorage.getItem(k)||''))),'note text saved to the device');await noErrors(pg)});
+  await test('Letter Card picks the letter from the plan, stages a treatment plan and picks post-op advice',async()=>{const pg=await page('/letter-card/');
+    await pg.fill('#paste','Dx: UL6 unrestorable, caries UR6\nTx: LA articaine. XLA UL6, 2 x Vicryl sutures\nPlan:\n- Caries control UR6\n- Crown UR6\n- Consider implant UL6\nRefer to oral surgery for LL8');
+    await pg.click('#parseBtn');await pg.waitForTimeout(300);
+    expect(await pg.getAttribute('#tab-referral','aria-selected')==='true','referral letter not opened from the plan');
+    expect(await pg.locator('#details [data-f=dept][data-v="Oral Surgery"][aria-pressed=true]').count()===1,'department not picked');
+    await pg.click('#tab-tplan');await pg.waitForTimeout(150);let t=await pg.innerText('#page');
+    expect(/Urgent care[\s\S]*Decay control[\s\S]*Essential treatment[\s\S]*Crown[\s\S]*Longer term[\s\S]*implant/i.test(t),'treatment plan not staged');
+    await pg.click('#tab-postop');await pg.waitForTimeout(150);t=await pg.innerText('#page');
+    expect(/After your tooth extraction/.test(t)&&/While you are numb/.test(t)&&/stitches/.test(t)&&/call 111/.test(t),'post-op advice not picked');await noErrors(pg)});
   await test('Trauma Card hands its note to Letter Card, which offers to import it',async()=>{const pg=await page('/trauma-card/');
     await pg.click('[data-mode=review]');await pg.click('[data-act=example]');
     await Promise.all([pg.waitForURL(BASE+'/letter-card/'),pg.click('[data-act=letter]')]);

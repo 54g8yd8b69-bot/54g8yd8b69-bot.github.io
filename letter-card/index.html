@@ -92,6 +92,20 @@ input.oth:not(:placeholder-shown){border-style:solid;background:var(--bg)}
 .tab:hover{border-color:var(--teal2)}
 .tab[aria-selected="true"]{background:var(--sel);color:var(--sel-fg);border-color:var(--sel)}
 @media (max-width:640px){.tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.tab{white-space:normal;text-align:left;line-height:1.2}}
+.tab.sug::after{content:" \2605";color:var(--teal2)}
+.tab.sug[aria-selected="true"]::after{color:inherit}
+.sugs{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:-6px 0 16px;font-size:.9rem;color:var(--muted)}
+.sugbtn{font:inherit;font-size:.88rem;border:1px dashed var(--teal2);background:transparent;color:var(--fg);border-radius:999px;padding:5px 11px;cursor:pointer;min-height:34px}
+.sugbtn:hover{border-style:solid}
+.sugbtn small{color:var(--muted)}
+.tpl{display:flex;flex-direction:column;gap:6px}
+.tpi{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.tpi .tpt{min-width:0;overflow-wrap:anywhere}
+.tpi .chips{flex-wrap:nowrap;align-items:center}
+.tpi .chip{padding:5px 9px;font-size:.85rem}
+@media (max-width:560px){.tpi{grid-template-columns:minmax(0,1fr)}}
+.tpadd{display:flex;gap:6px;margin-top:6px}
+.tpadd input{flex:1;min-width:0}
 
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--note-hi);border:1px solid var(--teal2);border-radius:10px;padding:10px 14px;margin-bottom:16px}
 .banner .btxt{flex:1;min-width:200px}
@@ -213,6 +227,7 @@ section.card h2{font-family:var(--display);font-size:1.1rem;margin:0;color:var(-
   </div>
 
   <nav class="tabs" id="tabs" role="tablist" aria-label="Letter type"></nav>
+  <div class="sugs" id="sugs" role="region" aria-label="Suggested from this note" hidden></div>
 
   <div class="grid" id="panel" role="tabpanel">
     <div class="form">
@@ -652,9 +667,11 @@ const TYPES=[
  {id:'clinic',name:'Clinic letter to GDP',full:'Clinic letter to GDP'},
  {id:'discharge',name:'Discharge to GDP',full:'Discharge letter to GDP'},
  {id:'patient',name:'Patient letter',full:'Patient letter'},
+ {id:'tplan',name:'Treatment plan',full:'Treatment plan letter'},
+ {id:'postop',name:'Post-op instructions',full:'Post-operative instructions'},
  {id:'mdt',name:'MDT / case summary',full:'MDT case summary'}];
 const TNAME=Object.fromEntries(TYPES.map(t=>[t.id,t.full]));
-const TSHORT={referral:'referral letter',clinic:'clinic letter',discharge:'discharge letter',patient:'patient letter',mdt:'MDT summary'};
+const TSHORT={referral:'referral letter',clinic:'clinic letter',discharge:'discharge letter',patient:'patient letter',tplan:'treatment plan letter',postop:'post-op instructions',mdt:'MDT summary'};
 const DEPTS=['Restorative Dentistry','Oral Surgery','Oral and Maxillofacial Surgery','Oral Medicine','Orthodontics','Paediatric Dentistry','Periodontology','Prosthodontics','Endodontics','Special Care Dentistry','Dental Radiology','Head and neck oncology'];
 const MDTS=['Head and neck oncology MDT','Hypodontia MDT','Restorative MDT','Dental trauma MDT','Orthognathic MDT','Cleft lip and palate MDT'];
 const REASONS={referral:['Specialist restorative opinion','Endodontic management','Periodontal management','Prosthodontic rehabilitation','Implant assessment','Assessment for extraction','Orthodontic assessment','Oral medicine opinion on a soft tissue lesion','Suspected oral cancer','Dental assessment before radiotherapy','Hypodontia assessment','Management of dental trauma','Treatment under sedation or GA'],
@@ -665,17 +682,20 @@ const URG=['Routine','Soon','Urgent','Urgent suspected cancer (USC)'];
 const isUSC=u=>/^Urgent suspected/.test(u||'');
 const ACTS=['Please continue routine care','Please provide OHI and fluoride varnish','Please prescribe 5000 ppm fluoride toothpaste','Please arrange radiograph at next recall','Please provide supportive periodontal therapy','Please review soft tissues at each recall','Please provide the definitive restoration','Please re-refer if symptoms recur','No action needed – for your information'];
 const FU=['Review in 2 weeks','Review in 4 weeks','Review in 6–8 weeks','Review in 3 months','Review in 6 months','Review in 12 months','Added to treatment waiting list','Awaiting MDT discussion','Discharged back to GDP care'];
-const CCS={referral:['GDP','Patient','Consultant'],clinic:['Patient','Consultant','Referrer'],discharge:['Patient','Consultant','Referrer'],patient:['GDP','Consultant'],mdt:[]};
+const CCS={referral:['GDP','Patient','Consultant'],clinic:['Patient','Consultant','Referrer'],discharge:['Patient','Consultant','Referrer'],patient:['GDP','Consultant'],tplan:['GDP'],postop:[],mdt:[]};
 const TOGS={clin:[['expand','Expand abbreviations'],['teeth','Spell out tooth names']],
   patient:[['expand','Plain English (expand abbreviations and terms)'],['teeth','Name teeth in plain English'],['you','Write to the patient as “you”'],['tech','Leave out technical lines (LA, isolation, IR(ME)R)']]};
-const togList=T=>T==='patient'?TOGS.patient:TOGS.clin;
+const PTISH=new Set(['patient','tplan','postop']);
+const togList=T=>T==='postop'?TOGS.patient.slice(0,2):PTISH.has(T)?TOGS.patient:TOGS.clin;
 
 /* ---------- state: memory only, never saved ---------- */
 function blankP(){const b=(o)=>Object.assign({dept:'',deptTxt:'',reason:[],reasonTxt:'',q:[],qTxt:'',fu:'',fuTxt:'',cc:[],tog:{expand:false,teeth:false}},o);
   return {referral:b({cc:['GDP']}),clinic:b({cc:['Patient']}),discharge:b({cc:['Patient'],fu:'Discharged back to GDP care'}),
-    patient:b({cc:['GDP'],tog:{expand:true,teeth:true,you:true,tech:true}}),mdt:b({})}}
+    patient:b({cc:['GDP'],tog:{expand:true,teeth:true,you:true,tech:true}}),
+    tplan:b({cc:['GDP'],tog:{expand:true,teeth:true,you:true,tech:true},charge:'',opts:'',stage:{},skip:[],extra:[]}),
+    postop:b({tog:{expand:true,teeth:true},proc:[],extra:''}),mdt:b({})}}
 const st={type:'clinic',sections:[],meta:{},edited:false,dirty:false,F:{urg:'Routine',act:[],actTxt:''},P:blankP()};
-const defInc=(key,T)=>T==='patient'?!['mh','sh','dh','notes'].includes(key):T==='discharge'?key!=='review':true;
+const defInc=(key,T)=>T==='tplan'?['pc','dx','review'].includes(key):T==='postop'?false:T==='patient'?!['mh','sh','dh','notes'].includes(key):T==='discharge'?key!=='review':true;
 const isInc=(s,T)=>s.inc[T]!==undefined?s.inc[T]:defInc(s.key,T);
 const secName=s=>s.key==='custom'?(s.title||'Custom section'):SD[s.key];
 
@@ -690,7 +710,7 @@ const CLSINGLE={mh:'Medical history',sh:'Social history',dh:'Dental history',eo:
 const PTL={pc:'Why you came to see us',hpc:'Why you came to see us',mh:'Your medical history',sh:'Your medical history',dh:'Your dental history',eo:'What we found',io:'What we found',exam:'What we found',findings:'What we found',rad:'Your X-rays',dx:'What this means',tx:'What we did',advice:'Looking after your mouth',ohi:'Looking after your mouth',plan:'What happens next',review:'Your next appointment',notes:'Other information'};
 const TYPE_OVER={referral:{tx:'Treatment to date',plan:'Current plan'},clinic:{tx:'Treatment today'},discharge:{tx:'Treatment provided'},mdt:{tx:'Treatment to date',plan:'Proposed plan',rad:'Imaging and investigations',_exam:'Clinical findings'}};
 const PT_SUB={eo:'Outside the mouth',io:'Inside the mouth',findings:'Your teeth'};
-function lab(T,key){if(T==='patient'){const h=PTL[key];return [h,PT_SUB[key]||'',h]}
+function lab(T,key){if(PTISH.has(T)){const h=PTL[key];return [h,PT_SUB[key]||'',h]}
   const b=CLL[key],o=TYPE_OVER[T]||{};let head=o[key]||b[0];if(head==='Examination'&&o._exam)head=o._exam;
   return [head,b[1],o[key]||CLSINGLE[key]||head]}
 
@@ -726,7 +746,128 @@ function ccText(c){return c==='GDP'?'[GDP name & practice]':c==='Patient'?'Patie
 function listOrPara(items){return items.length>1?[{t:'ul',items}]:items.length?[{t:'p',text:items[0]}]:[]}
 function splitLines(t){return String(t||'').split('\n').map(x=>x.trim()).filter(Boolean)}
 
+/* ---------- treatment plan letter: the note's Plan items grouped into stages ---------- */
+const STAGES=[['urgent','Urgent care','First, to get you out of pain and stop problems getting worse:'],['essential','Essential treatment','Next, to restore your teeth and gums to health:'],['long','Longer term and maintenance','Then, to keep your mouth healthy over time:']];
+const STG_LAB={urgent:'Urgent',essential:'Essential',long:'Long term'};
+const ST_URG=/\b(urgent\w*|emergency|pain|abscess\w*|infect\w*|swelling|extirpat\w*|pulpectomy|dressing|temporar\w*|stabilis\w*|stabiliz\w*|incision|drain\w*|XLA|extract\w*|ext|unrestorable|hopeless|caries control)\b/i;
+const ST_LONG=/\b(recall|review\w*|maintenance|maintain|monitor\w*|long[- ]term|future|consider\w*|implants?|orthodontic\w*|ortho|bleach\w*|whiten\w*|veneers?|SPT|supportive|re-?assess\w*|check-?ups?)\b/i;
+function autoStage(t){return ST_URG.test(t)?'urgent':ST_LONG.test(t)?'long':'essential'}
+function planItems(){
+  const P=st.P.tplan,out=[],seen=new Set();
+  st.sections.filter(s=>s.key==='plan').forEach(s=>splitLines(s.text).forEach(l=>{
+    if(OPT_RE.test(l))return;
+    l.replace(BULLET_RE,'').replace(/^\d+[.)]\s*/,'').replace(/^(?:tx plan|treatment plan|plan)\s*:\s*/i,'')
+     .split(/\s*;\s*|,?\s+then\s+/i).forEach(x=>{x=x.trim().replace(/[.,]+$/,'');
+       if(!x||/:$/.test(x)||seen.has(x))return;seen.add(x);if(P.skip.includes(x))return;
+       out.push({text:x,stage:P.stage[x]||autoStage(x)})})}));
+  P.extra.forEach(e=>{if(seen.has(e.text))return;seen.add(e.text);out.push({text:e.text,stage:P.stage[e.text]||e.stage,extra:true})});
+  return out}
+const OPT_RE=/^(?:[–—•·*-]\s*)?(?:other\s+)?(?:options(?:\s+discussed)?|alternatives(?:\s+discussed)?)\s*:\s*(.+)$/i;
+function optsFromNote(){const out=[];st.sections.forEach(s=>splitLines(s.text).forEach(l=>{const m=OPT_RE.exec(l);if(m)out.push(m[1].trim())}));return out.join('\n')}
+const CHARGES=['No charge (NHS hospital treatment)','NHS charges apply: estimate given','Private: written estimate given'];
+const chargeText=c=>c===CHARGES[0]?'Your treatment here is provided by the NHS, and there is no charge for it.':c===CHARGES[1]?'NHS charges apply to this treatment. We have given you a written estimate; please ask if anything is unclear.':c===CHARGES[2]?'This treatment is private. We have given you a written estimate of the cost; please ask if anything is unclear.':'';
+function visitCtx(pt){const ad=parseShortDate(st.meta.date),when=`on ${ad?longDate(ad):longDate(new Date())}`,cl=(st.meta.clinic||'').trim();
+  const where=cl?`in the ${cl}${/clinic$/i.test(cl)?'':' clinic'} at ${hosp()}`:pt?`at the ${dept()} department, ${hosp()}`:`in the ${dept()} department at ${hosp()}`;return {where,when}}
+function contactLine(what){return SET.letterhead&&SET.contact.trim()?`please contact the department using the details at the top of this ${what}.`:'please contact the department on [department telephone number].'}
+function sigBlock(){return {t:'sig',signoff:SET.signoff.trim()||'Yours sincerely',lines:[me(),[SET.grade.trim(),SET.department.trim()].filter(Boolean).join(', '),SET.hospital.trim()].filter(Boolean)}}
+function buildTPlan(){
+  const T='tplan',P=st.P[T],tg=P.tog,seen=new Set();
+  const X=t=>xform(t,{patient:true,you:!!tg.you,tech:!!tg.tech,teeth:!!tg.teeth,expand:!!tg.expand},seen);
+  const {where,when}=visitCtx(true),B=[];
+  if(SET.letterhead)B.push({t:'lh'});
+  B.push({t:'top',left:['[Patient name]','[Address]'],right:[...(SET.letterhead?[['Date',longDate(new Date())]]:[]),['CHI','[CHI]']]});
+  B.push({t:'title',text:'Your treatment plan'});
+  B.push({t:'sal',text:'Dear [Patient name],'});
+  B.push({t:'p',text:`Thank you for coming to see us ${where} ${when}. This letter sets out the treatment we discussed and the order we plan to carry it out in.`});
+  if(st.sections.length)B.push(...bodyBlocks(st.sections.filter(s=>isInc(s,T)&&s.text.trim()&&s.key!=='plan'&&s.key!=='review'),T,X));
+  const items=planItems();
+  if(items.length)STAGES.forEach(([k,h,lead])=>{const its=items.filter(x=>x.stage===k);if(its.length)B.push({t:'h',text:h},{t:'p',text:lead,tight:true},{t:'ul',items:its.map(x=>X(x.text))})});
+  else B.push({t:'h',text:'Your treatment'},{t:'p',text:'[Parse a note with a Plan section, or add treatment items under Letter details.]',muted:true});
+  if(P.opts.trim())B.push({t:'h',text:'Other options we discussed'},...textToBlocks(X(P.opts.trim())));
+  const ch=chargeText(P.charge);if(ch)B.push({t:'h',text:'Cost'},{t:'p',text:ch});
+  const fs=[];if(P.fu)fs.push(fuSentence(P.fu,'patient'));if(P.fuTxt.trim())fs.push(X(P.fuTxt.trim()));
+  const rv=st.sections.find(s=>s.key==='review'&&isInc(s,T)&&s.text.trim()),rb=rv?textToBlocks(X(rv.text)):[];
+  if(fs.length||rb.length){B.push({t:'h',text:'Your next appointment'});if(fs.length)B.push({t:'p',text:fs.join(' ')});B.push(...rb)}
+  B.push({t:'p',text:'Please take your time to read this plan. If you have any questions, or would like to talk about other options, '+contactLine('letter')+' You can change your mind about any part of your treatment at any stage.'});
+  B.push(sigBlock());
+  const cc=P.cc.map(ccText);if(cc.length)B.push({t:'cc',items:cc});
+  return B}
+
+/* ---------- post-op instructions: fixed advice for each procedure, picked from the note ---------- */
+const SUT_LINE='Your stitches will either dissolve by themselves (usually within about two weeks) or be removed at your review appointment.';
+const PROCS=[
+ {id:'la',chip:'Local anaesthetic',head:'While you are numb',items:c=>['Your lip, cheek or tongue may stay numb for a few hours.','Avoid hot food and drinks until the feeling comes back, so you do not burn yourself.','Take care not to bite or chew your lip, cheek or tongue. Keep an eye on children until the numbness wears off.']},
+ {id:'ext',chip:'Extraction',title:'After your tooth extraction',head:'After an extraction',pain:1,items:c=>['Bite firmly on the gauze pad for 20 minutes to help a blood clot form.','For the rest of today, do not rinse your mouth, spit or drink through a straw, so the clot can settle.','Avoid smoking, vaping and alcohol for at least 24 hours, and longer if you can: smoking raises the risk of a painful dry socket.','Avoid hot drinks and strenuous exercise for the rest of today.','From tomorrow, rinse gently with warm salty water (half a teaspoon of salt in a glass of warm water) after meals, for about a week.','Keep brushing your other teeth as normal, taking care around the socket.','If it bleeds, roll up a clean damp gauze or handkerchief, place it over the socket and bite firmly for 20 minutes without checking. Repeat once if needed.','Some pain and swelling is normal for a few days. Pain that gets worse two to four days later can be a dry socket: please contact us.',...(c.sut?[SUT_LINE]:[])]},
+ {id:'rct',chip:'Root canal treatment',title:'After your root canal treatment',head:'After root canal treatment',pain:1,items:c=>['The tooth may be tender to bite on for a few days. This usually settles by itself.','If the tooth has a temporary filling, avoid chewing hard or sticky food on it until the permanent restoration is placed.','If the temporary filling comes out, please contact us.','The tooth is weaker until it is permanently restored (often with a crown or onlay), so please come back to finish the treatment.']},
+ {id:'prep',chip:'Crown, onlay or bridge preparation',title:'Looking after your temporary',head:'With a temporary crown, onlay or bridge',pain:1,items:c=>['You have a temporary while the laboratory makes your final restoration.','Avoid sticky food (such as toffee or chewing gum) and very hard food on that side.','When you floss, slide the floss out sideways instead of pulling it back up, so the temporary is not dislodged.','The tooth may be sensitive to hot and cold for a few days.','If the temporary comes off, keep it and contact us so we can re-cement it. Do not leave the tooth uncovered.']},
+ {id:'fill',chip:'Filling',title:'After your filling',head:'After a filling',pain:1,items:c=>['You can eat and drink once the numbness has worn off.','Some sensitivity to hot, cold or sweet things is common for a few days, and occasionally lasts a few weeks.','If your bite feels high or uneven once the numbness has gone, contact us so we can adjust it.']},
+ {id:'perio',chip:'Gum (periodontal) treatment',title:'After your gum treatment',head:'After deep cleaning of your gums',pain:1,items:c=>['Your gums may be sore, and your teeth sensitive to cold, for a few days.','Some bleeding when you brush is normal at first and should reduce as your gums heal.','Keep brushing twice a day and clean between your teeth every day, using the interdental brushes we showed you.','As your gums heal they may shrink back a little, so teeth can look longer or small gaps can appear between them.']},
+ {id:'splint',chip:'Trauma splint',title:'Looking after your splint',head:'With a splint on injured teeth',pain:1,items:c=>[`The splint holds the injured teeth still while they heal. It is due to come off around ${c.splintDate||'[splint removal date]'}.`,'Eat soft food and avoid biting into food with the injured teeth.','Brush the splint and your teeth gently with a soft toothbrush after every meal.','If we gave you a chlorhexidine mouthwash, use it twice a day as instructed.','Avoid contact sports until we tell you it is safe.','Contact us if the splint becomes loose or breaks, or if an injured tooth darkens or a gum boil appears.']},
+ {id:'denture',chip:'New denture',title:'Getting used to your new denture',head:'With a new denture',items:c=>['It takes a few weeks to get used to a new denture. At first your mouth may feel full and you may make more saliva.','Start with soft food cut into small pieces, and chew on both sides at the same time.','Sore spots are common. If one develops, contact us for an adjustment. If you need to leave the denture out, try to wear it for a few hours before your appointment so we can see where it rubs.','Take the denture out at night. Clean it over a bowl of water or a folded towel, in case you drop it, and store it in water or a denture cleaning solution.','Do not use hot water or bleach to clean it.']},
+ {id:'implant',chip:'Implant surgery',title:'After your implant surgery',head:'After implant surgery',pain:1,items:c=>['If there is bleeding, bite gently on a damp gauze pad for 20 minutes.','For the rest of today, do not rinse your mouth, spit or drink through a straw.','From tomorrow, rinse gently with warm salty water after meals for about a week.','Do not smoke: smoking raises the risk of the implant failing.','Eat soft food and avoid chewing on the implant area until we tell you it is safe.','Swelling and bruising are common and are often worst two to three days after surgery.','If you have a temporary denture, wear it only as we advised.',...(c.sut?[SUT_LINE]:[])]},
+ {id:'biopsy',chip:'Biopsy',title:'After your biopsy',head:'After a biopsy',pain:1,items:c=>['The area may be sore for a few days.','For the rest of today, avoid hot drinks and do not rinse your mouth hard.','From tomorrow, rinse gently with warm salty water after meals until it has healed.','We will give you the results at your next appointment or by letter.',...(c.sut?[SUT_LINE]:[])]},
+ {id:'osplint',chip:'Bite (occlusal) splint',title:'Looking after your bite splint',head:'With your bite splint',items:c=>['Wear the splint as we advised, usually at night.','Clean it with a toothbrush and cool water each time you take it out. Do not use hot water, which can warp it.','Keep it in its case when you are not wearing it, away from pets.','Your bite may feel slightly different when you first take it out in the morning. This usually settles within an hour; if it does not, contact us.','Bring the splint to every appointment.']},
+ {id:'fv',chip:'Fluoride varnish',title:'After your fluoride varnish',head:'After fluoride varnish',items:c=>['Your teeth may feel slightly sticky or look a little yellow until the varnish wears off.','Avoid hard or crunchy food and hot drinks for at least four hours.','Do not brush your teeth for at least four hours, and ideally not until the next morning.']},
+ {id:'sut',chip:'Stitches',items:c=>[]}];
+const PROC=Object.fromEntries(PROCS.map(p=>[p.id,p]));
+const DET=[
+ ['ext',/\b(XLA|extract(?:ed|ion|ions)?|exodontia|surgical removal|SR\s+(?:UR|UL|LR|LL)[1-8])\b/i],
+ ['rct',/\b(RCT|root canal|pulpectomy|extirpat\w*|obturat\w*|access cavity|calcium hydroxide|Ledermix|Odontopaste)\b|Ca\(OH\)/i],
+ ['prep',/\b(crown|onlay|inlay|bridge|veneer)s?\b[^.\n]{0,40}\b(prep|prepared|preparation)\b|\b(prep|prepared|preparation)\b[^.\n]{0,40}\b(crown|onlay|inlay|bridge|veneer)s?\b|\b(temporary|provisional|temp)\s+(crown|onlay|bridge)|\bProtemp\b/i],
+ ['fill',/\b(composite|amalgam|GIC|glass ionomer|RMGIC|compomer|filling|restored)\b/i],
+ ['perio',/\b(RSD|root surface debridement|PMPR|subgingival|NSPT|scal(?:e|ed|ing)|debridement|deep clean\w*)\b/i],
+ ['osplint',/\b(occlusal|stabili[sz]ation|michigan|bite|night)\s+splint|bruxism appliance/i],
+ ['denture',t=>/\bdentures?\b/i.test(t)&&/\b(fit|fitted|issue|issued|insert|inserted|delivered)\b/i.test(t)],
+ ['implant',t=>/\bimplants?\b/i.test(t)&&/\b(plac(?:ed|ement)|surgery|inserted|stage 1|first stage)\b/i.test(t)],
+ ['biopsy',/\bbiops\w*/i],
+ ['fv',/fluoride varnish|duraphat|\bFV\b/i],
+ ['sut',/\b(sutur\w*|stitch\w*|vicryl)\b/i]];
+function procText(){const tx=st.sections.filter(s=>s.key==='tx');return (tx.length?tx:st.sections.filter(s=>!['plan','review','notes','pc','hpc','mh','sh','dh','dx'].includes(s.key))).map(s=>s.text).join('\n')}
+function detectProcs(){const t=procText(),ids=[];if(!t.trim())return ids;
+  DET.forEach(([id,re])=>{if(typeof re==='function'?re(t):re.test(t))ids.push(id)});
+  if(/\bsplint/i.test(t)&&/(luxation|avulsion|avulsed|trauma|fracture|flexible|wire|TTS)/i.test(t)&&!ids.includes('osplint'))ids.push('splint');
+  if(/\bLA\b|local an(?:a)?esthe\w*|lidocaine|lignocaine|articaine|mepivacaine|prilocaine|\bIANB\b|\bIDB\b|infiltration|Septanest|Lignospan|Citanest|Scandonest/i.test(t)||ids.some(i=>['ext','implant','biopsy'].includes(i)))ids.unshift('la');
+  return PROCS.map(p=>p.id).filter(i=>ids.includes(i))}
+function splintDate(){const m=/remove at[^\n–-]*[–-]\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})/.exec(st.sections.map(s=>s.text).join('\n'));return m?m[1]:''}
+function buildPostop(){
+  const T='postop',P=st.P[T],tg=P.tog,seen=new Set();
+  const X=t=>xform(t,{patient:true,you:true,tech:true,teeth:!!tg.teeth,expand:!!tg.expand},seen);
+  const c={sut:P.proc.includes('sut'),splintDate:splintDate()};
+  const sel=PROCS.filter(p=>P.proc.includes(p.id)&&p.id!=='sut'),main=sel.filter(p=>p.id!=='la');
+  const B=[];if(SET.letterhead)B.push({t:'lh'});
+  B.push({t:'top',left:['[Patient name]'],right:[['Date',longDate(new Date())]]});
+  B.push({t:'title',text:main.length===1?main[0].title:'After your treatment today'});
+  const tx=st.sections.filter(s=>s.key==='tx').map(s=>s.text).join('\n'),teeth=[];(tx.match(TOOTH_RE)||[]).forEach(x=>{if(!teeth.includes(x))teeth.push(x)});
+  if(teeth.length)B.push({t:'p',lead:'Teeth treated today:',text:X(teeth.join(', '))});
+  if(!sel.length)B.push({t:'p',text:'[Choose the treatment carried out under Letter details.]',muted:true});
+  sel.forEach(p=>B.push({t:'h',text:p.head},{t:'ul',items:p.items(c)}));
+  if(sel.some(p=>p.pain))B.push({t:'h',text:'Pain relief'},{t:'p',text:'Some discomfort is normal. If you need pain relief, take paracetamol or ibuprofen as directed on the packet, if they are suitable for you. Ask a pharmacist if you are not sure.'});
+  if(P.extra.trim())B.push({t:'h',text:'Extra advice for you'},...textToBlocks(X(P.extra.trim())));
+  const bleed=sel.some(p=>['ext','implant','biopsy'].includes(p.id));
+  B.push({t:'h',text:'Contact us if you have'},{t:'ul',items:[...(bleed?['bleeding that does not stop after biting on a damp gauze for 20 minutes, twice']:[]),'swelling that is getting worse after the first two to three days','pain that is getting worse rather than better','a high temperature, or you feel generally unwell','anything else that worries you']});
+  B.push({t:'p',text:cap(contactLine('leaflet'))+' Out of hours, call 111.'});
+  B.push({t:'p',text:'If you have difficulty breathing or swallowing, or swelling spreading towards your eye or neck, call 999 or go to A&E straight away.'});
+  B.push({t:'p',lead:'Your clinician today:',text:[me(),SET.grade.trim(),dept()].filter(Boolean).join(', ')});
+  return B}
+
+/* ---------- which documents this note calls for ("follow-up opens the matching letter") ---------- */
+const DEPT_ALIAS=[[/\bomfs|maxillofacial/i,'Oral and Maxillofacial Surgery'],[/\boral surg\w*|\bOS\b/i,'Oral Surgery'],[/\boral med\w*|\bOM\b/i,'Oral Medicine'],[/\bortho\w*/i,'Orthodontics'],[/\bpaed\w*|\bped\w*/i,'Paediatric Dentistry'],[/\bperio\w*/i,'Periodontology'],[/\bpros\w*/i,'Prosthodontics'],[/\bendo\w*/i,'Endodontics'],[/\bspecial care|\bSCD\b/i,'Special Care Dentistry'],[/\bradiolog\w*/i,'Dental Radiology'],[/\brestorative/i,'Restorative Dentistry'],[/head and neck|\bH&N\b|oncolog\w*/i,'Head and neck oncology']];
+function suggestTypes(){
+  const pl=st.sections.filter(s=>['plan','review','notes','custom'].includes(s.key)).map(s=>s.text).join('\n'),out=[];let m;
+  if((m=/(?<![-\w])(?:refer|referral|referred)\b(?!\s+(?:back|by))(.{0,48})/i.exec(pl))){const d=DEPT_ALIAS.find(([re])=>re.test(m[1]));out.push({t:'referral',why:'plan mentions a referral',dept:d?d[1]:''})}
+  if(/\bdischarg\w*|\b(?:back|return\w*) to (?:the |your )?GDP\b|\bGDP care\b/i.test(pl))out.push({t:'discharge',why:'plan mentions discharge'});
+  if(/\bMDT\b|multidisciplinary/i.test(pl))out.push({t:'mdt',why:'plan mentions the MDT'});
+  const n=planItems().length;if(n>=2)out.push({t:'tplan',why:n+' planned treatments'});
+  const pr=detectProcs().filter(i=>i!=='la'&&i!=='sut');if(pr.length)out.push({t:'postop',why:pr.map(i=>PROC[i].chip.toLowerCase()).join(', ')});
+  return out}
+function renderSugs(){const el=$('sugs');if(!el)return;const all=st.sug||[];
+  document.querySelectorAll('#tabs .tab').forEach(b=>b.classList.toggle('sug',all.some(x=>x.t===b.dataset.type)));
+  const s=all.filter(x=>x.t!==st.type);
+  if(!s.length){el.hidden=true;el.innerHTML='';return}
+  el.innerHTML='<span>Also from this note:</span>'+s.map(x=>`<button type="button" class="sugbtn" data-type="${x.t}">${esc(TNAME[x.t])} <small>· ${esc(x.why)}</small></button>`).join('');el.hidden=false}
+
 function buildLetter(){
+  if(st.type==='tplan')return buildTPlan();if(st.type==='postop')return buildPostop();
   const T=st.type,P=st.P[T],F=st.F,pt=T==='patient',tg=P.tog,seen=new Set();
   const X=t=>xform(t,{patient:pt,you:pt&&tg.you,tech:pt&&tg.tech,teeth:!!tg.teeth,expand:!!tg.expand},seen);
   const today=longDate(new Date());
@@ -862,8 +1003,9 @@ function renderTabs(){
   $('tabs').innerHTML=TYPES.map(t=>`<button type="button" role="tab" class="tab" id="tab-${t.id}" data-type="${t.id}" aria-selected="${st.type===t.id}" aria-controls="panel" tabindex="${st.type===t.id?0:-1}">${esc(t.name)}</button>`).join('');
   $('panel').setAttribute('aria-labelledby','tab-'+st.type);
 }
-function setType(T,focus){if(!TNAME[T])return;st.type=T;renderTabs();renderDetails();renderSections();schedule();if(focus){const b=$('tab-'+T);if(b)b.focus()}}
+function setType(T,focus){if(!TNAME[T])return;st.type=T;renderTabs();renderSugs();renderDetails();renderSections();schedule();if(focus){const b=$('tab-'+T);if(b)b.focus()}}
 $('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-type]');if(b)setType(b.dataset.type)});
+$('sugs').addEventListener('click',e=>{const b=e.target.closest('[data-type]');if(b)setType(b.dataset.type,true)});
 $('tabs').addEventListener('keydown',e=>{const i=TYPES.findIndex(t=>t.id===st.type);let j=null;
   if(e.key==='ArrowRight'||e.key==='ArrowDown')j=(i+1)%TYPES.length;else if(e.key==='ArrowLeft'||e.key==='ArrowUp')j=(i-1+TYPES.length)%TYPES.length;else if(e.key==='Home')j=0;else if(e.key==='End')j=TYPES.length-1;
   if(j!==null){e.preventDefault();setType(TYPES[j].id,true)}});
@@ -891,6 +1033,17 @@ function renderDetails(){
     h+=fld('Follow-up','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Other follow-up arrangements',aria:'Follow-up: other arrangements'});
   }else if(T==='patient'){
     h+=fld('Next appointment','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Anything else about next steps, in plain English',aria:'Next appointment: other details'});
+  }else if(T==='tplan'){
+    const items=planItems();
+    h+=`<div class="field"><span class="lbl">Treatment in stages <small>(from the note’s Plan: change any stage)</small></span><div class="tpl">${items.length?items.map(x=>`<div class="tpi"><span class="tpt">${esc(x.text)}</span><div class="chips" role="group" aria-label="Stage for ${esc(x.text)}">${STAGES.map(([k])=>`<button type="button" class="chip" data-tp="stage" data-k="${esc(x.text)}" data-v="${k}" aria-pressed="${x.stage===k}">${STG_LAB[k]}</button>`).join('')}<button type="button" class="ibtn del" data-tp="del" data-k="${esc(x.text)}" aria-label="Remove ${esc(x.text)}">✕</button></div></div>`).join(''):'<p class="hint">No Plan section in the note yet. Add treatment items below.</p>'}</div>
+      <div class="tpadd"><input type="text" id="tpAdd" placeholder="Add a treatment item, e.g. Crown UL6" aria-label="Add a treatment item"><button type="button" class="btn ghost sm" data-tp="add">Add</button></div></div>`;
+    h+=`<div class="field"><label class="lbl" for="tpOpts">Other options discussed</label><textarea id="tpOpts" data-ft="opts" rows="2" placeholder="e.g. Bridge or denture instead of an implant; leaving the gap">${esc(P.opts)}</textarea></div>`;
+    h+=fld('Cost','charge',CHARGES,P.charge,false);
+    h+=fld('Next appointment','fu',FU,P.fu,false,{txt:'fuTxt',val:P.fuTxt,ph:'Anything else about next steps, in plain English',aria:'Next appointment: other details'});
+  }else if(T==='postop'){
+    h+=fld('Treatment carried out <small>(picked from the note)</small>','proc',PROCS.map(p=>p.id),P.proc,true,{labels:PROCS.map(p=>p.chip)});
+    h+='<p class="hint">Standard advice for each treatment. Check it matches your department’s own leaflets before you give it out.</p>';
+    h+=`<div class="field"><label class="lbl" for="poExtra">Extra advice for this patient</label><textarea id="poExtra" data-ft="extra" rows="2" placeholder="e.g. Finish the course of antibiotics">${esc(P.extra)}</textarea></div>`;
   }else{
     h+=fld('MDT','dept',MDTS,P.dept,false,{txt:'deptTxt',val:P.deptTxt,ph:'Other MDT',aria:'MDT: other'});
     h+=fld('Reason for discussion','reason',[...REASONS.mdt,...P.reason.filter(r=>!REASONS.mdt.includes(r))],P.reason,true,{txt:'reasonTxt',val:P.reasonTxt,ph:'Add detail',aria:'Reason for discussion: detail'});
@@ -909,6 +1062,14 @@ $('details').addEventListener('click',e=>{const b=e.target.closest('[data-f]');i
     else{if(o[k]===v&&f!=='urg')o[k]='';else o[k]=v;b.parentNode.querySelectorAll('.chip').forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.v===o[k])))}
     if(f==='urg'){const hnt=$('uscHint');if(hnt)hnt.hidden=!isUSC(st.F.urg)}}
   st.dirty=true;schedule()});
+$('details').addEventListener('click',e=>{const b=e.target.closest('[data-tp]');if(!b)return;const P=st.P.tplan,k=b.dataset.k,a=b.dataset.tp;
+  if(a==='stage'){P.stage[k]=b.dataset.v;const ex=P.extra.find(x=>x.text===k);if(ex)ex.stage=b.dataset.v}
+  else if(a==='del'){if(P.extra.some(x=>x.text===k))P.extra=P.extra.filter(x=>x.text!==k);else if(!P.skip.includes(k))P.skip.push(k);toast('Removed '+k,{label:'Undo',fn:()=>{P.skip=P.skip.filter(x=>x!==k);renderDetails();schedule()}})}
+  else if(a==='add'){if(!addTP())return}
+  st.dirty=true;renderDetails();schedule();
+  const f=a==='add'?$('tpAdd'):a==='stage'?document.querySelector(`#details [data-tp="stage"][data-v="${b.dataset.v}"][data-k="${CSS.escape(k)}"]`):$('tpAdd');if(f)f.focus()});
+$('details').addEventListener('keydown',e=>{if(e.target.id==='tpAdd'&&e.key==='Enter'){e.preventDefault();if(addTP()){st.dirty=true;renderDetails();schedule();const i=$('tpAdd');if(i)i.focus()}}});
+function addTP(){const i=$('tpAdd'),v=(i&&i.value||'').trim().replace(/[.,]+$/,'');if(!v)return false;const P=st.P.tplan;P.skip=P.skip.filter(x=>x!==v);if(!planItems().some(x=>x.text===v))P.extra.push({text:v,stage:autoStage(v)});return true}
 $('details').addEventListener('input',e=>{const t=e.target;if(!t.dataset.ft)return;const [o,k]=fieldRef(t.dataset.ft);o[k]=t.value;st.dirty=true;schedule()});
 
 /* sections card */
@@ -916,7 +1077,7 @@ function addOptions(){$('addSec').innerHTML='<option value="">Choose a heading�
 function autosize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight+2,560)+'px'}
 function renderSections(){
   const T=st.type,L=$('secList');
-  $('secHint').textContent=st.sections.length?`Include toggles apply to the ${TSHORT[T]}`:'';
+  $('secHint').textContent=!st.sections.length?'':T==='postop'?'Post-op instructions use standard advice; sections are only used to pick the treatment':T==='tplan'?'The Plan section becomes the staged treatment list':`Include toggles apply to the ${TSHORT[T]}`;
   if(!st.sections.length){L.innerHTML='<p class="empty">Paste a note and press <b>Parse</b>, or use <b>Load example</b>. Each heading found (PC, HPC, MH, E/O, I/O, Dx, Tx, Plan…) becomes an editable section here; anything without a heading goes into Notes.</p>';return}
   L.innerHTML=st.sections.map((s,i)=>{const on=isInc(s,T),nm=secName(s);
     return `<div class="sec${on?'':' off'}" data-id="${s.id}">
@@ -936,7 +1097,7 @@ const secById=id=>st.sections.find(s=>s.id===id);
 $('secList').addEventListener('input',e=>{const box=e.target.closest('.sec');if(!box)return;const s=secById(box.dataset.id);if(!s)return;
   if(e.target.classList.contains('sec-text')){s.text=e.target.value;autosize(e.target)}
   else if(e.target.classList.contains('sec-title'))s.title=e.target.value;
-  st.dirty=true;refreshActs();scheduleIds();schedule()});
+  st.dirty=true;refreshActs();if(st.type==='tplan'||st.type==='postop'){if(st.type==='postop')st.P.postop.proc=detectProcs();renderDetails()}scheduleIds();schedule()});
 $('secList').addEventListener('change',e=>{if(!e.target.classList.contains('sec-type'))return;const box=e.target.closest('.sec'),s=secById(box.dataset.id);if(!s)return;
   const v=e.target.value;if(v==='custom'){s.title=s.title||(s.key==='custom'?'':SD[s.key]);s.key='custom'}else{s.key=v;s.title=''}
   renderSections();const nb=document.querySelector(`.sec[data-id="${s.id}"] ${v==='custom'?'.sec-title':'.sec-type'}`);if(nb)nb.focus();schedule()});
@@ -971,10 +1132,16 @@ function renderMeta(){const m=st.meta,el=$('metaLine');
   el.innerHTML=bits.join(' · ');el.hidden=false}
 function doParse(source){
   const raw=$('paste').value;if(!raw.trim()){toast('Paste a note first');$('paste').focus();return}
-  const prev={sections:st.sections,meta:st.meta,edited:st.edited};
+  const prev={sections:st.sections,meta:st.meta,edited:st.edited,type:st.type,sug:st.sug};
   const r=parseNote(raw);st.sections=r.sections;st.meta=r.meta;if(source)st.meta.source=source;st.edited=false;st.dirty=true;actKey='';
-  renderSections();renderDetails();renderMeta();checkIds();schedule();
-  toast(`Parsed into ${r.sections.length} section${r.sections.length===1?'':'s'}`,prev.sections.length?{label:'Undo',fn:()=>{st.sections=prev.sections;st.meta=prev.meta;actKey='';renderSections();renderDetails();renderMeta();schedule()}}:null);
+  const TP=st.P.tplan;TP.stage={};TP.skip=[];TP.extra=[];TP.opts=optsFromNote();st.P.postop.proc=detectProcs();
+  st.sug=suggestTypes();const pick=st.sug.find(x=>x.t==='referral'||x.t==='discharge'||x.t==='mdt');
+  if(pick){if(pick.t==='referral'&&pick.dept&&!st.P.referral.dept)st.P.referral.dept=pick.dept;st.type=pick.t}
+  else if(st.autoType&&st.type===st.autoType)st.type='clinic';
+  st.autoType=pick?pick.t:null;
+  renderTabs();renderSugs();renderSections();renderDetails();renderMeta();checkIds();schedule();
+  const undo={label:'Undo',fn:()=>{st.sections=prev.sections;st.meta=prev.meta;st.type=prev.type;st.sug=prev.sug;actKey='';renderTabs();renderSugs();renderSections();renderDetails();renderMeta();schedule()}};
+  toast(`Parsed into ${r.sections.length} section${r.sections.length===1?'':'s'}`+(pick?` · opened the ${TSHORT[pick.t]} (${pick.why})`:''),(prev.sections.length||pick)?undo:null);
 }
 $('parseBtn').addEventListener('click',()=>doParse());
 $('paste').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();doParse()}});
@@ -1029,7 +1196,7 @@ A Example, DCT3
 Supervisor: Dr B Example`}
 $('exampleBtn').addEventListener('click',()=>{$('paste').value=exampleNote();doParse('example note')});
 $('clearBtn').addEventListener('click',()=>{
-  $('paste').value='';st.sections=[];st.meta={};st.edited=false;st.dirty=false;actKey='';
+  $('paste').value='';st.sections=[];st.meta={};st.edited=false;st.dirty=false;actKey='';st.sug=[];renderSugs();st.P.postop.proc=[];st.P.postop.extra='';st.P.tplan.opts='';
   st.F.actTxt='';st.F.act=[];Object.values(st.P).forEach(P=>{P.reasonTxt='';P.qTxt='';P.fuTxt='';P.deptTxt=''});
   renderSections();renderDetails();renderMeta();checkIds();schedule();toast('Cleared. Nothing was saved.');$('paste').focus()});
 
