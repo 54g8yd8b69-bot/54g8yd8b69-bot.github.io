@@ -403,6 +403,20 @@ const D=()=>S.dent==='perm'?PERM:PRIM;
 const val=(x,t)=>typeof x==='function'?x(t):x;
 
 /* ---------- planning ---------- */
+/* One splint per arch: it stays on for the longest time any splinted tooth in that arch needs
+   (taking the splint off the less injured teeth early is not practical). */
+function ownSplint(code){
+  const t=S.t[code];if(!t)return null;const Dx=D(),H=t.hard&&Dx[t.hard],L=t.lux&&Dx[t.lux];if(!H&&!L)return null;
+  const sp=[H,L].filter(x=>x&&x.splint),auto=sp.some(x=>!!val(x.splintDef,t)),on=sp.length>0&&(t.splint===null?auto:t.splint);
+  const need=sp.map(x=>({sd:val(x.splint,t),why:x.n})).sort((a,b)=>durDays(b.sd)-durDays(a.sd))[0];
+  return {on,auto,canSplint:sp.length>0,sd:on?need.sd:null,why:on?need.why:''}}
+function archSplint(arch){let best=null;
+  S.teeth.filter(c=>c[0]===arch).forEach(c=>{const o=ownSplint(c);if(o&&o.on&&(!best||durDays(o.sd)>durDays(best.sd)))best={sd:o.sd,code:c,why:o.why}});
+  return best}
+const ARCH_NAME={U:'upper',L:'lower'};
+// mature replanted avulsion and mature intrusion: IADT indicates extirpation/RCT by 2 weeks, so sensibility testing adds nothing
+const noSens=t=>S.dent==='perm'&&t.apex==='mature'&&((t.lux==='avul'&&t.opts.scen!=='Not replanted')||t.lux==='intr');
+const noSensWhy=t=>t.lux==='avul'?'mature avulsed tooth: extirpation within 2 weeks of replantation':'mature intruded tooth: RCT from 2 weeks';
 function toothPlan(code){
   const t=S.t[code];if(!t)return null;
   const Dx=D(), H=t.hard&&Dx[t.hard], L=t.lux&&Dx[t.lux];
@@ -411,11 +425,8 @@ function toothPlan(code){
   let keys;
   if(L){keys=[...val(L.fu,t)];if(H&&(t.hard==='root'||t.hard==='alv'))keys=uniq([...keys,...val(H.fu,t)])}
   else keys=[...val(H.fu,t)];
-  const splintables=[H,L].filter(x=>x&&x.splint);
-  const auto=splintables.some(x=>!!val(x.splintDef,t));
-  const on=splintables.length>0&&(t.splint===null?auto:t.splint);
-  let sd=null;
-  if(on){sd=splintables.map(x=>val(x.splint,t)).sort((a,b)=>durDays(b)-durDays(a))[0]}
+  const own=ownSplint(code),on=own.on,auto=own.auto;
+  const arch=on?archSplint(code[0]):null,sd=arch?arch.sd:null;
   const base=parseISO(S.date);
   const pts=[];let age6=false;
   keys.forEach(k=>{
@@ -423,11 +434,11 @@ function toothPlan(code){
     let rad=perm, kk=k;
     if(!perm){rad=/R$/.test(k);kk=k.replace(/R$/,'')}
     const p=PT[kk];if(!p)return;
-    pts.push({code,key:kk,u:p.u,n:p.n,lab:p.lab,lo:p.lo,hi:p.hi,tol:p.tol,rad,sr:false});
+    pts.push({code,key:kk,u:p.u,n:p.n,lab:p.lab,lo:p.lo,hi:p.hi,tol:p.tol,rad,sr:false,nos:noSens(t)});
   });
   if(sd){
     let hit=pts.find(p=>p.u===sd.u&&p.n===sd.n&&p.key!=='w68');
-    if(!hit){hit={code,key:'sr',u:sd.u,n:sd.n,lab:durLab(sd),tol:3,rad:perm,sr:true};pts.push(hit)}
+    if(!hit){hit={code,key:'sr',u:sd.u,n:sd.n,lab:durLab(sd),tol:3,rad:perm,sr:true,nos:noSens(t)};pts.push(hit)}
     hit.sr=true;
   }
   if(base)pts.forEach(p=>{
@@ -464,7 +475,7 @@ function toothPlan(code){
   const info=[...(H?H.info(t):[]),...(L?L.info(t):[])];
   const succ=!perm&&((H&&H.succ)||(L&&L.succ));
   const concern=!perm&&((H&&H.concern)||(L&&L.concern));
-  return{code,t,H,L,pts,sd,on,auto,canSplint:splintables.length>0,ms,info,age6,succ,concern};
+  return{code,t,H,L,pts,sd,on,auto,canSplint:own.canSplint,ownSd:own.sd,setBy:arch&&arch.code!==code&&durDays(arch.sd)>durDays(own.sd)?arch:null,ms,info,age6,succ,concern};
 }
 function allPlans(){return S.teeth.map(toothPlan).filter(Boolean)}
 function groupVisits(plans){
@@ -477,7 +488,9 @@ function groupVisits(plans){
     }else groups.push({items:[it],codes:new Set([it.code]),A:it.a,B:it.b});
   });
   const base=parseISO(S.date);
+  const ord=ARCH_ORDER(S.dent),all=[...ord.U,...ord.L];
   groups.forEach(g=>{
+    g.items.sort((a,b)=>all.indexOf(a.code)-all.indexOf(b.code));
     const sr=g.items.find(i=>i.sr);
     let tgt=sr?sr.t:Math.max(...g.items.map(i=>i.t));
     tgt=Math.min(Math.max(tgt,g.A),g.B);
@@ -502,11 +515,23 @@ function groupVisits(plans){
 function taskText(i){
   const perm=S.dent==='perm';
   const bits=[];
-  if(i.sr)bits.push('remove splint');
   bits.push(i.rad?'clinical + radiograph':'clinical');
-  if(perm)bits.push('sensibility');
+  if(perm&&!i.nos)bits.push('sensibility');
   return i.code+' '+bits.join(', ');
 }
+function spanMap(plans){const out={},on=plans.filter(p=>p.on).map(p=>p.code);if(!on.length)return out;
+  const ord=ARCH_ORDER(S.dent),inj=plans.map(p=>p.code);
+  ['U','L'].forEach(a=>{const idx=on.map(c=>ord[a].indexOf(c)).filter(i=>i>=0);if(!idx.length)return;
+    let lo=Math.max(0,Math.min(...idx)-1),hi=Math.min(ord[a].length-1,Math.max(...idx)+1);
+    while(lo>0&&inj.includes(ord[a][lo]))lo--;while(hi<ord[a].length-1&&inj.includes(ord[a][hi]))hi++;out[a]=ord[a][lo]+'–'+ord[a][hi]});
+  const ks=Object.keys(out);if(S.spl.span&&ks.length===1)out[ks[0]]=S.spl.span;return out}
+function splintName(a,plans){const sp=spanMap(plans),both=Object.keys(sp).length>1;return `${both?ARCH_NAME[a]+' ':''}splint${sp[a]?' ('+sp[a]+')':''}`}
+function splintRemovals(plans){const placed=parseISO(S.spl.placed||S.date),on=plans.filter(p=>p.on);
+  return uniq(on.map(p=>p.code[0])).map(a=>{const b=archSplint(a);if(!b)return null;
+    return {arch:a,name:splintName(a,plans),sd:b.sd,code:b.code,why:b.why,teeth:on.filter(p=>p.code[0]===a).map(p=>p.code),date:placed?(b.sd.u==='w'?addDays(placed,b.sd.n*7):addMonths(placed,b.sd.n)):null}}).filter(Boolean)}
+function srLines(g){const plans=allPlans();return uniq(g.items.filter(i=>i.sr).map(i=>i.code[0])).map(a=>'Remove '+splintName(a,plans))}
+function visitTasks(g){return [...srLines(g),...g.items.map(taskText)]}
+function msGroups(ms){const out=[];ms.forEach(m=>{const k=iso(m.date)+'|'+m.txt,e=out.find(x=>x.k===k);if(e)e.codes.push(m.code);else out.push({k,m,codes:[m.code]})});return out}
 function splintSpan(plans){
   const on=plans.filter(p=>p.on).map(p=>p.code);if(!on.length)return'';
   const ord=ARCH_ORDER(S.dent);const out=[];
@@ -608,7 +633,7 @@ function toothCard(code,plan){
     }
     if(plan.canSplint){
       h+=`<div class="splintline"><button type="button" class="chip multi" data-act="splint" data-c="${code}" aria-pressed="${plan.on}">Splinted</button>`+
-        (plan.on&&plan.sd?`<span class="pill">Splint ${durLab(plan.sd)}</span>`:'')+
+        (plan.on&&plan.sd?`<span class="pill">Splint ${durLab(plan.sd)}</span>`+(plan.setBy?`<span class="hint">Whole splint stays on for ${esc(plan.setBy.code)} (${esc(lc1(plan.setBy.why))}); this tooth alone would need ${durLab(plan.ownSd)}</span>`:''):'')+
         (!plan.auto&&!plan.on?'<span class="hint">Optional for this injury</span>':'')+`</div>`;
     }
     h+=`<div class="box"><b>IADT key points</b><ul>${plan.info.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></div>`;
@@ -624,7 +649,9 @@ function reviewFields(code){
   h+=field('Symptoms',chips(P+'.sym',['Asymptomatic','Tender to bite','Spontaneous pain','Swelling','Sinus'],{multi:true}));
   h+=`<div class="row2">${field('Colour',chips(P+'.col',['Normal','Grey','Yellow (PCO)','Pink']))}${field('Mobility',chips(P+'.mob',['Physiological','Grade I','Grade II','Grade III','Reduced / none']))}</div>`;
   h+=field('Percussion',chips(P+'.perc',['Not TTP','TTP','High-pitched (metallic) note'],{multi:true}));
-  if(perm)h+=`<div class="row2">${field('Cold test',chips(P+'.cold',['Positive','Negative','Delayed','Not tested']))}${field('EPT reading',txt(P+'.ept','e.g. 34 or no response','short'))}</div>`;
+  const tt=S.t[code];
+  if(perm&&noSens(tt))h+=`<p class="hint">No sensibility testing needed (${esc(noSensWhy(tt))}).</p>`;
+  else if(perm)h+=`<div class="row2">${field('Cold test',chips(P+'.cold',['Positive','Negative','Delayed','Not tested']))}${field('EPT reading',txt(P+'.ept','e.g. 34 or no response','short'))}</div>`;
   h+=field('Radiograph',chips(P+'.rad',['Not taken','No change','Continued root development','Pulp canal obliteration','PDL widening','Periapical radiolucency','Inflammatory resorption','Replacement resorption','Arrested root development','Fracture-line radiolucency','Hard-tissue healing at fracture','Re-eruption noted'],{multi:true}));
   h+=field('Other findings',txt(P+'.note','Optional'));
   if(a.any){
@@ -638,18 +665,18 @@ function reviewFields(code){
 function timelineHTML(plans,groups){
   if(!groups.length&&!plans.some(p=>p.age6))return'<p class="empty">No formal review is needed for these injuries.</p>';
   const today=parseISO(todayISO());
-  const ms=plans.flatMap(p=>p.ms).filter(m=>m.date);
-  const rows=[...groups.map(g=>({k:'g',t:g.t,g})),...ms.map(m=>({k:'m',t:m.t+0.1,m}))].sort((a,b)=>a.t-b.t);
+  const ms=msGroups(plans.flatMap(p=>p.ms).filter(m=>m.date));
+  const rows=[...groups.map(g=>({k:'g',t:g.t,g})),...ms.map(x=>({k:'m',t:x.m.t+0.1,m:x.m,codes:x.codes}))].sort((a,b)=>a.t-b.t);
   let nextDone=false;
   const li=rows.map(r=>{
-    if(r.k==='m'){const m=r.m;return `<li class="ms${m.date<today?' past':''}"><div class="tld">${fmtL(m.date)} <small>· ${durLab(m)}</small></div><div class="tlt"><b>${esc(m.code)}</b> ${esc(m.txt)}</div></li>`}
+    if(r.k==='m'){const m=r.m;return `<li class="ms${m.date<today?' past':''}"><div class="tld">${fmtL(m.date)} <small>· ${durLab(m)}</small></div><div class="tlt"><b>${esc(r.codes.join(', '))}</b> ${esc(m.txt)}</div></li>`}
     const g=r.g, past=g.date<today, cur=S.mode==='review'&&g.key===S.visit;
     let cls=(g.items.some(i=>i.sr)?'sr ':'')+(past&&!cur?'past ':'')+(cur?'cur ':'');
     if(!past&&!cur&&!nextDone&&S.mode==='initial'){cls+='next';nextDone=true}
     const when=g.span?`${fmtL(g.span[0])} – ${fmtL(g.span[1])}`:fmtL(g.date);
     const note=g.moved?`<span class="mvnote">Moved from ${fmtL(g.orig)}</span>`:g.shift?`<span class="mvnote">${g.shift>0?'+':''}${g.shift} day${Math.abs(g.shift)===1?'':'s'} with the earlier move</span>`:'';
     const ed=S.mvEdit===g.key?`<div class="mvrow"><input type="date" class="short" data-mv="${g.key}" value="${iso(g.date)}" aria-label="New date for the ${esc(g.lab)} review"><button type="button" class="btn ghost small" data-act="mvtoday" data-o="${g.key}">Today</button>${g.moved?`<button type="button" class="btn link" data-act="mvreset" data-o="${g.key}">Back to ${fmtS(g.orig)}</button>`:''}<button type="button" class="btn link" data-act="mvedit" data-o="">Done</button></div>`:'';
-    return `<li class="${cls.trim()}"><div class="tld">${when} <small>· ${esc(g.lab)}</small> <button type="button" class="btn link mvbtn" data-act="mvedit" data-o="${g.key}" aria-label="Change the date of the ${esc(g.lab)} review">Change date</button></div>${note}${ed}<div class="tlt">${g.items.map(i=>esc(taskText(i)).replace(/^(\w+)/,'<b>$1</b>')).join('<br>')}</div></li>`;
+    return `<li class="${cls.trim()}"><div class="tld">${when} <small>· ${esc(g.lab)}</small> <button type="button" class="btn link mvbtn" data-act="mvedit" data-o="${g.key}" aria-label="Change the date of the ${esc(g.lab)} review">Change date</button></div>${note}${ed}<div class="tlt">${[...srLines(g).map(x=>`<b>${esc(x)}</b>`),...g.items.map(i=>esc(taskText(i)).replace(/^(\w+)/,'<b>$1</b>'))].join('<br>')}</div></li>`;
   }).join('');
   const succ=plans.filter(p=>p.age6).map(p=>p.code);
   const conc=plans.filter(p=>p.concern).map(p=>p.code);
@@ -696,7 +723,7 @@ function render(){
         const tday=todayISO(),off=dayDiff(g.orig,g.date);
         h+=`<div class="row2">${field('Date of this review',`<div class="mvrow" style="margin:0"><input type="date" class="short" data-mv="${g.key}" value="${iso(g.date)}" aria-label="Date of this review">${iso(g.date)!==tday?`<button type="button" class="btn ghost small" data-act="mvtoday" data-o="${g.key}">Seen today</button>`:''}${g.moved?`<button type="button" class="btn link" data-act="mvreset" data-o="${g.key}">Back to ${fmtS(g.orig)}</button>`:''}</div>`)}</div>`;
         if(off)h+=`<p class="hint">IADT date was ${fmtL(g.orig)}. This review is ${Math.abs(off)} day${Math.abs(off)===1?'':'s'} ${off>0?'late':'early'}, so later reviews move by the same amount; treatment deadlines stay as they were.</p>`;
-        h+=`<div class="box"><b>Due at this visit</b><ul>${g.items.map(i=>`<li>${esc(taskText(i))}</li>`).join('')}</ul></div>`;
+        h+=`<div class="box"><b>Due at this visit</b><ul>${visitTasks(g).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
       }
       h+=field('Radiographs taken today',chips('reviewRx',['Periapical','2 angled periapicals','Upper standard occlusal','None'],{multi:true}));
     }else h+='<p class="hint">Add the injured teeth and injuries (as at presentation) to see the review schedule.</p>';
@@ -713,7 +740,7 @@ function render(){
       ${field('Placed on',`<input type="date" class="short" data-k="spl.placed" value="${esc(S.spl.placed||S.date)}" aria-label="Splint placed date">`)}
       ${field('Span',txt('spl.span',sug?'Suggested: '+sug:'e.g. UR2–UL2',''))}</div>
       ${field('Type',chips('spl.mat',['0.4 mm SS wire + composite','Nylon line 0.13–0.25 mm + composite','Titanium trauma splint','Rigid splint (alveolar / jaw fracture)'],{sug:['0.4 mm SS wire + composite']}))}
-      <div class="box"><b>Removal</b><ul>${splinted.map(p=>`<li>${p.code}: ${durLab(p.sd)}, ${placed?fmtL(p.sd.u==='w'?addDays(placed,p.sd.n*7):addMonths(placed,p.sd.n)):'set a date'}</li>`).join('')}</ul></div></section>`;
+      <div class="box"><b>Removal</b><ul>${splintRemovals(plans).map(r=>`<li>${esc(uc1(r.name))}: off at ${durLab(r.sd)}, ${r.date?fmtL(r.date):'set a date'}. Set by ${esc(r.code)} (${esc(lc1(r.why))})${r.teeth.length>1?'; the whole splint stays on until then':''}.</li>`).join('')}</ul></div></section>`;
   }
   // Initial: radiographs + advice
   if(S.mode==='initial'&&plans.length){
@@ -818,7 +845,7 @@ function buildNote(plans,groups){
     const span=S.spl.span||splintSpan(plans);
     L.push('','SPLINT');
     L.push(`${S.spl.mat?S.spl.mat:'Passive flexible splint'}${span?' '+span:''}${placed?', placed '+fmtS(placed):''}.`);
-    spl.forEach(p=>{const d=placed?(p.sd.u==='w'?addDays(placed,p.sd.n*7):addMonths(placed,p.sd.n)):null;L.push(`  ${p.code}: remove at ${durLab(p.sd)}${d?' – '+fmtL(d):''}.`)});
+    splintRemovals(plans).forEach(r=>L.push(`  Remove ${r.name} at ${durLab(r.sd)}${r.date?' – '+fmtL(r.date):''} (set by ${r.code} ${lc1(r.why)}${r.teeth.length>1?'; whole splint stays on until then':''}).`));
   }
   if(S.mode==='initial'){
     if(S.rx.length)L.push('','RADIOGRAPHS',sent(S.rx)+'.');
@@ -845,8 +872,8 @@ function buildNote(plans,groups){
   if(future.length||ms.length||plans.some(p=>p.age6)){
     L.push('',S.mode==='initial'?'REVIEW PLAN (IADT 2020)':'PLAN');
     if(S.mode==='review'&&future.length)L.push('Next review: '+future[0].lab+' – '+fmtL(future[0].date)+'.');
-    const rows=[...future.map(g=>({t:g.t,s:`${fmtS(g.date)}${g.span?'–'+fmtS(g.span[1]):''} – ${g.lab}${g.moved?' (rescheduled)':g.shift?' (moved)':''}: ${g.items.map(taskText).join('; ')}`})),
-      ...ms.map(m=>({t:m.t+0.1,s:`${fmtS(m.date)} – ${m.code}: ${lc1(m.txt)}`}))].sort((a,b)=>a.t-b.t);
+    const rows=[...future.map(g=>({t:g.t,s:`${fmtS(g.date)}${g.span?'–'+fmtS(g.span[1]):''} – ${g.lab}${g.moved?' (rescheduled)':g.shift?' (moved)':''}: ${visitTasks(g).join('; ')}`})),
+      ...msGroups(ms).map(x=>({t:x.m.t+0.1,s:`${fmtS(x.m.date)} – ${x.codes.join(', ')}: ${lc1(x.m.txt)}`}))].sort((a,b)=>a.t-b.t);
     (S.mode==='initial'?rows:rows.slice(0,4)).forEach(r=>L.push('  '+r.s));
     if(S.mode==='review'&&rows.length>4)L.push(`  …then as scheduled (${rows.length-4} further).`);
     const succ=plans.filter(p=>p.age6);if(succ.length)L.push('  Around age 6 – review eruption of permanent successor ('+succ.map(p=>p.code.slice(0,2)+SUCC[p.code[2]]).join(', ')+').');

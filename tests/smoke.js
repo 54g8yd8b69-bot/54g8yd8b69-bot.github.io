@@ -203,7 +203,7 @@ run({name:'Landing page',fn:async()=>{
   await test('Trauma Card opens under the site CSP and builds a note, splint plan and IADT review schedule',async()=>{const pg=await page('/trauma-card/');
     expect((await pg.request.get(BASE+'/trauma-card/manifest.webmanifest')).ok(),'Trauma Card manifest missing');
     await pg.click('[data-act=example]');const n=await pg.inputValue('#out');
-    expect(/REVIEW PLAN \(IADT 2020\)/.test(n)&&/UL1: remove at 4 weeks/.test(n)&&/UR2–UL2/.test(n),'note incomplete: '+n.slice(0,200));
+    expect(/REVIEW PLAN \(IADT 2020\)/.test(n)&&/Remove splint \(UR2–UL2\) at 4 weeks/.test(n),'note incomplete: '+n.slice(0,200));
     await pg.click('[data-mode=review]');await pg.click('[data-act=example]');const r=await pg.inputValue('#out');
     expect(/REVIEW – 4 weeks post-injury/.test(r)&&/not diagnostic/.test(r),'review note incomplete');
     await pg.click('[data-k=dent][data-v=prim]');await pg.click('[aria-label=ULA]');await pg.click('[data-k="t.ULA.lux"][data-v=avul]');
@@ -218,6 +218,16 @@ run({name:'Landing page',fn:async()=>{
     expect(after.some(l=>/2 weeks \(rescheduled\)/.test(l))&&after.some(l=>/4 weeks \(moved\)/.test(l)),'later reviews did not follow: '+after.slice(0,3).join(' | '));
     expect(after.find(l=>/start RCT/.test(l))===before.find(l=>/start RCT/.test(l)),'RCT deadline moved');
     await pg.click('.tl [data-act=mvreset]');await pg.waitForTimeout(100);expect((await rows()).join()===before.join(),'reset did not restore the IADT dates');await noErrors(pg)});
+  await test('Trauma Card: one splint per arch stays on for the worst injury; no sensibility testing once extirpation is due',async()=>{const pg=await page('/trauma-card/');
+    const inj=async(c,lux,scen)=>{await pg.click(`[aria-label=${c}]`);await pg.click(`[data-k="t.${c}.lux"][data-v=${lux}]`);if(scen)await pg.click(`[data-k="t.${c}.opts.scen"][data-v="${scen}"]`)};
+    await inj('UL1','avul','Physiological medium, dry under 60 min');await inj('UL2','lat');await inj('LL1','ext');
+    const n=await pg.inputValue('#out');
+    expect(!/UL1 remove splint|UL2 remove splint/.test(n),'per-tooth splint removal suggested');
+    expect(/Remove upper splint \(UR1–UL3\) at 4 weeks.*set by UL2 lateral luxation/.test(n),'upper splint not set by the worst injury: '+n.slice(n.indexOf('SPLINT'),n.indexOf('SPLINT')+260));
+    expect(/Remove lower splint \(LR1–LL2\) at 2 weeks/.test(n),'lower splint should keep its own time');
+    expect(/UL1 clinical \+ radiograph;/.test(n)&&/UL2 clinical \+ radiograph, sensibility/.test(n),'sensibility rule wrong');
+    await pg.click('[data-mode=review]');await pg.waitForTimeout(100);
+    expect(await pg.locator('[data-k="t.UL1.f.cold"]').count()===0&&await pg.locator('[data-k="t.UL2.f.cold"]').count()>0,'cold test shown for the avulsed mature tooth');await noErrors(pg)});
   await test('Letter Card opens under the site CSP, parses a note and builds every letter type with placeholders only',async()=>{const pg=await page('/letter-card/');
     expect((await pg.request.get(BASE+'/letter-card/manifest.webmanifest')).ok(),'Letter Card manifest missing');
     await pg.click('#exampleBtn');await pg.waitForTimeout(300);expect(await pg.locator('.sec').count()>=8,'note not parsed into sections');
