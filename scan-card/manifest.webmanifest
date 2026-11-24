@@ -1,7 +1,7 @@
 {
   "name": "Scan Card",
   "short_name": "Scan Card",
-  "description": "Study models, model analysis, splints, special trays and wax-ups from one patient scan.",
+  "description": "Study models, model analysis, splints, scan comparison, preparation checks, special trays and wax-ups from one patient scan.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

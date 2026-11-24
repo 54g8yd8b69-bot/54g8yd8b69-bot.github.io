@@ -8,7 +8,9 @@ are tabs that all work on those scans.
 | Scans | load, check orientation, tidy and trim, choose a tool; keeps the case file | `/scan-card/` (the hub) |
 | Models | Model Card: scan to printable model (base, hollowing, label, bite hinge) | `/scan-card/model/` |
 | Analysis | Analysis Card: tooth widths, Bolton, space, arch form, occlusion, restorative space, report | `/scan-card/analysis/` |
-| Splint | Splint Card: splints and guards, checked against the opposing arch | `/scan-card/splint/` |
+| Splint | Splint Card: splints and guards, canine and front guidance ramps, checked against the opposing arch and in simplified excursions | `/scan-card/splint/` |
+| Compare | Compare Card: a later scan of the same arch lined up on the first (trimmed closest-point fit), coloured by the difference | `/scan-card/compare/` |
+| Prep check | Prep Card: a marked preparation's undercuts, wall angles, total occlusal convergence, wall heights and occlusal clearance | `/scan-card/prep/` |
 | Trays | the existing Tray Card page, as it is | `/tray-card/` |
 | Wax-up | the existing Wax Card page, as it is | `/wax-card/` |
 
@@ -20,10 +22,10 @@ Each tool page is still a complete app when opened on its own address (with its 
 scan-card/
   src/             the source: edit here
     index.html       the hub
-    model.html  analysis.html  splint.html
+    model.html  analysis.html  splint.html  compare.html  prep.html
     core.js          shared engine: shell, 3D viewer, mesh tools, scan loading, orientation, trim, case file, hub hand-off
     solid.js         scan to watertight solid, booleans, hollowing, lettering (Manifold, WebAssembly)
-  index.html  model/  analysis/  splint/  manifest.webmanifest     built for the site: do not edit
+  index.html  model/  analysis/  splint/  compare/  prep/  manifest.webmanifest     built for the site: do not edit
   dev/             test harness, tests and conventions (see dev/README.md)
 tools/build_scan_card.py     builds the site pages (and the artifact copy) from src/
 ```

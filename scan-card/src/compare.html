@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare Card — scan comparison</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+button{touch-action:manipulation}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+.hist{display:block;width:100%;height:92px;margin:6px 0 2px;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+.scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{height:10px;border-radius:5px;margin:6px 0 2px;background:linear-gradient(90deg,#1d4ed8,#38bdf8,#d1fae5 45%,#d1fae5 55%,#fbbf24,#dc2626)}
+</style>
+</head>
+<body>
+<script type="module">
+// Compare Card — two scans of the same arch, lined up and coloured by how far apart they are.
+// "Before" is a scan already loaded (in Scan Card, the one on the Scans tab); "After" is loaded here. After is lined up on
+// Before by trimmed closest-point fitting (parts that really changed do not pull the fit), then every point of After is
+// coloured by its distance to Before along Before's surface normal: blue = less than before (wear, loss), red = more.
+import * as N from './core.js';
+const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' }, mm = (v) => (Math.abs(v) < 0.005 ? '0.00' : (v > 0 ? '+' : '') + v.toFixed(2)) + ' mm';
+const P = { jaw: null, range: 0.5, tol: 0.1, show: 'map' };
+let C = mk();                                                   // the second scan and the comparison
+function mk() { return { after: null, matrix: null, fit: null, dev: null, stats: null, obj: null, refKey: null }; }
+
+const shell = N.createShell({
+  name: 'Compare Card', tagline: 'Scan comparison', title: document.title,
+  emptyHtml: '<div><b>Load the first scan</b>Drop the earlier scan here, or use the demo.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'second', title: 'Second scan', html: `
+      <p class="lead">Compare an arch with a later scan of the same arch. The scan already loaded is <b>Before</b>; load the later one here as <b>After</b>.</p>
+      <div class="row" id="cmJawRow"><label>Arch</label><div class="seg" id="cmJaw"><button data-v="upper" type="button" title="Compare the upper scan">Upper</button><button data-v="lower" type="button" title="Compare the lower scan">Lower</button></div></div>
+      <div class="btns"><button class="btn pri" id="cmFile" type="button" title="Choose the later scan of the same arch (STL, PLY or OBJ)">Load the After scan</button><button class="btn" id="cmMade" type="button" title="Make a copy of Before, moved and with 0.5 mm worn off the incisal edges, to see how the comparison works">Try with a made-up After</button></div>
+      <input type="file" id="cmInp" accept=".stl,.ply,.obj" hidden>
+      <div id="cmInfo"></div>
+      <p class="tip">The two scans do not need to be in the same position: After is lined up on Before automatically. Use scans of the same arch, ideally from the same scanner. The made-up After is only for trying the tool — it is a copy of Before, not a real second scan.</p>` },
+    { id: 'align', title: 'Line up', html: `
+      <div id="alInfo"></div>
+      <div class="btns"><button class="btn" id="alAgain" type="button" title="Line the scans up again from the start">Line up again</button></div>
+      <div class="row"><label>Show</label><div class="seg" id="alShow"><button data-v="both" type="button" title="Before and After together">Both</button><button data-v="map" type="button" title="After, coloured by the difference">Map</button></div></div>
+      <p class="tip">The fit uses the 80% of points that agree best, so worn or restored areas do not pull the two scans apart. “Fit error” is the typical distance between the two surfaces where they agree: it shows how well the unchanged parts match. If it is large, the scans may be of different arches or one may be distorted.</p>` },
+    { id: 'map', title: 'Differences', html: `
+      <div class="bar"></div><div class="scale"><span id="scLo"></span><span>0</span><span id="scHi"></span></div>
+      <div class="row"><label>Colour range</label><input type="range" id="cmRange" min="0.1" max="2" step="0.05" value="0.5"><span class="val"></span></div>
+      <div class="row"><label>Count as unchanged within</label><input type="range" id="cmTol" min="0.02" max="0.5" step="0.01" value="0.1"><span class="val"></span></div>
+      <canvas class="hist" id="cmHist" width="600" height="184"></canvas>
+      <div id="mpInfo"></div>
+      <div class="btns"><button class="btn" id="cmShot" type="button" title="Save the view as a picture">Save picture</button><button class="btn" id="cmCopy" type="button" title="Copy the numbers as text">Copy numbers</button></div>
+      <p class="tip">Blue: After lies inside Before (material lost — wear, erosion, a reduced tooth). Red: After stands proud of Before (material added — a restoration, calculus, a tooth that moved out). Grey: no matching surface within 1.5 mm (scanned on only one of the two). Tap the scan to read the difference at that point. “Most lost” and “most gained” are the deepest values reached over at least 1 mm² of surface, so a few stray points do not set them; at contact points between teeth the nearest surface can be the neighbouring tooth, which shows as small false spots. Scanner accuracy limits what can be told apart: differences of a few hundredths of a millimetre are within the noise of most scans.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const legend = shell.panel('', 'legend'); legend.hidden = true;
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Compare Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility' || what === 'case') return; if (C.refKey && C.refKey !== refKey()) clearCompare(false); syncUI(); refreshView(); },
+  extendCase: (c) => {
+    c.remove('compare-second');
+    if (C.after && C.matrix) c.add({ role: 'compare-second', name: C.after.name || 'after', mesh: C.after, matrix: C.matrix, meta: { jaw: P.jaw, fit: C.fit } });
+    c.data.compare = { version: 1, jaw: P.jaw, range: P.range, tol: P.tol, stats: C.stats || null };
+  },
+  readCase: (c) => {
+    clearCompare(true); const d = c.data.compare; if (d) { P.jaw = d.jaw || P.jaw; P.range = d.range ?? P.range; P.tol = d.tol ?? P.tol; R.range.set(P.range); R.tol.set(P.tol); }
+    const it = c.get('compare-second'); if (it && scans.has(P.jaw)) { C.after = it.mesh; C.matrix = it.matrix.clone(); C.fit = (it.meta && it.meta.fit) || null; compute(); }
+  },
+});
+const refKey = () => { const sc = P.jaw && scans[P.jaw]; return sc ? sc.raw.positions.length + ':' + N.crc32(new Uint8Array(sc.raw.positions.buffer, 0, Math.min(sc.raw.positions.byteLength, 120000))) + ':' + sc.matrix.elements.join(',') : null; };
+function pickJaw() { if (P.jaw && scans.has(P.jaw)) return P.jaw; P.jaw = scans.has('lower') ? 'lower' : scans.has('upper') ? 'upper' : null; return P.jaw; }
+function clearCompare(keepAfter) { if (C.obj) { viewer.remove(C.obj); } const a = keepAfter ? null : C.after; C = mk(); if (!keepAfter && a) shell.status('Before changed: load or line up After again'); probeClear(); }
+
+// ───────────── the comparison ─────────────
+let refBvh = null, refBvhKey = null, refIdx = null;              // the BVH reorders the triangle list it is given: it gets a copy (refIdx), so the scan's own mesh is left alone
+function refMesh() { return scans.framed(P.jaw); }
+function bvhOfRef() { const k = refKey(); if (refBvhKey !== k) { const m = refMesh(), g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3)); refIdx = Uint32Array.from(m.indices); g.setIndex(new THREE.BufferAttribute(refIdx, 1)); refBvh = new N.MeshBVH(g); refBvhKey = k; } return refBvh; }
+/** which way Before's triangles face (+1 out of the teeth, as scanners write them; −1 if this file has them the other way round) */
+function refOrientation() {
+  const m = refMesh(), P0 = m.positions, I = m.indices, up = P.jaw === 'upper' ? -1 : 1; let zt = -Infinity; for (let i = 2; i < P0.length; i += 3) if (up * P0[i] > zt) zt = up * P0[i];
+  let s = 0; for (let f = 0; f < I.length; f += 3) { const a = I[f] * 3, b = I[f + 1] * 3, c = I[f + 2] * 3; if (up * (P0[a + 2] + P0[b + 2] + P0[c + 2]) / 3 < zt - 2.5) continue; const ux = P0[b] - P0[a], uy = P0[b + 1] - P0[a + 1], vx = P0[c] - P0[a], vy = P0[c + 1] - P0[a + 1]; s += up * (ux * vy - uy * vx); }
+  return s >= 0 ? 1 : -1;
+}
+async function lineUp() {
+  if (!C.after || !pickJaw()) return;
+  await shell.busy('Lining the scans up…', async () => {
+    await N.sleep(30); const start = N.autoOrient(C.after, P.jaw).matrix, r = N.alignScans(C.after, refMesh(), { start, bvh: bvhOfRef() });
+    C.matrix = r.matrix; C.fit = { rms: r.rms, kept: r.kept }; shell.setBusyText('Measuring the differences…'); await N.sleep(16); compute();
+  });
+  scans.touch(); syncUI(); refreshView();
+}
+function compute() {
+  const bvh = bvhOfRef(), ref = refMesh(), A = N.transformMesh(C.after, C.matrix), Pa = A.positions, n = Pa.length / 3, dev = new Float32Array(n), hit = {}, q = new THREE.Vector3(), Pr = ref.positions, Ir = refIdx, or = refOrientation();
+  for (let v = 0; v < n; v++) {
+    q.set(Pa[3 * v], Pa[3 * v + 1], Pa[3 * v + 2]); bvh.closestPointToPoint(q, hit);
+    if (hit.distance > 1.5) { dev[v] = NaN; continue; }
+    const f = hit.faceIndex * 3, a = Ir[f] * 3, b = Ir[f + 1] * 3, c = Ir[f + 2] * 3, ux = Pr[b] - Pr[a], uy = Pr[b + 1] - Pr[a + 1], uz = Pr[b + 2] - Pr[a + 2], wx = Pr[c] - Pr[a], wy = Pr[c + 1] - Pr[a + 1], wz = Pr[c + 2] - Pr[a + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, side = (q.x - hit.point.x) * nx + (q.y - hit.point.y) * ny + (q.z - hit.point.z) * nz;
+    dev[v] = (side * or >= 0 ? 1 : -1) * hit.distance;
+  }
+  C.dev = dev; C.mesh = A; C.refKey = refKey(); stats(); makeObject();
+}
+function stats() {
+  const d = C.dev, A = C.mesh, I = A.indices, P0 = A.positions; let area = 0, inTol = 0, sum = 0, sq = 0, lo = Infinity, hi = -Infinity, loV = -1, hiV = -1, miss = 0, all = 0, aLoss = 0, aGain = 0;
+  const va = new Float32Array(d.length);                          // area round each vertex (a third of each triangle), so dense patches do not count more
+  for (let f = 0; f < I.length; f += 3) { const a = I[f] * 3, b = I[f + 1] * 3, c = I[f + 2] * 3, ux = P0[b] - P0[a], uy = P0[b + 1] - P0[a + 1], uz = P0[b + 2] - P0[a + 2], wx = P0[c] - P0[a], wy = P0[c + 1] - P0[a + 1], wz = P0[c + 2] - P0[a + 2], ar = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 6; va[I[f]] += ar; va[I[f + 1]] += ar; va[I[f + 2]] += ar; }
+  for (let v = 0; v < d.length; v++) { const w = va[v]; all += w; const x = d[v]; if (!(x === x)) { miss += w; continue; } area += w; sum += x * w; sq += x * x * w; if (Math.abs(x) <= P.tol) inTol += w; else if (x < 0) aLoss += w; else aGain += w; if (x < lo) { lo = x; loV = v; } if (x > hi) { hi = x; hiV = v; } }
+  // the extremes: the deepest value reached over at least 1 mm² of surface, so a few stray points (at a contact point, where the
+  // nearest surface can be the neighbouring tooth, or at a scan's ragged edge) do not set the figure
+  const ord = []; for (let v = 0; v < d.length; v++) if (d[v] === d[v]) ord.push(v); ord.sort((a, b) => d[a] - d[b]);
+  const reach = (list) => { let acc = 0; for (const v of list) { acc += va[v]; if (acc >= 1) return v; } return list.length ? list[list.length - 1] : -1; };
+  loV = reach(ord); hiV = reach(ord.slice().reverse()); lo = loV >= 0 ? Math.min(0, d[loV]) : 0; hi = hiV >= 0 ? Math.max(0, d[hiV]) : 0;
+  const at = (v) => (v >= 0 ? [P0[3 * v], P0[3 * v + 1], P0[3 * v + 2]] : null);
+  C.stats = { mean: sum / area, rms: Math.sqrt(sq / area), within: inTol / area, loss: aLoss / area, gain: aGain / area, lo, hi, loAt: at(loV), hiAt: at(hiV), matched: area / all, areaMM2: area, tol: P.tol };
+}
+const lerpC = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), N.clamp(t, 0, 1));
+function colourOf(x) {
+  if (!(x === x)) return new THREE.Color(0xcbd5e1); const r = P.range, t = x / r;
+  if (Math.abs(x) <= P.tol) return new THREE.Color(0xd1fae5);
+  return t < 0 ? (t < -0.5 ? lerpC(0x38bdf8, 0x1d4ed8, (-t - 0.5) * 2) : lerpC(0xd1fae5, 0x38bdf8, -t * 2)) : (t > 0.5 ? lerpC(0xfbbf24, 0xdc2626, (t - 0.5) * 2) : lerpC(0xd1fae5, 0xfbbf24, t * 2));
+}
+function makeObject() {
+  if (C.obj) viewer.remove(C.obj); C.obj = null; if (!C.mesh) return;
+  const n = C.dev.length, col = new Float32Array(n * 3); for (let v = 0; v < n; v++) { const c = colourOf(C.dev[v]); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  C.obj = new THREE.Mesh(N.toGeometry({ positions: C.mesh.positions, indices: C.mesh.indices, colors: col }, { bvh: true }), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide }));
+  C.obj.name = 'after'; viewer.add(C.obj);
+}
+function recolour() { if (!C.obj) return; const a = C.obj.geometry.attributes.color; for (let v = 0; v < C.dev.length; v++) { const c = colourOf(C.dev[v]); a.setXYZ(v, c.r, c.g, c.b); } a.needsUpdate = true; viewer.invalidate(); }
+function drawHist() {
+  const cv = $('cmHist'), g = cv.getContext('2d'), W = cv.width, H = cv.height, r = P.range, nb = 60, bins = new Float64Array(nb); g.clearRect(0, 0, W, H); if (!C.dev) return;
+  for (const x of C.dev) { if (!(x === x)) continue; const b = Math.floor((N.clamp(x, -r, r * 0.9999) + r) / (2 * r) * nb); bins[b]++; }
+  const mx = Math.max(...bins) || 1;
+  for (let b = 0; b < nb; b++) { const x = -r + (b + 0.5) * (2 * r) / nb, h = Math.sqrt(bins[b] / mx) * (H - 14); g.fillStyle = '#' + colourOf(x).getHexString(); g.fillRect(b * W / nb + 1, H - 12 - h, W / nb - 2, h); }
+  g.fillStyle = '#0f2a44'; g.fillRect(W / 2 - 1, 0, 2, H - 12); g.font = '20px sans-serif'; g.fillStyle = '#64748b'; g.fillText('square-root scale', 8, 20);
+}
+
+// ───────────── tap to read a value ─────────────
+let probe = null;
+function probeClear() { if (probe) { viewer.scene.remove(probe.m); probe.l.remove(); probe = null; viewer.invalidate(); } }
+const probeTool = {
+  cursor: 'crosshair',
+  onDown: (i) => {
+    if (i.button !== 0 || !C.obj || shell.steps[shell.current].id !== 'map') return false; const h = i.pick([C.obj]); if (!h) return false;
+    const I = C.mesh.indices, f = h.faceIndex * 3, bc = h.barycoord || null, vs = [I[f], I[f + 1], I[f + 2]], ds = vs.map((v) => C.dev[v]);
+    const val = bc && ds.every((x) => x === x) ? ds[0] * bc.x + ds[1] * bc.y + ds[2] * bc.z : ds.find((x) => x === x);
+    probeClear(); probe = { m: viewer.marker(h.point, { color: 0x0f2a44, px: 12 }), l: viewer.label(val === undefined || !(val === val) ? 'no match' : mm(val), h.point, { dy: -16 }) }; return true;
+  },
+  onMove: () => {}, onUp: () => {},
+};
+
+// ───────────── controls ─────────────
+const R = {
+  range: N.rangeBind('cmRange', (v) => { P.range = v; recolour(); drawHist(); syncScale(); }, { fmt: (v) => '±' + v.toFixed(2) + ' mm' }),
+  tol: N.rangeBind('cmTol', (v, done) => { P.tol = v; recolour(); if (C.dev) stats(); if (done) scans.touch(); syncUI(); }, { fmt: (v) => '±' + v.toFixed(2) + ' mm' }),
+};
+const SEG = {
+  jaw: N.segBind($('cmJaw'), (v) => { if (!scans.has(v)) return syncUI(); P.jaw = v; clearCompare(false); syncUI(); refreshView(); }),
+  show: N.segBind($('alShow'), (v) => { P.show = v; refreshView(); }, P.show),
+};
+$('cmFile').addEventListener('click', () => { if (!pickJaw()) return shell.status('Load the Before scan first', true); $('cmInp').click(); });
+$('cmInp').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try { const m = await shell.busy('Reading the After scan…', async () => N.cleanMesh(await N.readMeshFile(f)).mesh); m.name = f.name; C.after = m; C.matrix = null; await lineUp(); shell.goto('align'); }
+  catch (err) { shell.status(String((err && err.message) || err), true); }
+});
+$('cmMade').addEventListener('click', async () => {
+  if (!pickJaw()) return shell.status('Load the Before scan first', true);
+  const ref = scans[P.jaw].raw, m = scans.framed(P.jaw), Pm = m.positions, up = P.jaw === 'upper' ? -1 : 1, out = Float32Array.from(Pm); let zt = -Infinity, yMin = Infinity;
+  for (let i = 0; i < Pm.length; i += 3) { if (up * Pm[i + 2] > zt) zt = up * Pm[i + 2]; if (Pm[i + 1] < yMin) yMin = Pm[i + 1]; }
+  const nm = N.vertexNormals(m), or = refOrientation();            // wear = material taken off along the surface normal, deepest at the incisal edges
+  for (let i = 0; i < Pm.length; i += 3) { const h = up * Pm[i + 2]; if (Math.abs(Pm[i]) < 12 && Pm[i + 1] < yMin + 10 && h > zt - 3) { const w = 0.5 * N.clamp((h - (zt - 3)) / 1.5, 0, 1) * or; out[i] -= w * nm[i]; out[i + 1] -= w * nm[i + 1]; out[i + 2] -= w * nm[i + 2]; } }
+  const T = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0.05, -0.04, 0.1)).setPosition(3, -2, 1.5);
+  C.after = { ...N.transformMesh({ positions: out, indices: ref.indices }, T), name: 'made-up after' }; C.matrix = null; await lineUp(); shell.goto('align'); shell.status('Made-up After: a moved copy of Before with 0.5 mm worn off the incisal edges');
+});
+$('alAgain').addEventListener('click', () => lineUp());
+$('cmShot').addEventListener('click', async () => { const url = viewer.snapshot(), bin = atob(url.split(',')[1]), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const b = new Blob([u8], { type: 'image/png' }); const r = await N.saveFile('comparison.png', b); shell.status(r.message, !r.ok && r.code !== 'declined'); });
+$('cmCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(numbersText()); shell.status('Numbers copied'); } catch (_) { shell.status('Copying was not allowed here', true); } });
+function numbersText() {
+  const s = C.stats; if (!s) return '';
+  return `Scan comparison (${NAME[P.jaw].toLowerCase()} arch), After lined up on Before\nFit error where the scans agree: ${C.fit ? C.fit.rms.toFixed(3) + ' mm' : '–'}\nWithin ±${s.tol.toFixed(2)} mm: ${(s.within * 100).toFixed(1)}% of the surface; less than before: ${(s.loss * 100).toFixed(1)}%; more than before: ${(s.gain * 100).toFixed(1)}%\nMost lost: ${mm(s.lo)}; most gained: ${mm(s.hi)}\nMean ${mm(s.mean)}, RMS ${s.rms.toFixed(3)} mm (over ${(s.matched * 100).toFixed(0)}% of After that has a matching surface)`;
+}
+function syncScale() { $('scLo').textContent = '−' + P.range.toFixed(2); $('scHi').textContent = '+' + P.range.toFixed(2) + ' mm'; }
+function syncUI() {
+  const jaw = pickJaw(), both = scans.has('upper') && scans.has('lower');
+  $('cmJawRow').hidden = !both; for (const b of $('cmJaw').children) b.disabled = !scans.has(b.dataset.v); SEG.jaw(jaw || '');
+  $('cmInfo').innerHTML = !jaw ? '<div class="note warn">Load the Before scan first.</div>' : C.after ? `<div class="note">After: ${N.esc(C.after.name || 'scan')}, ${(C.after.indices.length / 3).toLocaleString('en-GB')} triangles.</div>` : '';
+  const f = C.fit; $('alInfo').innerHTML = !C.after ? '<div class="note warn">Load the After scan first.</div>' : f ? `<div class="sum"><h5>Lined up<span class="okb${f.rms > 0.1 ? ' bad' : ''}">${f.rms > 0.1 ? 'Check' : 'Good fit'}</span></h5><div><span>Fit error where the scans agree</span><b>${f.rms.toFixed(3)} mm</b></div></div>${f.rms > 0.1 ? '<div class="note warn">The unchanged parts do not match closely. Check that both scans are of the same arch.</div>' : ''}` : '';
+  const s = C.stats; $('mpInfo').innerHTML = !s ? '' : `<div class="sum"><h5>${NAME[jaw] || ''} arch</h5>
+    <div><span>Unchanged (within ±${s.tol.toFixed(2)} mm)</span><b>${(s.within * 100).toFixed(1)}%</b></div>
+    <div><span>Less than before</span><b>${(s.loss * 100).toFixed(1)}%</b></div><div><span>More than before</span><b>${(s.gain * 100).toFixed(1)}%</b></div>
+    <div><span>Most lost</span><b>${mm(s.lo)}</b></div><div><span>Most gained</span><b>${mm(s.hi)}</b></div>
+    <div><span>RMS difference</span><b>${s.rms.toFixed(3)} mm</b></div></div>${s.matched < 0.7 ? `<div class="note warn">Only ${(s.matched * 100).toFixed(0)}% of After has a matching surface on Before.</div>` : ''}`;
+  syncScale(); drawHist();
+  shell.markDone('load', !!jaw); shell.markDone('second', !!C.after); shell.markDone('align', !!C.fit); shell.markDone('map', !!C.stats);
+}
+let marks = [];
+function refreshView() {
+  const id = shell.current >= 0 ? shell.steps[shell.current].id : 'load', jaw = pickJaw(), cmp = ['align', 'map'].includes(id) && C.obj;
+  for (const m of marks) { viewer.scene.remove(m.m); m.l.remove(); } marks = [];
+  if (C.obj) C.obj.visible = !!cmp;
+  for (const j of JAWS) if (scans[j]) { const want = !cmp ? (id === 'second' || id === 'load' || id === 'orient' ? true : j === jaw) : (j === jaw && P.show === 'both' && id === 'align'); if (scans[j].object.visible !== want) scans.setVisible(j, want); const mt = scans[j].object.material; mt.transparent = !!cmp; mt.opacity = cmp ? 0.45 : 1; }
+  legend.hidden = !cmp; if (cmp) legend.innerHTML = '<div><i style="background:#1d4ed8"></i>less than before</div><div><i style="background:#d1fae5"></i>unchanged</div><div><i style="background:#dc2626"></i>more than before</div><div><i style="background:#cbd5e1"></i>no match</div>';
+  if (id === 'map' && C.stats) { for (const [k, t] of [['loAt', 'most lost'], ['hiAt', 'most gained']]) { const p = C.stats[k]; if (!p || Math.abs(C.stats[k === 'loAt' ? 'lo' : 'hi']) <= P.tol) continue; const v = new THREE.Vector3(...p); marks.push({ m: viewer.marker(v, { color: k === 'loAt' ? 0x1d4ed8 : 0xdc2626, px: 12 }), l: viewer.label(`${t} ${mm(C.stats[k === 'loAt' ? 'lo' : 'hi'])}`, v, { dy: -16 }) }); } }
+  if (id === 'map') { if (viewer.tool !== probeTool) viewer.setTool(probeTool); shell.hint('Tap the scan to read the difference there'); } else { if (viewer.tool === probeTool) viewer.setTool(null); probeClear(); shell.hint(''); }
+  viewer.invalidate();
+}
+shell.onStepChange(() => { syncUI(); refreshView(); });
+syncUI(); shell.goto(0);
+window.APP = { N, THREE, shell, viewer, scans, P, get C() { return C; }, lineUp, compute, numbersText, refreshView };
+</script>
+</body>
+</html>

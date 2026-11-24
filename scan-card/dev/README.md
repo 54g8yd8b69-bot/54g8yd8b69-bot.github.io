@@ -19,6 +19,8 @@ python3 tools/build_scan_card.py --deps /home/claude/suite
 |---|---|
 | `shared/core.js`, `shared/solid.js` | `src/core.js`, `src/solid.js` |
 | `scan-card/index.html` | `src/index.html` (the hub) |
+| `compare-card/index.html` | `src/compare.html` |
+| `prep-card/index.html` | `src/prep.html` |
 | `model-card/index.html` | `src/model.html` |
 | `analysis-card/index.html` | `src/analysis.html` |
 | `splint-card/index.html` | `src/splint.html` |
@@ -41,6 +43,9 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `tests/analysis-card/` | Analysis Card on its own: `t1` … `t11` (widths against the designed teeth, Bolton by hand calculation, arch, sections, touch); `NOTES.md` has the numbers |
 | `tests/splint-card/` | Splint Card on its own: `f1` … `f5` in the browser, `verify.mjs` / `accuracy.mjs` and the kernel tests in Node; `NOTES.md` has the pipeline and its limits |
 | `tests/suite/` | one case file through all three stand-alone pages and back (`roundtrip.cjs` then `roundtrip.mjs`); an independent check of exported splints |
+| `tests/splint-card/t19-guide.mjs`, `f6-guide.cjs` | guidance ramps: opposing canine tips found against the designed teeth (within 0.25 mm), files watertight, fit unchanged, nothing through the opposing arch, back teeth clear in all three excursions with ramps and touching without — the excursions checked again independently by sliding the opposing mesh |
+| `tests/compare-card/c1.cjs` | made-up wear and a real second STL file (other triangles, turned 125°, moved 40 mm) lined up to < 0.003 mm; 0.5 / 0.3 mm wear measured within 0.02 mm; loss only where it was made |
+| `tests/prep-card/mkprep.mjs`, `p1.cjs` | a demo arch with 46 as an exact preparation (`makeDemoArch({ prep })`: walls 6°, lingual −6°, 2 mm reduction, shoulder); marked by real taps; wall angles within 0.1°, convergence, wall height, the lingual undercut, “Fewest undercuts” clearing it, clearance checked the other way round |
 | `tests/hub/` | Scan Card itself, below |
 
 | hub test | what it proves |
@@ -52,6 +57,8 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `h5-artifact.cjs` | the artifact copy: frames by address, the fetch + srcdoc fallback, and saving through a stand-in for the artifact's downloads (copy the built artifact folder to `art-test/`, add `index-srcdoc.html` with `"frames":"srcdoc"` and `index-claude.html` with a fake `window.claude`) |
 | `h6-big.cjs`, `h6-mem.cjs` | times and memory with 448k + 350k triangle scans |
 | `h7-lru.cjs` | with large scans the least recently used tool is closed and comes back with its work, at its step |
+| `h9-new-tools.cjs` | Prep check, Compare and Splint guidance inside the hub on one pair of scans, saved in one case and read back in a fresh Scan Card |
+| `h10-phone-new.cjs` | Compare and Prep check on a phone |
 | `h8-exports.cjs` | STL files saved through the hub are byte-identical to what the tool computes; a colour PLY scan keeps its colours into Wax Card (needs `NO_CSP=1`) |
 
 The built site pages are tested from the site's own `tests/smoke.js` (three Scan Card tests, under the real site CSP)

@@ -95,7 +95,7 @@ run({name:'Landing page',fn:async()=>{
   await test('Scan Card opens under the site CSP: scans loaded once feed Models, Analysis and Splint, and their work comes back as one case',async()=>{const pg=await page('/scan-card/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect((await pg.request.get(BASE+'/scan-card/manifest.webmanifest')).ok(),'Scan Card manifest missing');
-    expect(await pg.locator('#tabs button').count()===6,'expected the Scans tab and five tools');
+    expect(await pg.locator('#tabs button').count()===8,'expected the Scans tab and seven tools');
     const tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/')),settle=()=>pg.evaluate(()=>APP.H.q);
     const sig=fr=>fr.evaluate(()=>['upper','lower'].map(j=>APP.scans[j]?[APP.scans[j].raw.positions.length,APP.N.crc32(new Uint8Array(APP.scans[j].raw.positions.buffer)),APP.N.crc32(new Uint8Array(APP.scans[j].raw.indices.buffer)),Array.from(APP.scans[j].matrix.elements).join()].join(':'):'-').join('|'));
     await pg.click('[data-ss=demo]');await pg.waitForFunction(()=>APP.scans.has('upper')&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
@@ -144,6 +144,25 @@ run({name:'Landing page',fn:async()=>{
     expect(await pg.evaluate(()=>APP.users().join())==='Trays,Wax-up','the Scans tab does not show Trays and Wax-up as using the scans');
     expect(await t.evaluate(()=>new Promise(res=>{let n=0;for(const P of [WebGLRenderingContext.prototype,WebGL2RenderingContext.prototype]){const o=P.drawElements;P.drawElements=function(...a){n++;return o.apply(this,a)}}setTimeout(()=>res(n),700)}))===0,'Tray Card keeps drawing while its tab is hidden');
     await noErrors(pg)});
+  await test('Scan Card’s Prep check, Compare and Splint guidance work under the site CSP',async()=>{const pg=await page('/scan-card/');
+    await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});const settle=()=>pg.evaluate(()=>APP.H.q),tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/'));
+    const idle=fr=>fr.waitForFunction(()=>!document.querySelector('#busy').classList.contains('show'),null,{timeout:240000});
+    // a lower arch whose 46 is a preparation of known shape (walls 6°, lingual −6°), made by the demo generator, and the upper
+    const T=await pg.evaluate(async()=>{const N=APP.N,pair=N.makeDemoPair({res:0.3}),t=pair.truth.lower.teeth.find(q=>q.fdi===46),zc=(t.mesial[2]+t.distal[2])/2,prep={fdi:46,zTop:t.tip[2]-2,zMargin:zc-1.2,R0:0.36*t.width,shoulder:0.8,taper:6,taperLingual:-6};
+      const lo=N.makeDemoArch({jaw:'lower',res:0.3,prep}).mesh;await APP.scans.loadFiles([new File([N.stlBinary(lo)],'lower.stl'),new File([N.stlBinary(pair.upper)],'upper.stl')]);
+      const c=t.centre,loop=[];for(let k=0;k<10;k++){const a=k/10*2*Math.PI;loop.push([c[0]+Math.cos(a)*(prep.R0+0.45),c[1]+Math.sin(a)*(prep.R0+0.45),prep.zMargin])}return{seed:[c[0],c[1],prep.zTop],loop}});
+    await idle(pg);expect(await pg.evaluate(()=>APP.scans.has('upper')&&APP.scans.has('lower')),'scans did not load');
+    await pg.click('#tabs [data-tab=prep]');await settle();const pr=tool('prep');expect(!!pr,'Prep check did not open');await pr.waitForFunction(()=>window.APP&&APP.scans.has('lower'),null,{timeout:60000});
+    const f=await pr.evaluate(T=>{const M=APP.scans.lower.matrix,V=p=>new APP.THREE.Vector3(...p).applyMatrix4(M).toArray();APP.P.jaw='lower';APP.P.seed=V(T.seed);APP.P.loop=T.loop.map(V);APP.P.dir=new APP.THREE.Vector3(0,0,1).transformDirection(M).toArray();APP.analyse();const s=APP.R.sides;return{b:s.buccal.angle,l:s.lingual.angle,md:APP.R.tocMD,c:APP.R.clear&&APP.R.clear.min}},T);
+    expect(Math.abs(f.b-6)<1&&Math.abs(f.l+6)<1&&Math.abs(f.md-12)<1.5&&f.c>1,'Prep check figures '+JSON.stringify(f));
+    await pg.click('#tabs [data-tab=compare]');await settle();const cm=tool('compare');expect(!!cm,'Compare did not open');await cm.waitForFunction(()=>window.APP&&APP.scans.has('lower'),null,{timeout:60000});
+    await cm.click('#cmJaw [data-v=lower]');await cm.click('#cmMade');await idle(cm);
+    const c=await cm.evaluate(()=>({rms:APP.C.fit.rms,lo:APP.C.stats.lo}));expect(c.rms<0.01&&Math.abs(c.lo+0.5)<0.04,'Compare '+JSON.stringify(c));
+    await pg.click('#tabs [data-tab=splint]');await settle();const sp=tool('splint');expect(!!sp,'Splint did not open');await sp.waitForFunction(()=>window.APP&&APP.scans.has('upper'),null,{timeout:60000});
+    await sp.evaluate(()=>APP.shell.goto('appliance'));await sp.click('#apJaw [data-v=upper]');await sp.click('#apType [data-v=flat]');await sp.evaluate(()=>APP.shell.goto('shell'));await idle(sp);
+    await sp.check('#shUse');await idle(sp);await sp.click('#shAuto');await idle(sp);await sp.check('#gdOn');await idle(sp);await sp.waitForFunction(()=>APP.D.res&&!APP.D.dirty,null,{timeout:300000});
+    const g=await sp.evaluate(()=>({r:APP.D.res.report.ramps,w:APP.D.res.report.watertight,e:['right','left','forward'].map(k=>APP.D.exc[k][1])}));
+    expect(g.w&&g.r&&g.r.length===3&&g.e.every(q=>q.guide==='front'&&q.back>0.3),'Splint guidance '+JSON.stringify(g));await noErrors(pg)});
   await test('Scan Card’s tools still open on their own, and their logo leads back to Scan Card',async()=>{const pg=await page('/scan-card/model/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect(await pg.evaluate(()=>!APP.N.EMBED&&!APP.shell.stepEl('load').hidden&&document.querySelectorAll('#topBtns button').length===2),'Model Card on its own should have its own loading steps');

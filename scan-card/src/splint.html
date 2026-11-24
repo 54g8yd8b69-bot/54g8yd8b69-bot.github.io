@@ -585,6 +585,101 @@ K.body = (hf, borderZ, crownAt, planeZ, o) => {
 
 // ───────────── building the appliance ─────────────
 const manOf = (M, mesh, id) => new M.Manifold(new M.Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts: mesh.indices, runOriginalID: new Uint32Array([id]) }));
+// ───────────── guidance: canine and front ramps on a flat table, and a check of the excursions ─────────────
+/**
+ * The tips of the opposing canines and the front of the opposing incisors, found on the opposing arch (arch frame, its teeth
+ * pointing −Z, so a tip is a lowest point). `oppIsUpper` widens the canine window (upper incisors are wider than lower ones).
+ * → { inc:[x,y,z], right:[x,y,z], left:[x,y,z], mid (mm along the arch at the midline) }  — any of them null if not found.
+ * right / left are the PATIENT's sides; `flipX` says whether arch x runs opposite to the case frame's (an upper appliance).
+ */
+K.guideTips = (oppA, arch, oppIsUpper, flipX) => {
+  const hf = N.rasterHeightfield(oppA, { cell: 0.25, mode: 'min', pad: 1 }), { nx, ny, x0, y0, cell, z } = hf, o = {};
+  let km = 0; for (let k = 1; k < arch.n; k++) if (arch.py[k] < arch.py[km]) km = k;
+  const mid = km * arch.step, lo = 11, hi = 26, best = { inc: null, a: null, b: null };   // measured along the appliance's own arch line, so the window covers a lower canine on an upper curve (≈21 mm) and an upper canine on a lower one (≈16 mm)
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const v = z[j * nx + i]; if (!(v < 1e9)) continue; const x = x0 + i * cell, y = y0 + j * cell;
+    K.archCoords(arch, x, y, o); if (o.over > 0 || Math.abs(o.d) > 6) continue;
+    const u = o.s - mid, key = Math.abs(u) < 4 ? 'inc' : u >= lo && u <= hi ? 'b' : -u >= lo && -u <= hi ? 'a' : null;
+    if (key && (!best[key] || v < best[key][2])) best[key] = [x, y, v];
+  }
+  // arc runs from the patient's right end (case frame); in an upper appliance's arch frame x is mirrored, but the arc order is not
+  const sideOf = (q) => (q ? ((flipX ? -q[0] : q[0]) > 0 ? 'left' : 'right') : null), out = { inc: best.inc, right: null, left: null, mid };
+  for (const q of [best.a, best.b]) { const sd = sideOf(q); if (sd) out[sd] = q; }
+  return out;
+};
+/**
+ * Which way the opposing teeth slide over the appliance (arch frame, unit 2D vectors) in the three excursions.
+ * The lower jaw moves; seen from an upper appliance the lower teeth move with it, seen from a lower appliance the upper teeth move the
+ * other way. right = the lower jaw moving to the patient's right (the right canine is the working-side guide), and so on.
+ */
+K.guideDirs = (jaw) => {
+  const opp = jaw === 'upper' ? 1 : -1, fx = jaw === 'upper' ? -1 : 1;          // fx: the arch frame mirrors x for an upper appliance
+  return { right: [fx * -opp, 0], left: [fx * opp, 0], forward: [0, -opp] };
+};
+/**
+ * Ramps from points and settings: each rises from where the opposing tip rests, in the direction(s) that tip slides, at `angle`
+ * degrees, for `length` mm, then stops with a steep back. A canine ramp guides the sideways and the sideways-forward movement.
+ * pts = K.guideTips result; g = { canine, front, canineAngle, frontAngle, length }.  → [{ c:[x,y], dirs:[[x,y],…], tan, L }]
+ */
+K.rampSpecs = (pts, jaw, g) => {
+  const D = K.guideDirs(jaw), out = [], unit = (a, b) => { const x = a[0] + b[0], y = a[1] + b[1], l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+  if (g.canine) for (const sd of ['right', 'left']) if (pts[sd]) out.push({ c: [pts[sd][0], pts[sd][1]], dirs: [D[sd], unit(D[sd], D.forward)], tan: Math.tan(g.canineAngle * Math.PI / 180), L: g.length, kind: sd });
+  if (g.front && pts.inc) out.push({ c: [pts.inc[0], pts.inc[1]], dirs: [D.forward], tan: Math.tan(g.frontAngle * Math.PI / 180), L: g.length, kind: 'front' });
+  return out;
+};
+/** height of the ramps above the table at (x, y), arch frame */
+K.rampHeight = (ramps, x, y) => {
+  let h = 0;
+  for (const r of ramps) {
+    const dx = x - r.c[0], dy = y - r.c[1], dist = Math.hypot(dx, dy); if (dist > r.L + 1.6) continue;
+    let u = 0; for (const d of r.dirs) { const t = dx * d[0] + dy * d[1]; if (t > u) u = t; }
+    const v = Math.min(r.tan * Math.min(u, r.L), Math.max(0, r.L + 1 - dist) * 1.7); if (v > h) h = v;       // rise, then a steep back (about 60°)
+  }
+  return h;
+};
+/**
+ * The ramps as a solid (arch frame), to be joined to the body: from 1.2 mm under the table up to table + ramp height, never closer
+ * than 0.05 mm to the opposing arch where it rests (oppA, arch frame). plane = { a, b, d } (table z = a·x + b·y + d).
+ * onTable(x, y): true where the appliance's table lies underneath — a ramp is only built there, never as a shelf past the edge.
+ */
+K.rampSolid = (ramps, plane, oppA, onTable = null) => {
+  if (!ramps.length) return null;
+  let xa = Infinity, xb = -Infinity, ya = Infinity, yb = -Infinity; for (const r of ramps) { const e = r.L + 2; xa = Math.min(xa, r.c[0] - e); xb = Math.max(xb, r.c[0] + e); ya = Math.min(ya, r.c[1] - e); yb = Math.max(yb, r.c[1] + e); }
+  const cell = 0.2, nx = Math.ceil((xb - xa) / cell) + 1, ny = Math.ceil((yb - ya) / cell) + 1, top = new Float32Array(nx * ny), bot = new Float32Array(nx * ny), mask = new Uint8Array(nx * ny);
+  const O = oppA ? N.rasterHeightfield(oppA, { cell, mode: 'min', bounds: { min: [xa - 1, ya - 1, -1e3], max: [xb + 1, yb + 1, 1e3] }, pad: 0 }) : null;
+  const low = (x, y) => { if (!O) return Infinity; let m = Infinity; const i0 = Math.round((x - O.x0) / cell), j0 = Math.round((y - O.y0) / cell); for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const i = i0 + a, j = j0 + b; if (i < 0 || j < 0 || i >= O.nx || j >= O.ny) continue; const v = O.z[j * O.nx + i]; if (v < m) m = v; } return m; };
+  let any = 0;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i, x = xa + i * cell, y = ya + j * cell, t = plane.a * x + plane.b * y + plane.d, h = K.rampHeight(ramps, x, y);
+    bot[k] = t - 1.2; top[k] = Math.min(t + h, low(x, y) - 0.05); if (h > 0.02 && top[k] > t + 0.02 && (!onTable || onTable(x, y))) { mask[k] = 1; any++; }
+  }
+  if (!any) return null;
+  const sol = S.fieldSolid({ nx, ny, x0: xa, y0: ya, cell, z: top }, { nx, ny, x0: xa, y0: ya, cell, z: bot }, { mask, min: 0.05 });
+  return sol && sol.indices && sol.indices.length ? sol : null;
+};
+/**
+ * The excursions, simplified: the opposing arch slides over the appliance by `dists` mm in each direction and rises just enough to
+ * stay on it (a translation — no condylar guidance, no rotation). appA, oppA: appliance and opposing arch in the appliance's arch
+ * frame (opposing teeth point −Z). front = how far along the arch from the midline counts as the front (incisors and canines), mm.
+ * → { right|left|forward: [{ s, lift, back (smallest gap at the back teeth, mm), guide ('front' | 'back' | 'both'), at:[x,y,z] }] }
+ */
+K.excursions = (appA, oppA, arch, jaw, front, dists = [1, 2, 3]) => {
+  const cell = 0.25, T = N.rasterHeightfield(appA, { cell, mode: 'max', pad: 4 }), O = N.rasterHeightfield(oppA, { cell, mode: 'min', pad: 4 }), o = {};
+  let km = 0; for (let k = 1; k < arch.n; k++) if (arch.py[k] < arch.py[km]) km = k; const mid = km * arch.step;
+  const isFront = new Uint8Array(T.nx * T.ny);
+  for (let j = 0; j < T.ny; j++) for (let i = 0; i < T.nx; i++) { K.archCoords(arch, T.x0 + i * cell, T.y0 + j * cell, o); isFront[j * T.nx + i] = Math.abs(o.s - mid) <= front ? 1 : 0; }
+  const oppAt = (x, y) => { const i = Math.round((x - O.x0) / cell), j = Math.round((y - O.y0) / cell); return i < 0 || j < 0 || i >= O.nx || j >= O.ny ? Infinity : O.z[j * O.nx + i]; };
+  const gapField = (sx, sy) => { const g = new Float32Array(T.nx * T.ny).fill(Infinity); let need = -Infinity; for (let j = 0; j < T.ny; j++) for (let i = 0; i < T.nx; i++) { const k = j * T.nx + i, t = T.z[k]; if (!(t > -1e9)) continue; const q = oppAt(T.x0 + i * cell - sx, T.y0 + j * cell - sy); if (!(q < 1e9)) continue; g[k] = q - t; if (t - q > need) need = t - q; } return { g, need }; };
+  const base = gapField(0, 0).need, D = K.guideDirs(jaw), out = {};
+  for (const [name, d] of Object.entries(D)) {
+    out[name] = dists.map((s) => {
+      const { g, need } = gapField(d[0] * s, d[1] * s); let back = Infinity, fMin = Infinity, bMin = Infinity, at = null, atG = Infinity;
+      for (let k = 0; k < g.length; k++) { if (!(g[k] < 1e9)) continue; const gap = g[k] + need; if (isFront[k]) { if (gap < fMin) fMin = gap; } else { if (gap < back) back = gap; if (gap < bMin) bMin = gap; } if (gap < atG) { atG = gap; const i = k % T.nx, j = (k / T.nx) | 0; at = [T.x0 + i * cell, T.y0 + j * cell, T.z[k]]; } }
+      return { s, lift: need - base, back, guide: fMin <= 0.05 && bMin <= 0.05 ? 'both' : bMin <= 0.05 ? 'back' : 'front', at };
+    });
+  }
+  return out;
+};
 K.DEFAULTS = { type: 'guard', tiltX: 0, tiltY: 0, retention: 0.1, clearance: 0.1, thickness: 2, minThick: 1, occlusal: 2, meet: true, imprint: 0, edge: 0.6, buccal: 3, lingual: 4, adjB: [], adjL: [], fineCell: 0.075, bodyCell: 0.25, fitCell: 0.2 };
 /**
  * Build the appliance.
@@ -657,7 +752,14 @@ K.build = async (inp, p0, stage = async () => {}) => {
   const crownAt = (x, y, z) => { K.archCoords(inp.arch, e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, o); return Math.abs(o.d) < 7 && o.over < 1 && e[2] * x + e[6] * y + e[10] * z > archTop(inp.arch, o.s) - 3; };
   const bd = K.body(hf, (x, y) => surfaceZ(mp, x, y), crownAt, planeZ, { h: gb, thickness: p.thickness, minThick: p.minThick, clearance: c, edge: p.edge, oppLow });
   if (!bd.mesh || !bd.mesh.indices.length) throw new Error('Nothing to build — the margin leaves no tooth covered.');
-  Object.assign(info, bd.info); const body = manOf(M, bd.mesh, C.ids); lap('body');
+  Object.assign(info, bd.info); let body = manOf(M, bd.mesh, C.ids); lap('body');
+  if (plane && p.ramps && p.ramps.length) {                         // guidance ramps on the table (arch frame), joined to the body
+    const bt = N.rasterHeightfield(N.transformMesh(bd.mesh, Ri), { cell: 0.2, mode: 'max', pad: 1 });     // the body's top, arch frame
+    const onTable = (x, y) => { const i = Math.round((x - bt.x0) / bt.cell), j = Math.round((y - bt.y0) / bt.cell); if (i < 1 || j < 1 || i >= bt.nx - 1 || j >= bt.ny - 1) return false; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if (!(bt.z[(j + b) * bt.nx + i + a] >= plane.a * x + plane.b * y + plane.d - 0.3)) return false; return true; };
+    const rs = K.rampSolid(p.ramps, plane, inp.oppA, onTable);
+    if (rs) { const rm = manOf(M, N.transformMesh(rs, R), C.ids), joined = body.add(rm); S.free(body, rm); body = joined; info.ramps = p.ramps.map((r) => r.kind); }
+    lap('ramps');
+  }
   // 4. appliance = body − cavity; keep the largest piece
   await stage('Cutting the fit surface…');
   const app0 = body.subtract(C.cav), parts = app0.decompose(); let big = parts[0];
@@ -743,7 +845,7 @@ const PRESETS = {
   thin: { kind: 'guard', label: 'Thin tray', note: 'A thin, retainer-style tray that follows the teeth closely. Thinner than some splint resins allow: check the instructions for your resin.', set: { thickness: 0.8, minThick: 0.5, edge: 0.4, buccal: 4, lingual: 4, useOpp: false } },
 };
 const P = { jaw: null, type: 'guard', tiltX: 0, tiltY: 0, retention: 0.1, clearance: 0.1, thickness: 2, minThick: 1, occlusal: 2, edge: 0.6, buccal: 3, lingual: 4, adjB: [], adjL: [],
-  useOpp: false, open: 0, openMode: 'hinge', meet: true, imprint: 0, showOpp: true, pos: 'case', map: 'thick', section: false, sectionAt: 25, sectionFlip: false };
+  useOpp: false, open: 0, openMode: 'hinge', meet: true, imprint: 0, showOpp: true, guide: false, gCan: true, gFront: true, gCa: 35, gFa: 30, gLen: 4, gTips: null, pos: 'case', map: 'thick', section: false, sectionAt: 25, sectionFlip: false };
 const NCTRL = 13;                                                 // margin control points per side
 const kindOf = () => (PRESETS[P.type] || PRESETS.guard).kind;
 const mkDesign = () => ({ jaw: null, raw: null, mtx: null, scanA: null, arch: null, hfA: null, cache: {}, res: null, meshCase: null, thick: null, contact: null, opp: null, dirty: true, error: '', object: null });
@@ -795,11 +897,25 @@ const shell = N.createShell({
           <div class="row flatOnly"><label><input type="checkbox" id="shMeet"> Table touches the opposing cusps</label></div>
           <div class="row flatOnly"><label>Cusp imprints</label><input type="range" id="shImp" min="0" max="0.6" step="0.05" value="0"><span class="val"></span></div>
           <div class="btns flatOnly"><button class="btn" id="shAuto" type="button" title="Find the smallest opening at which a flat table of the minimum thickness fits between the arches">Open just enough for the table</button></div>
+          <div class="flatOnly" id="gdBox">
+            <div class="h4">Guidance</div>
+            <div class="row"><label><input type="checkbox" id="gdOn"> Guidance ramps on the table</label></div>
+            <div id="gdOpts">
+              <div class="row"><label><input type="checkbox" id="gdCan"> Canine ramps (side-to-side)</label></div>
+              <div class="row"><label>Canine ramp steepness</label><input type="range" id="gdCa" min="15" max="60" step="1" value="35"><span class="val"></span></div>
+              <div class="row"><label><input type="checkbox" id="gdFront"> Front ramp (forward)</label></div>
+              <div class="row"><label>Front ramp steepness</label><input type="range" id="gdFa" min="15" max="60" step="1" value="30"><span class="val"></span></div>
+              <div class="row"><label>Ramp length</label><input type="range" id="gdLen" min="2" max="7" step="0.5" value="4"><span class="val"></span></div>
+              <div class="row"><label>Move a point</label><div class="seg" id="gdPick"><button data-v="right" type="button" title="Then tap the tip of the opposing canine on the patient's right">R canine</button><button data-v="inc" type="button" title="Then tap where the opposing front teeth meet the table">Front</button><button data-v="left" type="button" title="Then tap the tip of the opposing canine on the patient's left">L canine</button></div></div>
+              <div class="btns"><button class="btn" id="gdAuto" type="button" title="Find the opposing canine tips and front teeth again">Find the points again</button></div>
+            </div>
+          </div>
           <div class="row"><label><input type="checkbox" id="shShow"> Show the opposing arch</label></div>
         </div>
         <div class="row flatOnly" id="shOccRow"><label>Table above the highest cusp</label><input type="range" id="shOcc" min="0.5" max="5" step="0.1" value="2"><span class="val"></span></div>
       </div>
       <div id="shInfo"></div>
+      <p class="tip"><b>Guidance ramps</b> rise from where each opposing canine tip (and the front teeth) rests on the table, in the direction it slides when the jaw moves to that side (or forward), so the back teeth come apart. The three points are found on the opposing arch and shown as dots: check them, and move one by choosing it and tapping the right place. A ramp is only built where the table lies under it, so a point on the very edge gives a smaller ramp. Steepness and length are your choice for the patient; nothing here recommends a value. The Check step shows what the excursions would do, simplified: the opposing arch slides over the splint and rises just enough to stay on it — no condylar guidance, so check the splint in the mouth.</p>
       <p class="tip">“Fit clearance” is the gap left between the teeth and the inside of the appliance. “Minimum thickness” is the least the biting table is allowed to be over a cusp, and the level below which the Check step warns. The scans arrive in the bite they were taken in: “Open the bite” moves the opposing arch away to make room. “Hinge” turns the lower jaw about an average-value axis (see Sources); it is an approximation of a real opening movement — a bite recorded at the wanted opening is better. The appliance is never allowed to pass through the opposing arch.</p>
       <p class="tip" id="srcTip"></p>` },
     { id: 'check', title: 'Check', html: `
@@ -843,7 +959,7 @@ scans = N.createScanSet({
 // ───────────── the design: preparation, building, display ─────────────
 function pickJaw() { if (P.jaw && scans.has(P.jaw)) return P.jaw; return scans.has('upper') ? 'upper' : scans.has('lower') ? 'lower' : null; }
 function dropObject() { if (D.object) { viewer.remove(D.object); D.object = null; } }
-function resetDesign() { rev++; dropObject(); S.free(D.cache && D.cache.cav); D = mkDesign(); clearOverlays(); clearDots(); clearSection(); }
+function resetDesign() { rev++; if (D && D.jaw) P.gTips = null; dropObject(); S.free(D.cache && D.cache.cav); D = mkDesign(); clearOverlays(); clearDots(); clearSection(); }
 /** make sure the arch analysis matches the scan now loaded; false if there is nothing to design on */
 function prep() {
   const jaw = pickJaw(); if (!jaw) return false;
@@ -856,8 +972,20 @@ function prep() {
   } catch (e) { console.error(e); D.error = String((e && e.message) || e); D.arch = null; return false; }
   return true;
 }
-const buildParams = () => ({ type: kindOf(), tiltX: P.tiltX, tiltY: P.tiltY, retention: P.retention, clearance: P.clearance, thickness: P.thickness, minThick: P.minThick, occlusal: P.occlusal, meet: P.meet, imprint: P.imprint, edge: P.edge, buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
+const buildParams = () => ({ ramps: rampParams(), type: kindOf(), tiltX: P.tiltX, tiltY: P.tiltY, retention: P.retention, clearance: P.clearance, thickness: P.thickness, minThick: P.minThick, occlusal: P.occlusal, meet: P.meet, imprint: P.imprint, edge: P.edge, buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
 const otherJaw = () => (D.jaw === 'upper' ? 'lower' : 'upper');
+// ---- guidance: the opposing tips are kept in the opposing scan's own case-frame position (bite not opened), so opening the bite moves them with it ----
+const guideOn = () => P.guide && kindOf() === 'flat' && oppUsed();
+const toArchOpp = () => K.archMatrix(D.jaw).multiply(opposing().Om);
+/** the three points in the appliance's arch frame (found on the opposing arch the first time) */
+function guideTips() {
+  if (!oppUsed()) return null; const M = toArchOpp(), v = new THREE.Vector3();
+  if (!P.gTips) { const t = K.guideTips(opposing().meshA, D.arch, otherJaw() === 'upper', D.jaw === 'upper'), Mi = M.clone().invert(); P.gTips = {}; for (const k of ['right', 'left', 'inc']) P.gTips[k] = t[k] ? v.set(...t[k]).applyMatrix4(Mi).toArray() : null; }
+  const out = {}; for (const k of ['right', 'left', 'inc']) out[k] = P.gTips[k] ? v.set(...P.gTips[k]).applyMatrix4(M).toArray() : null; return out;
+}
+const rampParams = () => (guideOn() ? K.rampSpecs(guideTips(), D.jaw, { canine: P.gCan, front: P.gFront, canineAngle: P.gCa, frontAngle: P.gFa, length: P.gLen }) : []);
+/** how far along the arch from the midline counts as "the front" for the excursion check: just past the canines */
+function frontReach() { const t = guideTips(); if (!t) return 20; let km = 0; const A = D.arch, o = {}; for (let k = 1; k < A.n; k++) if (A.py[k] < A.py[km]) km = k; let m = 0; for (const sd of ['right', 'left']) if (t[sd]) { K.archCoords(A, t[sd][0], t[sd][1], o); m = Math.max(m, Math.abs(o.s - km * A.step)); } return m ? m + 3 : 20; }
 /** is there an opposing arch in the same bite, and does the user want it used? */
 const oppAvailable = () => !!(D.jaw && scans.has(otherJaw()) && scans.inBite), oppUsed = () => oppAvailable() && P.useOpp;
 /** how the opposing arch is moved to open the bite (case frame) */
@@ -887,6 +1015,7 @@ function setResult(res, meshCase = null) {
   D.meshCase = meshCase || N.transformMesh(res.mesh, K.archMatrix(D.jaw).invert()); D.res = res; D.dirty = false; D.error = '';
   D.thick = K.thickness(D.meshCase, res.triKind, P.edge + 0.25); gradeThickness();
   D.contact = oppUsed() ? K.contacts(N.transformMesh(D.meshCase, K.archMatrix(D.jaw)), res.triKind, opposing().meshA) : null;
+  D.exc = oppUsed() && kindOf() === 'flat' ? K.excursions(N.transformMesh(D.meshCase, K.archMatrix(D.jaw)), opposing().meshA, D.arch, D.jaw, frontReach(), [1, 2, 3]) : null;
   if (!res.report.volume) res.report.volume = Math.abs(N.meshVolume(D.meshCase));
   res.report.watertight = N.isWatertight(D.meshCase); res.report.tris = D.meshCase.indices.length / 3;
   makeObject();
@@ -1019,6 +1148,21 @@ function showThinnest() {
   if (!D.thick || !D.thick.worstAt) return; const pos = new THREE.Vector3(...D.thick.worstAt), bad = D.thick.worst < -0.1;
   thinMark = viewer.marker(pos, { color: bad ? 0xef4444 : 0xffffff, px: 14 }); thinLabel = viewer.label(`${D.thick.t[D.thick.worstV].toFixed(2)} mm${bad ? ' — too thin' : ''}`, pos, { dy: -16, color: bad ? 'rgba(185,28,28,.92)' : undefined });
 }
+let gDots = [];
+function showGuideDots(on) {
+  for (const d of gDots) { viewer.scene.remove(d.m); if (d.l) d.l.remove(); } gDots = [];
+  if (!on) return; const t = guideTips(); if (!t) return; const Ai = K.archMatrix(D.jaw).invert();
+  for (const [k, name] of [['right', 'R'], ['inc', 'F'], ['left', 'L']]) { if (!t[k]) continue; const pos = new THREE.Vector3(...t[k]).applyMatrix4(Ai), sel = gPick === k; gDots.push({ m: viewer.marker(pos, { color: sel ? 0xf59e0b : 0x7c3aed, px: sel ? 22 : 16 }), l: viewer.label(name, pos, { dy: -16 }) }); }
+}
+const guideTool = {
+  cursor: 'crosshair',
+  onDown: (i) => {
+    if (i.button !== 0 || !gPick) return false; const sc = scans[otherJaw()]; if (!sc) return false; const h = i.pick([sc.object]); if (!h) return false;
+    P.gTips = P.gTips || {}; P.gTips[gPick] = h.point.clone().applyMatrix4(opposing().Om.clone().invert()).toArray();       // shown opened: keep it in the scan's own position
+    const k = gPick; gPick = null; SEG.gPick(''); touch(true); refreshView(); shell.status(`${{ right: 'Right canine', left: 'Left canine', inc: 'Front' }[k]} point moved`); return true;
+  },
+  onMove: () => {}, onUp: () => {},
+};
 /** show what belongs to the current step */
 let framed = null;
 function refreshView() {
@@ -1047,6 +1191,8 @@ function refreshView() {
   if (design && jaw) { if (scans[jaw] && scans[jaw].object.visible !== showScan) scans.setVisible(jaw, showScan); if (scans[other] && scans[other].object.visible !== !!showOpp) scans.setVisible(other, !!showOpp); }
   else for (const j of JAWS) if (scans[j] && !scans[j].object.visible) scans.setVisible(j, true);
   if (id !== 'margin') clearDots();
+  const gOn = id === 'shell' && jaw && D.arch && guideOn() && !!showOpp; showGuideDots(gOn);
+  if (gOn && gPick) { if (viewer.tool !== guideTool) viewer.setTool(guideTool); shell.hint('Tap the opposing tooth where the point belongs.'); } else if (viewer.tool === guideTool) { viewer.setTool(null); shell.hint(''); }
   if (id === 'margin' && jaw && D.arch) { if (viewer.tool !== marginTool) viewer.setTool(marginTool); shell.hint('Drag a dot up or down to move the margin there.'); } else if (viewer.tool === marginTool) { viewer.setTool(null); shell.hint(''); }
   showSection();
   viewer.invalidate();
@@ -1101,12 +1247,19 @@ Object.assign(R, {
   open: N.rangeBind('shOpen', (v, done) => { P.open = v; if (done) touch(true); }, { fmt: mm }), imprint: N.rangeBind('shImp', (v, done) => { P.imprint = v; if (done) touch(true); }, { fmt: mm }),
   occlusal: N.rangeBind('shOcc', (v, done) => { P.occlusal = v; if (done) touch(true); }, { fmt: mm }),
 });
+Object.assign(R, {
+  gCa: N.rangeBind('gdCa', (v, done) => { P.gCa = v; if (done) touch(true); }, { fmt: (v) => v.toFixed(0) + '°' }),
+  gFa: N.rangeBind('gdFa', (v, done) => { P.gFa = v; if (done) touch(true); }, { fmt: (v) => v.toFixed(0) + '°' }),
+  gLen: N.rangeBind('gdLen', (v, done) => { P.gLen = v; if (done) touch(true); }, { fmt: mm }),
+});
+let gPick = null;
 const SEG = {
+  gPick: N.segBind($('gdPick'), (v) => { gPick = gPick === v ? null : v; SEG.gPick(gPick || ''); refreshView(); }),
   jaw: N.segBind($('apJaw'), (v) => { if (!scans.has(v)) return syncUI(); P.jaw = v; resetDesign(); syncUI(); refreshView(); }),
   map: N.segBind($('ckMap'), (v) => { P.map = v; refreshView(); }, P.map), pos: N.segBind($('exPos'), (v) => { P.pos = v; }, P.pos),
   mode: N.segBind($('shMode'), (v) => { P.openMode = v; touch(true); }, P.openMode),
 };
-for (const [id, key, rebuild] of [['shUse', 'useOpp', true], ['shMeet', 'meet', true], ['shShow', 'showOpp', false]]) $(id).addEventListener('change', (e) => { P[key] = e.target.checked; if (rebuild) touch(true); syncUI(); refreshView(); });
+for (const [id, key, rebuild] of [['shUse', 'useOpp', true], ['shMeet', 'meet', true], ['shShow', 'showOpp', false], ['gdOn', 'guide', true], ['gdCan', 'gCan', true], ['gdFront', 'gFront', true]]) $(id).addEventListener('change', (e) => { P[key] = e.target.checked; if (rebuild) touch(true); syncUI(); refreshView(); });
 $('shAuto').addEventListener('click', async () => {
   if (!prep() || !oppAvailable()) return shell.status('Load the opposing arch in the same bite first', true);
   await shell.busy('Finding the opening…', async () => {
@@ -1118,6 +1271,7 @@ $('shAuto').addEventListener('click', async () => {
   touch(true);
 });
 $('apType').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; P.type = b.dataset.v; Object.assign(P, PRESETS[P.type].set); paramsToUI(); touch(); syncUI(); shell.status(`${PRESETS[P.type].label}: starting values set`); });
+$('gdAuto').addEventListener('click', () => { P.gTips = null; if (oppUsed()) guideTips(); touch(true); refreshView(); shell.status('Guidance points found again'); });
 $('paReset').addEventListener('click', () => { P.tiltX = P.tiltY = 0; paramsToUI(); touch(); refreshView(); });
 $('mgReset').addEventListener('click', () => { P.adjB = []; P.adjL = []; showMargin(); touch(); shell.status('Local margin changes removed'); });
 $('ckSec').addEventListener('change', (e) => { P.section = e.target.checked; syncUI(); showSection(); if (P.section) faceSection(); });
@@ -1134,6 +1288,7 @@ $('paView').addEventListener('click', () => {
 function paramsToUI() {
   R.tiltX.set(P.tiltX); R.tiltY.set(P.tiltY); R.retention.set(P.retention); R.buccal.set(P.buccal); R.lingual.set(P.lingual); R.clearance.set(P.clearance); R.thickness.set(P.thickness); R.minThick.set(P.minThick); R.edge.set(P.edge);
   R.sectionAt.set(P.sectionAt); $('ckSec').checked = !!P.section;
+  R.gCa.set(P.gCa); R.gFa.set(P.gFa); R.gLen.set(P.gLen); $('gdOn').checked = !!P.guide; $('gdCan').checked = !!P.gCan; $('gdFront').checked = !!P.gFront;
   R.open.set(P.open); R.imprint.set(P.imprint); R.occlusal.set(P.occlusal); SEG.mode(P.openMode); $('shUse').checked = !!P.useOpp; $('shMeet').checked = !!P.meet; $('shShow').checked = !!P.showOpp;
   SEG.map(P.map); SEG.pos(P.pos); [...$('apType').children].forEach((b) => b.classList.toggle('on', b.dataset.v === P.type));
 }
@@ -1157,7 +1312,14 @@ function summaryHtml() {
     if (ct.through) warn.push(`The appliance passes through the opposing arch at ${ct.through} point${ct.through > 1 ? 's' : ''}.`);
     if (kindOf() === 'flat' && P.meet && ct.patches.length < 3) warn.push('Fewer than three contacts with the opposing teeth.');
   }
-  return `<div class="sum"><h5>${NAME[D.jaw]} appliance<span class="okb${r.watertight ? '' : ' bad'}">${r.watertight ? 'Watertight' : 'Not watertight'}</span></h5>
+  let exc = '';
+  if (D.exc) {
+    const row = (name, k) => { const q = D.exc[k][1]; return `<div><span>${name}, 2 mm</span><b>${q.guide === 'front' ? `back teeth clear by ${q.back.toFixed(1)} mm` : 'back teeth touch'}</b></div>`; };
+    exc = `<div class="sum"><h5>Excursions (simplified)</h5>${row('To the right', 'right')}${row('To the left', 'left')}${row('Forward', 'forward')}</div>`;
+    if (P.guide) for (const [k, n] of [['right', 'to the right'], ['left', 'to the left'], ['forward', 'forward']]) { const q = D.exc[k][1]; if (q.guide !== 'front') warn.push(`Moving ${n}, the back teeth still touch the splint at 2 mm: check the guidance points and make the ramp steeper or longer.`); }
+  }
+  if (r.ramps && r.ramps.length) opp += `<div><span>Guidance ramps</span><b>${r.ramps.map((k) => ({ right: 'R canine', left: 'L canine', front: 'front' })[k]).join(' · ')}</b></div>`;
+  return exc.replace(/^/, '') + `<div class="sum"><h5>${NAME[D.jaw]} appliance<span class="okb${r.watertight ? '' : ' bad'}">${r.watertight ? 'Watertight' : 'Not watertight'}</span></h5>
     <div><span>Thinnest biting surface</span><b>${f2(th && th.occ)}</b></div><div><span>Thinnest wall (away from the border)</span><b>${f2(th && th.wall)}</b></div>${opp}
     <div><span>Resin volume</span><b>${(r.volume / 1000).toFixed(2)} mL</b></div>
     <div><span>Triangles</span><b>${(r.tris || 0).toLocaleString('en-GB')}</b></div></div>
@@ -1170,7 +1332,7 @@ function syncUI() {
   $('paInfo').innerHTML = D.uc && jaw ? `<div class="note">${(D.uc.share * 100).toFixed(0)}% of this scan lies in an undercut for this path; deepest ${D.uc.max.toFixed(1)} mm.</div>` : '';
   const flat = kindOf() === 'flat', avail = oppAvailable();
   $('shTlab').textContent = flat ? 'Wall thickness' : 'Thickness'; $('shUse').disabled = !avail; $('shUseRow').title = avail ? '' : 'Needs the opposing arch, loaded in the same bite';
-  $('shOpp').hidden = !(avail && P.useOpp); for (const e of document.querySelectorAll('.flatOnly')) e.hidden = !flat; $('shOccRow').hidden = !flat || (avail && P.useOpp && P.meet);
+  $('shOpp').hidden = !(avail && P.useOpp); $('gdOpts').hidden = !P.guide; for (const e of document.querySelectorAll('.flatOnly')) e.hidden = !flat; $('shOccRow').hidden = !flat || (avail && P.useOpp && P.meet);
   $('ckSecRow').hidden = $('ckFace').hidden = $('ckFlip').hidden = !P.section;
   $('mgInfo').innerHTML = (P.adjB.some((v) => v) || P.adjL.some((v) => v)) ? '<div class="note">The margin has local changes.</div>' : '';
   $('ckMap').querySelector('[data-v=contact]').disabled = !(D.contact && !D.dirty); if (P.map === 'contact' && !D.contact) { P.map = 'thick'; SEG.map('thick'); }

@@ -9,7 +9,7 @@ const ok = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) proce
   const settle = () => page.evaluate(() => APP.H.q);
   const tool = (id) => page.frames().find((f) => f !== page.mainFrame() && new RegExp('/scan-card/' + id + '(\\.html|/)').test(f.url()));
   await page.waitForFunction(() => window.APP);
-  ok(await page.evaluate(() => document.querySelectorAll('#tabs button').length) === 6, 'six tabs (Scans + five tools)');
+  ok(await page.evaluate(() => document.querySelectorAll('#tabs button').length) === 8, 'eight tabs (Scans + seven tools)');
   await page.click('[data-ss=demo]'); await idle();
   ok(await page.evaluate(() => APP.scans.has('upper') && APP.scans.has('lower')), 'demo scans loaded on the Scans tab');
   await shot(OUT + 'h1-scans.png');

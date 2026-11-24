@@ -1117,8 +1117,12 @@ function surfaceNets(F, nx, ny, nz) {                           // F < 0 inside;
   return { V, T };
 }
 /**
- * makeDemoArch({ jaw:'lower'|'upper', res:0.3, missing:{12:5.5, 22:true}, spacing:0 })
+ * makeDemoArch({ jaw:'lower'|'upper', res:0.3, missing:{12:5.5, 22:true}, spacing:0, prep })
  *   missing: FDI → width of the gap left (true = the tooth's own width).   spacing: extra mm between each of the six front teeth.
+ *   prep: { fdi, zTop, zMargin, R0, shoulder, taper, taperLingual } — that tooth is a preparation of exactly known shape instead of a
+ *     crown: walls round its long axis (radius R0 at the margin) converging at `taper`° each (buccal, mesial, distal) and at
+ *     `taperLingual`° on the lingual / palatal (negative = an undercut; blended over ±8° at the corners), flat occlusal surface at
+ *     zTop, a shoulder `shoulder` mm wide at zMargin. Heights in the case frame. For testing preparation measurements.
  * → { mesh, truth:{ jaw, teeth:[{ fdi, type, width, mesial:[x,y,z], distal:[x,y,z], tip:[x,y,z], centre:[x,y,z] }], gaps:[{fdi,width,a,b}] } }
  *   tip = incisal edge midpoint, canine cusp, or the mesiobuccal cusp. gaps[].width = the slot left along the arch line (not the
  *   distance between the neighbours' contact points, which sit labial of that line on the front teeth).
@@ -1149,13 +1153,20 @@ export function makeDemoArch(o = {}) {
   const x0 = -(eP.x + 12), y0 = D.y0 - 9, nx = Math.ceil((2 * (eP.x + 12)) / h) + 1, ny = Math.ceil((eP.y + 3 - y0) / h) + 1, nz = Math.ceil((wMax - wMin) / h) + 1;
   const nearest = (x, y) => { let bd = Infinity, bk = 0; for (let k = 0; k < samples.length; k++) { const dx = x - samples[k][0], dy = y - samples[k][1], d = dx * dx + dy * dy; if (d < bd) { bd = d; bk = k; } } const S = samples[bk], dx = x - S[0], dy = y - S[1]; return { d: Math.sqrt(bd) * (dx * S[2] + dy * S[3] >= 0 ? 1 : -1), s: S[4] }; };
   const domeAt = (d, s) => { const ad = Math.abs(d), wdt = 4.6 + 1.6 * sstep(8, 30, Math.abs(s)), q = ad / wdt; let T = 0.4 - 2.2 * Math.pow(q, 2.6), k = 1 / Math.sqrt(1 + Math.pow(2.2 * 2.6 / wdt * Math.pow(q, 1.6), 2)); if (upper && d < 0) { const pal = -1.5 - 9 * sstep(0, 14, ad); if (pal > T) { T = pal; k = 0.85; } } return [T, k]; };
-  const F = new Float32Array(nx * ny * nz);
+  const F = new Float32Array(nx * ny * nz), pr = o.prep || null;
+  const zw = (z) => (upper ? D.ref - z : z + D.ref);                 // case-frame height → this generator's height
+  const toothF = (t, u, v, w) => {
+    if (!pr || t.fdi !== pr.fdi) return demoToothF(t, u, v, w);
+    const r = Math.hypot(u, v), lingual = r > 1e-6 ? -v / r : 0, ang = Math.acos(clamp(lingual, -1, 1)) * 180 / Math.PI, f = clamp((ang - 37) / 16, 0, 1);
+    const tau = (pr.taperLingual + (pr.taper - pr.taperLingual) * f) * Math.PI / 180, wMg = zw(pr.zMargin), wTop = zw(pr.zTop), R = pr.R0 - (w - wMg) * Math.tan(tau);
+    return Math.min(Math.max(r - R, w - wTop, wMg - w), Math.max(r - (pr.R0 + (pr.shoulder ?? 0.8)), w - wMg));
+  };
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
     const x = x0 + i * h, y = y0 + j * h, nr = nearest(x, y), [T, kT] = domeAt(nr.d, nr.s), cand = [];
     for (const t of teeth) { const dx = x - t.cx, dy = y - t.cy; if (dx * dx + dy * dy < (Math.max(t.md, t.bl) / 2 + 2.5) ** 2) cand.push([t, dx * t.tx + dy * t.ty, dx * t.nx + dy * t.ny]); }
     for (let k = 0; k < nz; k++) {
       const w = wMin + k * h; let f = (w - T) * kT;
-      if (cand.length) { let ft = Infinity; for (const c of cand) ft = sminP(ft, demoToothF(c[0], c[1], c[2], w), 0.55); f = sminP(f, ft, 1.0); }
+      if (cand.length) { let ft = Infinity; for (const c of cand) ft = sminP(ft, toothF(c[0], c[1], c[2], w), 0.55); f = sminP(f, ft, 1.0); }
       F[i + nx * (j + ny * k)] = f;
     }
   }
@@ -1453,6 +1464,63 @@ export function createScanSet(o) {
     setTimeout(() => { try { HUB.register(window, api); } catch (e) { console.error(e); } }, 0);
   }
   return S;
+}
+
+// ───────────────────────────── lining up two scans of the same arch ─────────────────────────────
+/** eigenvector of the largest eigenvalue of a symmetric 4×4 matrix (Jacobi) */
+function eigMax4(A) {
+  const a = A.map((r) => r.slice()), V = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+  for (let sweep = 0; sweep < 50; sweep++) {
+    let off = 0; for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) off += a[i][j] * a[i][j]; if (off < 1e-22) break;
+    for (let p = 0; p < 4; p++) for (let q = p + 1; q < 4; q++) {
+      if (Math.abs(a[p][q]) < 1e-30) continue; const th = (a[q][q] - a[p][p]) / (2 * a[p][q]), t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < 4; k++) { const akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - s * akq; a[k][q] = s * akp + c * akq; }
+      for (let k = 0; k < 4; k++) { const apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - s * aqk; a[q][k] = s * apk + c * aqk; }
+      for (let k = 0; k < 4; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq; }
+    }
+  }
+  let b = 0; for (let i = 1; i < 4; i++) if (a[i][i] > a[b][b]) b = i; return [V[0][b], V[1][b], V[2][b], V[3][b]];
+}
+/** The rigid motion (Matrix4) that best moves points src onto dst, least squares (Horn's quaternion method). src, dst: flat [x,y,z,…] */
+export function rigidFit(src, dst) {
+  const n = src.length / 3, cs = [0, 0, 0], cd = [0, 0, 0];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) { cs[k] += src[3 * i + k] / n; cd[k] += dst[3 * i + k] / n; }
+  const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) S[a][b] += (src[3 * i + a] - cs[a]) * (dst[3 * i + b] - cd[b]);
+  const [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]] = S;
+  const q = eigMax4([[xx + yy + zz, yz - zy, zx - xz, xy - yx], [yz - zy, xx - yy - zz, xy + yx, zx + xz], [zx - xz, xy + yx, -xx + yy - zz, yz + zy], [xy - yx, zx + xz, yz + zy, -xx - yy + zz]]);
+  const R = new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(q[1], q[2], q[3], q[0]).normalize()), c = new THREE.Vector3(...cs).applyMatrix4(R);
+  return R.setPosition(cd[0] - c.x, cd[1] - c.y, cd[2] - c.z);
+}
+/**
+ * Line up `moving` (a mesh; `start` = its first guess, a Matrix4 into the reference's frame) with `reference` by trimmed
+ * iterative closest points: every round, only the closest `keep` share of the pairs is used, so a part that really changed
+ * (wear, a new restoration, gum that was scanned further) does not pull the fit. Several start turns about the vertical are tried.
+ * → { matrix (moving → reference frame), rms (mm, over the pairs kept), kept (share), iterations }
+ */
+export function alignScans(moving, reference, o = {}) {
+  const keep = o.keep ?? 0.8, refG = new THREE.BufferGeometry(); refG.setAttribute('position', new THREE.BufferAttribute(reference.positions, 3)); refG.setIndex(new THREE.BufferAttribute(Uint32Array.from(reference.indices), 1));   // a copy: the BVH reorders it
+  const bvh = o.bvh || new MeshBVH(refG), P = moving.positions, nV = P.length / 3, hit = {}, q = new THREE.Vector3();
+  const sample = (n) => { const st = Math.max(1, Math.floor(nV / n)), out = []; for (let v = 0; v < nV; v += st) out.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); return out; };
+  const run = (M0, pts, iters, kp) => {
+    let M = M0.clone(), rms = Infinity, it = 0; const n = pts.length / 3, src = new Float64Array(n * 3), dst = new Float64Array(n * 3), d = new Float64Array(n), e = M.elements;
+    for (; it < iters; it++) {
+      const E = M.elements;
+      for (let i = 0; i < n; i++) { const x = pts[3 * i], y = pts[3 * i + 1], z = pts[3 * i + 2]; q.set(E[0] * x + E[4] * y + E[8] * z + E[12], E[1] * x + E[5] * y + E[9] * z + E[13], E[2] * x + E[6] * y + E[10] * z + E[14]); bvh.closestPointToPoint(q, hit); src[3 * i] = x; src[3 * i + 1] = y; src[3 * i + 2] = z; dst[3 * i] = hit.point.x; dst[3 * i + 1] = hit.point.y; dst[3 * i + 2] = hit.point.z; d[i] = hit.distance; }
+      const lim = Float64Array.from(d).sort()[Math.min(n - 1, Math.floor(n * kp))], s2 = [], d2 = []; let ss = 0, m = 0;
+      for (let i = 0; i < n; i++) if (d[i] <= lim) { s2.push(src[3 * i], src[3 * i + 1], src[3 * i + 2]); d2.push(dst[3 * i], dst[3 * i + 1], dst[3 * i + 2]); ss += d[i] * d[i]; m++; }
+      const nr = Math.sqrt(ss / Math.max(1, m)), Mn = rigidFit(s2, d2), mv = Math.abs(Mn.elements[12] - M.elements[12]) + Math.abs(Mn.elements[13] - M.elements[13]) + Math.abs(Mn.elements[14] - M.elements[14]);
+      M = Mn; if (Math.abs(rms - nr) < 1e-5 && mv < 1e-4) { rms = nr; break; } rms = nr;
+    }
+    return { M, rms, it };
+  };
+  const coarse = sample(1500), starts = o.turns || [0, -10, 10, -20, 20], c = new THREE.Vector3(...meshBounds(moving).center).applyMatrix4(o.start); let best = null;
+  for (const deg of starts) {                                     // turns about the vertical of the reference frame, through the moving scan's centre
+    const T = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(deg))).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z)).multiply(o.start);
+    const r = run(T, coarse, 30, 0.7); if (!best || r.rms < best.rms) best = r;
+  }
+  const fine = run(best.M, sample(o.points || 8000), 60, keep);
+  return { matrix: fine.M, rms: fine.rms, kept: keep, iterations: fine.it };
 }
 
 // ───────────────────────────── tidy and trim (shared step) ─────────────────────────────

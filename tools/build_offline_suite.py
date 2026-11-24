@@ -50,6 +50,8 @@ APPS = [
     ('scan-model', 'Scan Card: Models', '/scan-card/model/', (None, 'scan-card/model/index.html'), {'hidden': True}),
     ('scan-analysis', 'Scan Card: Analysis', '/scan-card/analysis/', (None, 'scan-card/analysis/index.html'), {'hidden': True}),
     ('scan-splint', 'Scan Card: Splint', '/scan-card/splint/', (None, 'scan-card/splint/index.html'), {'hidden': True}),
+    ('scan-compare', 'Scan Card: Compare', '/scan-card/compare/', (None, 'scan-card/compare/index.html'), {'hidden': True}),
+    ('scan-prep', 'Scan Card: Prep check', '/scan-card/prep/', (None, 'scan-card/prep/index.html'), {'hidden': True}),
     ('dentmat', 'DentMat', '/dentmat/', (None, 'dentmat/index.html'), {}),
     ('dentalaudit', 'DentalAudit', '/dentalaudit/', (None, 'dentalaudit/index.html'),
      {'lazy': ['js/vendor/jspdf.umd.min.js', 'js/vendor/jspdf.plugin.autotable.min.js', 'js/vendor/docx.iife.min.js']}),
