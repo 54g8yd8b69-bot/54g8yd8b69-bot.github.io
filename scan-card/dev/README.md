@@ -52,6 +52,7 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `h5-artifact.cjs` | the artifact copy: frames by address, the fetch + srcdoc fallback, and saving through a stand-in for the artifact's downloads (copy the built artifact folder to `art-test/`, add `index-srcdoc.html` with `"frames":"srcdoc"` and `index-claude.html` with a fake `window.claude`) |
 | `h6-big.cjs`, `h6-mem.cjs` | times and memory with 448k + 350k triangle scans |
 | `h7-lru.cjs` | with large scans the least recently used tool is closed and comes back with its work, at its step |
+| `h8-exports.cjs` | STL files saved through the hub are byte-identical to what the tool computes; a colour PLY scan keeps its colours into Wax Card (needs `NO_CSP=1`) |
 
 The built site pages are tested from the site's own `tests/smoke.js` (three Scan Card tests, under the real site CSP)
 and `tests/offline/offline.js` (Scan Card and all five tools inside the single offline file).
