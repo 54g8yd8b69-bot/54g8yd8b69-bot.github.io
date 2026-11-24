@@ -113,11 +113,17 @@ function oppBvh() {
 function region() {
   const g = geo(); if (!g || !P.seed || P.loop.length < 3) return null;
   const poly = P.loop.map((p) => [p[0], p[1]]), inside = (x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
-  const hit = {}; g.bvh.closestPointToPoint(new THREE.Vector3(...P.seed), hit); let f0 = hit.faceIndex;
-  if (!inside(g.cen[3 * f0], g.cen[3 * f0 + 1])) return null;
-  const reg = new Uint8Array(g.nF), stack = [f0]; reg[f0] = 1; let n = 1;
-  while (stack.length) { const f = stack.pop(); for (let k = 0; k < 3; k++) { const o = g.adj[3 * f + k]; if (o < 0 || reg[o] || !inside(g.cen[3 * o], g.cen[3 * o + 1])) continue; reg[o] = 1; n++; stack.push(o); } }
-  return n > 20 ? reg : null;
+  // …and on the biting side of the margin: the margin's height there (from the nearest margin points, in plan), less a quarter
+  // of a millimetre. Without this, on a model with a base (a closed surface) the flood runs down the base's walls and onto its back.
+  const u = up(), lp = P.loop, near = (x, y) => { let w = 0, h = 0; for (const q of lp) { const d2 = (q[0] - x) ** 2 + (q[1] - y) ** 2 + 0.01, wi = 1 / (d2 * d2); w += wi; h += wi * q[2]; } return h / w; };
+  const ok = (f) => { const x = g.cen[3 * f], y = g.cen[3 * f + 1]; return inside(x, y) && u * g.cen[3 * f + 2] >= u * near(x, y) - 0.25; };
+  const grow = (f0, reg) => { const stack = [f0]; reg[f0] = 1; let n = 1; while (stack.length) { const f = stack.pop(); for (let k = 0; k < 3; k++) { const o = g.adj[3 * f + k]; if (o < 0 || reg[o] || !ok(o)) continue; reg[o] = 1; n++; stack.push(o); } } return n; };
+  const hit = {}; g.bvh.closestPointToPoint(new THREE.Vector3(...P.seed), hit); const f0 = hit.faceIndex;
+  if (ok(f0)) { const reg = new Uint8Array(g.nF), n = grow(f0, reg); if (n > 20) return reg; }
+  // the tooth tap missed (it landed on the margin, or outside it): take the largest piece of surface inside the margin instead
+  const seen = new Uint8Array(g.nF); let best = null, bestN = 0;
+  for (let f = 0; f < g.nF; f++) { if (seen[f] || !ok(f)) continue; const reg = new Uint8Array(g.nF), n = grow(f, reg); for (let k = 0; k < g.nF; k++) if (reg[k]) seen[k] = 1; if (n > bestN) { bestN = n; best = reg; } }
+  return bestN > 20 ? best : null;
 }
 
 // ───────────── the measurements ─────────────
@@ -250,7 +256,7 @@ function syncUI() {
   const jaw = pickJaw(), both = scans.has('upper') && scans.has('lower');
   $('ptJawRow').hidden = !both; for (const b of $('ptJaw').children) b.disabled = !scans.has(b.dataset.v); SEG.jaw(jaw || '');
   $('ptLead').textContent = !jaw ? 'Load a scan first.' : !P.seed ? 'Tap the prepared tooth.' : P.loop.length < 3 ? 'Now tap round the margin, in order, all the way round.' : 'Keep tapping round the margin if it is not yet all the way round, or go on to the path of insertion.';
-  $('ptCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}${R ? ` · prepared surface ${R.total.toFixed(1)} mm²` : P.loop.length >= 3 ? ' · the tooth tap is not inside the margin' : ''}` : '';
+  $('ptCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}${R ? ` · prepared surface ${R.total.toFixed(1)} mm²` : P.loop.length >= 3 ? ' · no surface found inside the margin — check the points go all the way round the tooth' : ''}` : '';
   $('pbInfo').innerHTML = !R ? '<div class="note warn">Mark the prepared tooth first.</div>' : `<div class="sum"><h5>Path of insertion<span class="okb${R.uSelf + R.uBlock > 0.5 ? ' bad' : ''}">${R.uSelf + R.uBlock > 0.5 ? 'Not clear' : 'Clear'}</span></h5><div><span>From the occlusal axis</span><b>${R.tilt.toFixed(1)}°</b></div><div><span>Undercut</span><b>${R.uSelf.toFixed(1)} mm²</b></div><div><span>Another tooth in the way</span><b>${R.uBlock.toFixed(1)} mm²</b></div></div>`;
   $('ckTgtRow').hidden = P.map !== 'clear'; $('ckMap').querySelector('[data-v=clear]').disabled = !(R && R.clear);
   if (!R) $('ckOut').innerHTML = '<div class="note warn">Mark the prepared tooth first.</div>';
