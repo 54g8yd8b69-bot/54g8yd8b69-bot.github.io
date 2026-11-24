@@ -1,0 +1,9 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>stl view</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"}}</script>
+<style>html,body{margin:0;height:100%;background:#0b1d31}#v{position:absolute;inset:0}</style></head><body><div id="v"></div>
+<script type="module">
+import * as N from './core.js';
+const viewer = N.createViewer(document.getElementById('v')); let cur = null;
+window.show = async (url, dir, crease = 35) => { const buf = await (await fetch(url)).arrayBuffer(); const m = N.parseMesh(buf, 'stl', url); if (cur) viewer.remove(cur); cur = new N.THREE.Mesh(N.toGeometry(m, { crease, bvh: false }), N.materials.model({ side: N.THREE.DoubleSide })); viewer.add(cur); viewer.fit(null, { dir }); return m.indices.length / 3; };
+window.READY = true;
+</script></body></html>

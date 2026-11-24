@@ -1,7 +1,7 @@
 {
   "name": "Notile",
   "short_name": "Notile",
-  "description": "Browser-based tools for dental clinicians: notes, charting, set-up lists, lab cards, smile design, digital wax-ups, special trays, a materials reference, clinical audit and a guidelines library.",
+  "description": "Browser-based tools for dental clinicians: notes, charting, set-up lists, lab cards, smile design, models, splints, trays and wax-ups from scans, a materials reference, clinical audit and a guidelines library.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -21,8 +21,7 @@
     {"name": "DentMat", "url": "/dentmat/"},
     {"name": "DentalAudit", "url": "/dentalaudit/"},
     {"name": "Smile Card", "url": "/smile-card/"},
-    {"name": "Wax Card", "url": "/wax-card/"},
-    {"name": "Tray Card", "url": "/tray-card/"},
+    {"name": "Scan Card", "url": "/scan-card/"},
     {"name": "Guide Card", "url": "/guide-card/"}
   ]
 }

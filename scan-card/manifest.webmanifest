@@ -1,0 +1,22 @@
+{
+  "name": "Scan Card",
+  "short_name": "Scan Card",
+  "description": "Study models, model analysis, splints, special trays and wax-ups from one patient scan.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B2E4A",
+  "theme_color": "#0B2E4A",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

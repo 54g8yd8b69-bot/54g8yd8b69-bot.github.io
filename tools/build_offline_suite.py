@@ -4,7 +4,7 @@
 
     python3 tools/build_offline_suite.py --apps <dir containing notile/ set-app/ chrome-card/ ortho-card/> [-o Notile-Suite.html]
 
-Apps hosted in this repo (dentmat, dentalaudit, smile-card, wax-card, tray-card, trauma-card, letter-card,
+Apps hosted in this repo (scan-card, dentmat, dentalaudit, smile-card, wax-card, tray-card, trauma-card, letter-card,
 implantref, guide-card) are read from here; the four
 apps with their own repos are read from --apps (clone them next to each other).
 
@@ -20,6 +20,9 @@ How it works
     browsers without it. That keeps the file well under 16 MiB.
   * ImplantRef is included without its camera scanner (scan.js, ZXing, OCR model, GTIN table): it hides
     the Scan buttons when the scanner isn't present.
+  * Scan Card shows its tools in frames of its own. There are no addresses to load inside one file, so it asks
+    the suite for each tool's page (SUITE.page) and puts that in the frame. Its Models, Analysis and Splint pages,
+    and Wax Card and Tray Card (which it opens as tabs), are in the file but have no button of their own.
 Dictate (/dictate/) is left out: it needs the ~100 MB speech model served from the site.
 Data entered in the file is saved by the browser for that file on that computer only.
 """
@@ -43,12 +46,16 @@ APPS = [
     ('set-list', 'Set-App list', '/set-app/list.html', ('set-app', 'list.html'), {'hidden': True}),
     ('chrome-card', 'Chrome Card', '/chrome-card/', ('chrome-card', 'index.html'), {}),
     ('ortho-card', 'Ortho Card', '/ortho-card/', ('ortho-card', 'index.html'), {}),
+    ('scan-card', 'Scan Card', '/scan-card/', (None, 'scan-card/index.html'), {}),
+    ('scan-model', 'Scan Card: Models', '/scan-card/model/', (None, 'scan-card/model/index.html'), {'hidden': True}),
+    ('scan-analysis', 'Scan Card: Analysis', '/scan-card/analysis/', (None, 'scan-card/analysis/index.html'), {'hidden': True}),
+    ('scan-splint', 'Scan Card: Splint', '/scan-card/splint/', (None, 'scan-card/splint/index.html'), {'hidden': True}),
     ('dentmat', 'DentMat', '/dentmat/', (None, 'dentmat/index.html'), {}),
     ('dentalaudit', 'DentalAudit', '/dentalaudit/', (None, 'dentalaudit/index.html'),
      {'lazy': ['js/vendor/jspdf.umd.min.js', 'js/vendor/jspdf.plugin.autotable.min.js', 'js/vendor/docx.iife.min.js']}),
     ('smile-card', 'Smile Card', '/smile-card/', (None, 'smile-card/index.html'), {}),
-    ('wax-card', 'Wax Card', '/wax-card/', (None, 'wax-card/index.html'), {}),
-    ('tray-card', 'Tray Card', '/tray-card/', (None, 'tray-card/index.html'), {}),
+    ('wax-card', 'Wax Card', '/wax-card/', (None, 'wax-card/index.html'), {'hidden': True}),     # opened from inside Scan Card
+    ('tray-card', 'Tray Card', '/tray-card/', (None, 'tray-card/index.html'), {'hidden': True}),  # opened from inside Scan Card
     ('trauma-card', 'Trauma Card', '/trauma-card/', (None, 'trauma-card/index.html'), {}),
     ('letter-card', 'Letter Card', '/letter-card/', (None, 'letter-card/index.html'), {}),
     ('implantref', 'ImplantRef', '/implantref/', (None, 'implantref/index.html'),
@@ -286,6 +293,8 @@ var frames={{}},current=null;
 window.SUITE={{
   lazy:{{}},
   fonts:function(w){{try{{fontBufs().forEach(function(f){{var ff=new w.FontFace(f.f,f.b.slice(0),{{style:f.s,weight:f.w}});w.document.fonts.add(ff);ff.load().catch(function(){{}})}})}}catch(e){{}}}},
+  /* the page of an app in this file, for an app that shows others in frames of its own (Scan Card) */
+  page:function(path){{var r=route(path);return r?unpack(r.id):Promise.reject(new Error('Not in this file: '+path))}},
   go:function(path){{if(path==='/'||path===''){{location.hash='';return}}var r=route(path);if(!r)return;location.hash=r.id+(r.hash?'/'+r.hash:'')}}
 }};
 function show(id,sub){{var home=document.getElementById('home'),view=document.getElementById('view');

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Card — model builder</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+ "manifold-3d/manifold.js":"https://cdn.jsdelivr.net/npm/manifold-3d@3.5.5/manifold.js"
+}}
+</script>
+<script src="manifold-wasm.js"></script>
+<style>
+.lblrow input[type=text]{flex:none;width:64px;text-transform:uppercase;text-align:center;letter-spacing:1px;font-weight:600}
+.lblrow label{flex:none;width:48px}
+.lblrow .sp{flex:1}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+</style>
+</head>
+<body>
+<script type="module">
+import * as N from './core.js';
+import * as S from './solid.js';
+const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' };
+
+// ───────────── settings and per-arch state ─────────────
+const P = { baseH: 5, smooth: 2, margin: 0, style: 'horseshoe', plateT: 3, bar: false, hollow: false, wall: 2.5, underside: 'open', notches: 4, labelStyle: 'raised', labelSize: 3.5, hinge: false, pos: 'print' };
+const mkArch = () => ({ model: null, work: null, object: null, info: null, error: '', dirty: true, label: { text: '', at: null, rot: 0 } });
+const A = { upper: mkArch(), lower: mkArch() };
+const FLIP = N.rotationAbout('y', 180);                               // case frame ↔ "teeth up" for an upper arch (its own inverse)
+const workM = (jaw) => (jaw === 'upper' ? FLIP.clone() : new THREE.Matrix4());
+let scans, labelJaw = 'lower', rev = 0;
+
+// ───────────── shell ─────────────
+const shell = N.createShell({
+  name: 'Model Card', tagline: 'Model builder · scan to printable model', title: 'Model Card — model builder',
+  emptyHtml: '<div><b>No scan loaded</b>Drop an STL, PLY or OBJ scan here, or use “Load scans”.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'trim', title: 'Tidy and trim', optional: true, html: '' },
+    { id: 'base', title: 'Base', html: `
+      <p class="lead">The scan is closed into a solid model with a flat base, parallel to the biting plane.</p>
+      <div class="row"><label>Shape</label><div class="seg" id="bsStyle"><button data-v="horseshoe" type="button" title="The base follows the outline of the scan">Follows the scan</button><button data-v="full" type="button" title="A flat plate fills in the middle of the arch">Full base</button></div></div>
+      <div class="row"><label>Base height</label><input type="range" id="bsH" min="1" max="15" step="0.5" value="5"><span class="val"></span></div>
+      <div class="row" id="bsPlateRow" hidden><label>Plate thickness</label><input type="range" id="bsPlate" min="1.5" max="8" step="0.5" value="3"><span class="val"></span></div>
+      <div class="row"><label>Tidy the outline</label><input type="range" id="bsSmooth" min="0.3" max="4" step="0.1" value="2"><span class="val"></span></div>
+      <div class="row"><label>Extra margin</label><input type="range" id="bsMargin" min="0" max="4" step="0.25" value="0"><span class="val"></span></div>
+      <div class="row" id="bsBarRow"><label><input type="checkbox" id="bsBar"> Bar across the back (stiffens a horseshoe model)</label></div>
+      <div class="row" id="bsHingeRow" hidden><label><input type="checkbox" id="bsHinge"> Bite hinge (ball-and-socket posts so the two models close into the scanned bite)</label></div>
+      <div id="bsInfo"></div>
+      <p class="tip">“Base height” is measured from the lowest edge of the scan down to the underside. “Tidy the outline” smooths the ragged scan edge into a clean wall; “Extra margin” moves the wall outward. The surface of the scan itself is never altered. With the bite hinge, print both models, seat the balls in the sockets and the models close in the bite the scanner recorded.</p>` },
+    { id: 'hollow', title: 'Hollow and drain', optional: true, html: `
+      <div class="row"><label>Inside</label><div class="seg" id="hoMode"><button data-v="solid" type="button">Solid</button><button data-v="hollow" type="button">Hollow</button></div></div>
+      <div id="hoOpts" hidden>
+        <div class="row"><label>Wall thickness</label><input type="range" id="hoWall" min="1.5" max="4" step="0.25" value="2.5"><span class="val"></span></div>
+        <div class="row"><label>Underside</label><div class="seg" id="hoUnder"><button data-v="open" type="button" title="No floor: the cavity is open underneath">Open</button><button data-v="closed" type="button" title="A floor with two drain holes">Closed + drain holes</button></div></div>
+        <div class="row" id="hoNotchRow"><label>Vent notches in the rim</label><input type="range" id="hoNotch" min="0" max="8" step="1" value="4"><span class="val"></span></div>
+      </div>
+      <div id="hoInfo"></div>
+      <p class="tip">A hollow model uses much less resin and prints faster. With an open underside printed flat on the build plate, the vent notches let resin and air escape so the model does not form a suction cup. A closed underside gets two drain holes through the floor. Wall thickness is accurate to about ±0.4 mm.</p>` },
+    { id: 'label', title: 'Label', optional: true, html: `
+      <p class="lead">A short label of up to 4 characters. Do not use patient details.</p>
+      <div class="row lblrow"><label>Upper</label><input type="text" id="lbTupper" maxlength="4" autocomplete="off" spellcheck="false" aria-label="Upper label"><button class="btn" id="lbPupper" type="button" title="Then click a flat part of the upper model">Place…</button><button class="btn" id="lbXupper" type="button" title="Remove the upper label">✕</button></div>
+      <div class="row lblrow"><label>Lower</label><input type="text" id="lbTlower" maxlength="4" autocomplete="off" spellcheck="false" aria-label="Lower label"><button class="btn" id="lbPlower" type="button" title="Then click a flat part of the lower model">Place…</button><button class="btn" id="lbXlower" type="button" title="Remove the lower label">✕</button></div>
+      <div class="row"><label>Style</label><div class="seg" id="lbStyle"><button data-v="raised" type="button">Raised</button><button data-v="engraved" type="button">Engraved</button></div></div>
+      <div class="row"><label>Letter height</label><input type="range" id="lbSize" min="2.5" max="7" step="0.5" value="3.5"><span class="val"></span></div>
+      <div class="row"><label>Turn</label><input type="range" id="lbRot" min="-180" max="180" step="5" value="0"><span class="val"></span></div>
+      <p class="tip">Type the label, press “Place…”, then click where it should go. Flat areas work best: the underside of a solid model, the back wall, the plate or the bar. Letters A–Z, 0–9 and - . / # + are available.</p>` },
+    { id: 'export', title: 'Export', html: `
+      <div id="exSummary"></div>
+      <div class="row"><label>Position</label><div class="seg" id="exPos"><button data-v="print" type="button" title="Each model sits base-down at Z = 0, ready for the slicer">Flat for printing</button><button data-v="scan" type="button" title="Exactly where the scanner put the scans, so the models line up with them in other software">As scanned</button></div></div>
+      <div class="btns"><button class="btn pri" id="exStl" type="button" title="Download the model(s) as STL">Download STL</button><button class="btn" id="exCase" type="button" title="Save scans and models as one case file for the other apps">Save case</button></div>
+      <p class="note">A design aid for making study and working models. Check each printed model against the scan and the patient before relying on it.</p>
+      <p class="tip">Sizes are in millimetres. “Flat for printing” gives one STL per arch with the base on Z = 0. If both arches were built you get both files together in one zip.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const STEP = (id) => shell.steps.findIndex((s) => s.id === id);
+const present = () => JAWS.filter((j) => scans && scans.has(j));
+
+scans = N.createScanSet({
+  shell, viewer, appName: 'Model Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility' || what === 'case') return; for (const j of JAWS) invalidate(j); syncUI(); if (['base', 'hollow', 'label', 'export'].includes(shell.steps[shell.current].id) && present().length) ensureBuilt(); },
+  extendCase: (c) => {
+    for (const j of JAWS) { const a = A[j], role = j + '-model'; c.remove(role); if (a.model && !a.dirty && scans[j]) c.add({ role, name: `model-${j}`, mesh: N.transformMesh(a.model, scans[j].matrix.clone().invert()), matrix: scans[j].matrix, meta: { info: a.info } }); }
+    c.data.model = { version: 1, params: { ...P }, labels: { upper: { ...A.upper.label }, lower: { ...A.lower.label } } };
+  },
+  readCase: (c) => {
+    const d = c.data.model;
+    if (d && d.params) Object.assign(P, d.params);
+    for (const j of JAWS) {
+      dropObject(j); A[j] = mkArch(); if (d && d.labels && d.labels[j]) A[j].label = { text: '', at: null, rot: 0, ...d.labels[j] };
+      const it = c.get(j + '-model'); if (it && scans[j]) { const mesh = N.transformMesh(it.mesh, it.matrix); setModel(j, mesh, N.transformMesh(mesh, workM(j)), (it.meta && it.meta.info) || null); }
+    }
+    paramsToUI(); syncUI();
+  },
+});
+
+// ───────────── models in the scene ─────────────
+const panel = scans.panel;
+panel.insertAdjacentHTML('beforeend', JAWS.map((j) => `<div class="row" data-mvis="${j}" hidden><label><input type="checkbox" checked> ${NAME[j]} model</label></div>`).join(''));
+panel.addEventListener('change', (e) => { const r = e.target.closest('[data-mvis]'); if (r && A[r.dataset.mvis].object) { A[r.dataset.mvis].object.visible = e.target.checked; viewer.invalidate(); } });
+function dropObject(j) { const a = A[j]; if (a.object) { viewer.remove(a.object); a.object = null; } panel.querySelector(`[data-mvis=${j}]`).hidden = true; }
+function invalidate(j) { const a = A[j]; rev++; a.dirty = true; a.model = a.work = null; a.info = null; a.error = ''; a.pre = null; dropObject(j); }
+function setModel(j, mesh, work, info) {
+  const a = A[j]; dropObject(j); a.model = mesh; a.work = work; a.info = info; a.dirty = false; a.error = '';
+  a.object = new THREE.Mesh(N.toGeometry(mesh, { crease: 38 }), N.materials.model()); a.object.name = j + '-model'; viewer.add(a.object);
+  const row = panel.querySelector(`[data-mvis=${j}]`); row.hidden = false; row.querySelector('input').checked = true;
+}
+/** show the built models (and hide the scans they contain) or the other way round */
+function showModels(on) {
+  for (const j of JAWS) { const a = A[j]; if (a.object) a.object.visible = on; if (scans[j]) scans[j].object.visible = !(on && a.object); }
+  for (const j of JAWS) { const r = panel.querySelector(`[data-vis=${j}] input`); if (r && scans[j]) r.checked = scans[j].object.visible; const m = panel.querySelector(`[data-mvis=${j}] input`); if (m && A[j].object) m.checked = A[j].object.visible; }
+  viewer.invalidate();
+}
+
+// ───────────── building a model ─────────────
+function labelMatrix(at, rot) {                                 // text plane on the surface: z = outward normal, y = "up"
+  const n = new THREE.Vector3(...at.n).normalize(), ref = Math.abs(n.z) < 0.7 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const y = ref.clone().addScaledVector(n, -ref.dot(n)).normalize().applyAxisAngle(n, THREE.MathUtils.degToRad(rot || 0)), x = new THREE.Vector3().crossVectors(y, n);
+  return new THREE.Matrix4().makeBasis(x, y, n).setPosition(...at.p);
+}
+async function buildJaw(jaw) {
+  const M = await S.ready(), a = A[jaw], W = workM(jaw), sc = scans[jaw], myRev = rev;
+  if (!sc) return;                                               // the scan was removed while we were waiting
+  const key = JSON.stringify([P.baseH, P.smooth, P.margin, P.style, P.plateT, P.bar, P.hollow, P.wall, P.underside, P.notches, P.hinge && hingeSpec, sc.raw.indices.length, sc.matrix.elements]);
+  if (!(a.pre && a.preKey === key && a.preRaw === sc.raw)) { a.pre = await buildBody(M, jaw, W); a.preKey = key; a.preRaw = sc.raw; }
+  const { baseZ, cavity } = a.pre, notes = a.pre.notes.slice();
+  let man = S.toManifold(a.pre.mesh);
+  const add = (o) => { const t = man.add(o); S.free(man, o); man = t; }, sub = (o) => { const t = man.subtract(o); S.free(man, o); man = t; };
+  const L = a.label;
+  if (L.text && L.at) {
+    const pre = { positions: a.pre.mesh.positions, indices: a.pre.mesh.indices.slice() }, bvh = new N.MeshBVH(N.toGeometry(pre, { bvh: false })), hit = {}; bvh.closestPointToPoint(new THREE.Vector3(...L.at.p), hit);
+    if (hit.point) { const I = pre.indices, Q = pre.positions, f = hit.faceIndex * 3, va = new THREE.Vector3().fromArray(Q, I[f] * 3), vb = new THREE.Vector3().fromArray(Q, I[f + 1] * 3), vc = new THREE.Vector3().fromArray(Q, I[f + 2] * 3), n = vb.sub(va).cross(vc.sub(va)).normalize(); L.at = { p: hit.point.toArray(), n: n.toArray() }; }
+    const raised = P.labelStyle === 'raised', depth = 0.5, txt = S.textSolid(L.text, { height: P.labelSize, depth: depth + 0.5 });
+    if (txt) { const placed = txt.translate(0, 0, raised ? -0.5 : -depth).transform(S.mat4(labelMatrix(L.at, L.rot))); S.free(txt); if (raised) add(placed); else sub(placed); }
+  }
+  const work = L.text && L.at ? S.fromManifold(man) : a.pre.mesh, volume = man.volume(), bb = man.boundingBox(); S.free(man);
+  const info = { volume, cavity, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], tris: work.indices.length / 3, watertight: N.isWatertight(work), baseZ, notes };
+  if (myRev !== rev) return;                                     // something changed while this was being built: the next pass redoes it
+  setModel(jaw, N.transformMesh(work, W.clone().invert()), work, info);
+}
+/** everything except the label: scan → solid, base shape, hollowing, hinge. → { mesh (work frame), baseZ, cavity, notes } */
+async function buildBody(M, jaw, W) {
+  const notes = [];
+  const scan = N.transformMesh(scans.framed(jaw), W), b = N.meshBounds(scan), baseZ = b.min[2] - P.baseH;
+  const r = S.scanToSolid(scan, { baseZ, margin: P.margin, smooth: P.smooth });
+  let man = S.toManifold(r.mesh);
+  const add = (o) => { const t = man.add(o); S.free(man, o); man = t; }, sub = (o) => { const t = man.subtract(o); S.free(man, o); man = t; };
+  const rp = r.report; if (rp.holesFilled) notes.push(`${rp.holesFilled} hole${rp.holesFilled > 1 ? 's' : ''} closed (largest ${rp.largestHole.toFixed(0)} mm round)`); if (rp.piecesDropped) notes.push(`${rp.piecesDropped} separate piece${rp.piecesDropped > 1 ? 's' : ''} left out`);
+  const O = r.outline;
+  if (O && P.style === 'full') { const cs = new M.CrossSection([O], 'NonZero'), hull = cs.hull(); add(hull.extrude(Math.min(P.plateT, P.baseH)).translate(0, 0, baseZ)); S.free(cs, hull); }
+  if (O && P.style === 'horseshoe' && P.bar) {
+    let yL = -Infinity, yR = -Infinity; for (const p of O) { if (p[0] < 0 && p[1] > yL) yL = p[1]; if (p[0] > 0 && p[1] > yR) yR = p[1]; }
+    const yb = Math.min(yL, yR) - 1, wBar = 6, hBar = Math.min(3, P.baseH); let sL = 0, nL = 0, sR = 0, nR = 0;
+    for (const p of O) if (p[1] > yb - wBar && p[1] < yb + 1) { if (p[0] < 0) { sL += p[0]; nL++; } else { sR += p[0]; nR++; } }
+    if (nL && nR && sR / nR - sL / nL > 8) add(M.Manifold.cube([sR / nR - sL / nL, wBar, hBar]).translate(sL / nL, yb - wBar, baseZ)); else notes.push('no room for a bar');
+  }
+  let cavity = 0;
+  if (P.hollow) {
+    const open = P.underside === 'open', h = S.hollow(man, { wall: P.wall, openBelow: open ? baseZ : undefined });
+    if (h.cavityVolume > 0) {
+      S.free(man); man = h.solid; cavity = h.cavityVolume;
+      if (open && P.notches > 0 && O) { const nO = O.length; for (let k = 0; k < P.notches; k++) { const j = Math.floor((k + 0.5) * nO / P.notches), p = O[j], q0 = O[(j + nO - 2) % nO], q1 = O[(j + 2) % nO], ang = Math.atan2(q1[1] - q0[1], q1[0] - q0[0]) * 180 / Math.PI; sub(M.Manifold.cylinder(2 * (P.wall + P.margin) + 6, 1.5, 1.5, 24, true).rotate([90, 0, 0]).rotate([0, 0, ang]).translate(p[0], p[1], baseZ)); } }
+      if (!open) { const F = h.field, k = Math.min(F.nz - 1, Math.max(0, Math.round((baseZ + P.wall + 1.2 - F.z0) / F.cell - 0.5))); let done = 0;
+        for (const side of [-1, 1]) { let best = P.wall + 0.8, bi = -1, bj = -1; for (const far of [12, 1]) { for (let j = 0; j < F.ny; j++) for (let i = 0; i < F.nx; i++) { const x = F.x0 + (i + 0.5) * F.cell; if (x * side <= far) continue; const d = F.d[(k * F.ny + j) * F.nx + i]; if (d > best) { best = d; bi = i; bj = j; } } if (bi >= 0) break; } if (bi >= 0) { sub(M.Manifold.cylinder(P.wall + 4, 1.75, 1.75, 24).translate(F.x0 + (bi + 0.5) * F.cell, F.y0 + (bj + 0.5) * F.cell, baseZ - 1)); done++; } }
+        if (done < 2) notes.push(done ? 'only one drain hole fitted' : 'no room for drain holes'); }
+    } else { S.free(h.solid); notes.push('too thin to hollow at this wall thickness'); }
+  }
+  if (P.hinge && hingeSpec) addHinge(M, jaw, baseZ, add, sub, notes);
+  { // anything not joined to the main body would print as a loose bit; a sealed bubble would trap resin: leave both out and say so
+    const parts = man.decompose();
+    if (parts.length > 1) {
+      let big = parts[0]; for (const q of parts) if (q.volume() > big.volume()) big = q;
+      const sealed = cavity > 0 && P.underside === 'closed', keep = parts.filter((q) => q === big || (sealed && q.volume() < 0)), lost = parts.filter((q) => !keep.includes(q));
+      if (lost.length) {
+        const nm = keep.length === 1 ? keep[0].translate(0, 0, 0) : M.Manifold.compose(keep); S.free(man); man = nm;
+        const loose = lost.filter((q) => q.volume() > 0).length, bub = lost.length - loose;
+        if (loose) notes.push(`${loose} loose piece${loose > 1 ? 's' : ''} left out`); if (bub) notes.push(`${bub} sealed bubble${bub > 1 ? 's' : ''} filled in`);
+      }
+    }
+    S.free(...parts);
+  }
+  const mesh = S.fromManifold(man); S.free(man);
+  return { mesh, baseZ, cavity, notes };
+}
+// ---- bite hinge: two ball-and-socket posts behind the arches, shared by both models ----
+let hingeSpec = null;
+function planHinge() {
+  hingeSpec = null; if (!(scans.has('upper') && scans.has('lower') && scans.inBite)) return;
+  const bu = N.meshBounds(scans.framed('upper')), bl = N.meshBounds(scans.framed('lower'));
+  const y = Math.max(bu.max[1], bl.max[1]) + 5, half = Math.max(12, Math.min(bu.max[0], bl.max[0], -bu.min[0], -bl.min[0]) - 4);
+  hingeSpec = { y, xs: [-half, half], z: (bl.max[2] + bu.min[2]) / 2, r: 3.2, ball: 1.8, zLower: bl.min[2] - P.baseH, zUpper: bu.max[2] + P.baseH, yBack: { lower: bl.max[1], upper: bu.max[1] } };
+}
+function addHinge(M, jaw, baseZ, add, sub, notes) {
+  const h = hingeSpec, up = jaw === 'upper', sg = up ? -1 : 1;            // work frame: lower = case frame; upper = case frame turned 180° about Y (x → −x, z → −z)
+  const zMeet = up ? -h.z : h.z, tabH = Math.min(4, P.baseH), yFrom = h.yBack[jaw] - 10;
+  for (const x0 of h.xs) {
+    const x = up ? -x0 : x0;
+    add(M.Manifold.cube([2 * h.r, h.y - yFrom + h.r, tabH]).translate(x - h.r, yFrom, baseZ));                    // tab from the heel back to the post
+    add(M.Manifold.cylinder(zMeet - baseZ, h.r, h.r, 40).translate(x, h.y, baseZ));                                // post up to the meeting plane
+    if (!up) add(M.Manifold.sphere(h.ball, 40).translate(x, h.y, zMeet)); else sub(M.Manifold.sphere(h.ball + 0.12, 40).translate(x, h.y, zMeet));
+  }
+  if (jaw === 'lower') notes.push('hinge balls on this model'); else notes.push('hinge sockets on this model');
+}
+let building = null, queued = false, stashT = 0;
+async function buildPass() {
+  const todo = present().filter((j) => A[j].dirty); if (!todo.length) return;
+  planHinge();
+  try {
+    await shell.busy('Building…', async () => {
+      for (const j of todo) { if (!scans.has(j)) continue; shell.setBusyText(`Building the ${j} model…`); await N.sleep(20); try { await buildJaw(j); } catch (e) { console.error(e); A[j].error = String((e && e.message) || e); A[j].dirty = false; dropObject(j); A[j].model = null; } }
+    });
+  } catch (_) {}
+}
+/** Build whatever is out of date. Calls made while a build is running are folded into one more pass at the end. */
+async function ensureBuilt() {
+  if (building) { queued = true; return building; }
+  building = (async () => { let guard = 0; do { queued = false; await buildPass(); } while ((queued || present().some((j) => A[j].dirty && !A[j].error)) && ++guard < 6); })();
+  try { await building; } finally { building = null; }
+  syncUI(); if (['base', 'hollow', 'label', 'export'].includes(shell.steps[shell.current].id)) showModels(true);
+  const bad = present().filter((j) => A[j].error); if (bad.length) shell.status(`${NAME[bad[0]]} model: ${A[bad[0]].error}`, true);
+  clearTimeout(stashT); stashT = setTimeout(() => { if (present().length) N.stashCase(scans.toCase(), 'Model Card'); }, 2500);
+  return !bad.length;
+}
+const rebuild = () => { rev++; for (const j of JAWS) { A[j].dirty = true; A[j].error = ''; } return ensureBuilt(); };
+
+// ───────────── tidy and trim (the shared step) ─────────────
+const trim = N.createTrimStep({ shell, viewer, scans, step: 'trim' });
+if (N.EMBED) shell.hideStep('trim');                              // inside Scan Card the scans are tidied once, on its Scans tab
+
+// ───────────── base / hollow / label controls ─────────────
+const mm = (v) => parseFloat(v.toFixed(2)) + ' mm';
+const R = {
+  baseH: N.rangeBind('bsH', (v, done) => { P.baseH = v; if (done) rebuild(); }, { fmt: mm }), plateT: N.rangeBind('bsPlate', (v, done) => { P.plateT = v; if (done) rebuild(); }, { fmt: mm }),
+  smooth: N.rangeBind('bsSmooth', (v, done) => { P.smooth = v; if (done) rebuild(); }, { fmt: mm }), margin: N.rangeBind('bsMargin', (v, done) => { P.margin = v; if (done) rebuild(); }, { fmt: mm }),
+  wall: N.rangeBind('hoWall', (v, done) => { P.wall = v; if (done) rebuild(); }, { fmt: mm }), notches: N.rangeBind('hoNotch', (v, done) => { P.notches = v; if (done) rebuild(); }, { fmt: (v) => String(v) }),
+  labelSize: N.rangeBind('lbSize', (v, done) => { P.labelSize = v; if (done && JAWS.some((j) => A[j].label.at && A[j].label.text)) rebuild(); }, { fmt: mm }),
+  rot: N.rangeBind('lbRot', (v, done) => { const L = A[labelJaw].label; L.rot = v; if (done && L.at && L.text) { rev++; A[labelJaw].dirty = true; ensureBuilt(); } }, { fmt: (v) => v + '°' }),
+};
+const SEG = {
+  style: N.segBind($('bsStyle'), (v) => { P.style = v; syncUI(); rebuild(); }, P.style), mode: N.segBind($('hoMode'), (v) => { P.hollow = v === 'hollow'; syncUI(); rebuild(); }, 'solid'),
+  under: N.segBind($('hoUnder'), (v) => { P.underside = v; syncUI(); rebuild(); }, P.underside), lstyle: N.segBind($('lbStyle'), (v) => { P.labelStyle = v; if (JAWS.some((j) => A[j].label.at && A[j].label.text)) rebuild(); }, P.labelStyle),
+  pos: N.segBind($('exPos'), (v) => { P.pos = v; }, P.pos),
+};
+$('bsBar').addEventListener('change', (e) => { P.bar = e.target.checked; rebuild(); });
+$('bsHinge').addEventListener('change', (e) => { P.hinge = e.target.checked; rebuild(); });
+function paramsToUI() {
+  R.baseH.set(P.baseH); R.plateT.set(P.plateT); R.smooth.set(P.smooth); R.margin.set(P.margin); R.wall.set(P.wall); R.notches.set(P.notches); R.labelSize.set(P.labelSize);
+  SEG.style(P.style); SEG.mode(P.hollow ? 'hollow' : 'solid'); SEG.under(P.underside); SEG.lstyle(P.labelStyle); SEG.pos(P.pos); $('bsBar').checked = !!P.bar; $('bsHinge').checked = !!P.hinge;
+  for (const j of JAWS) $('lbT' + j).value = A[j].label.text || '';
+}
+// labels
+let placing = null;
+const placeTool = { cursor: 'crosshair', onClick: (i) => {
+  const j = placing, a = A[j]; if (!j || !a.object) return; const h = i.pick([a.object]); if (!h) return shell.status(`Click on the ${j} model`);
+  const W = workM(j); a.label.at = { p: h.point.clone().applyMatrix4(W).toArray(), n: h.normal.clone().transformDirection(W).toArray() }; a.label.rot = 0; labelJaw = j; R.rot.set(0);
+  stopPlacing(); rev++; a.dirty = true; ensureBuilt();
+} };
+function stopPlacing() { if (placing) { $('lbP' + placing).classList.remove('on'); placing = null; } if (viewer.tool === placeTool) viewer.setTool(null); shell.hint(''); }
+for (const j of JAWS) {
+  const inp = $('lbT' + j);
+  inp.addEventListener('input', () => { inp.value = inp.value.toUpperCase().split('').filter((c) => S.LABEL_CHARS.includes(c)).join('').slice(0, 4); A[j].label.text = inp.value.trim(); });
+  inp.addEventListener('change', () => { if (A[j].label.at) { rev++; A[j].dirty = true; ensureBuilt(); } });
+  $('lbP' + j).addEventListener('click', () => {
+    if (placing === j) return stopPlacing(); stopPlacing();
+    if (!A[j].object) return shell.status(`There is no ${j} model yet`, true); if (!A[j].label.text) return shell.status('Type the label first', true);
+    placing = j; $('lbP' + j).classList.add('on'); viewer.setTool(placeTool); shell.hint(`Click a flat part of the ${j} model where the label should go.`);
+  });
+  $('lbX' + j).addEventListener('click', () => { const had = A[j].label.at; A[j].label = { text: '', at: null, rot: 0 }; inp.value = ''; if (had) { rev++; A[j].dirty = true; ensureBuilt(); } });
+}
+
+// ───────────── summary + export ─────────────
+function summaryHtml(j) {
+  const a = A[j]; if (!scans.has(j)) return '';
+  if (a.error) return `<div class="note bad"><b>${NAME[j]}:</b> ${N.esc(a.error)}</div>`;
+  const i = a.info; if (!i) return '';
+  return `<div class="sum"><h5>${NAME[j]} model<span class="okb${i.watertight ? '' : ' bad'}">${i.watertight ? 'Watertight' : 'Not watertight'}</span></h5>
+    <div><span>Size</span><b>${i.size.map((v) => v.toFixed(1)).join(' × ')} mm</b></div>
+    <div><span>Resin volume</span><b>${(i.volume / 1000).toFixed(1)} mL</b></div>
+    ${i.cavity ? `<div><span>Saved by hollowing</span><b>${(i.cavity / 1000).toFixed(1)} mL</b></div>` : ''}
+    <div><span>Triangles</span><b>${i.tris.toLocaleString('en-GB')}</b></div>
+    ${i.notes && i.notes.length ? `<div><span>${N.esc(i.notes.join(' · '))}</span></div>` : ''}</div>`;
+}
+function syncUI() {
+  const both = scans.has('upper') && scans.has('lower');
+  $('bsPlateRow').hidden = P.style !== 'full'; $('bsBarRow').hidden = P.style !== 'horseshoe'; $('bsHingeRow').hidden = !(both && scans.inBite);
+  $('hoOpts').hidden = !P.hollow; $('hoNotchRow').hidden = P.underside !== 'open';
+  for (const j of JAWS) { const on = scans.has(j); $('lbT' + j).disabled = $('lbP' + j).disabled = $('lbX' + j).disabled = !on; }
+  const sum = JAWS.map(summaryHtml).join('') || (present().length ? '' : '<div class="note warn">Load a scan first.</div>');
+  $('bsInfo').innerHTML = sum; $('hoInfo').innerHTML = sum; $('exSummary').innerHTML = sum;
+  for (const id of ['base', 'hollow', 'label', 'export']) shell.markDone(id, present().length > 0 && present().every((j) => !A[j].dirty && !A[j].error && A[j].model));
+  shell.markDone('load', present().length > 0);
+}
+function exportMesh(j) {
+  const a = A[j]; if (P.pos === 'scan') return N.transformMesh(a.model, scans[j].matrix.clone().invert());
+  const b = N.meshBounds(a.work); return N.transformMesh(a.work, new THREE.Matrix4().makeTranslation(-b.center[0], -b.center[1], -b.min[2]));
+}
+$('exStl').addEventListener('click', async () => {
+  if (!(await ensureBuilt())) return; const js = present().filter((j) => A[j].model); if (!js.length) return shell.status('Load a scan first', true);
+  const r = await shell.busy('Writing STL…', async () => N.saveFiles('models.zip', js.map((j) => ({ name: `model-${j}.stl`, data: N.stlBinary(exportMesh(j), null, `Model Card ${j} model, mm`) }))));
+  shell.status(r.message, !r.ok && r.code !== 'declined');
+});
+$('exCase').addEventListener('click', () => scans.saveCase());
+
+// ───────────── step changes ─────────────
+shell.onStepChange(async (i) => {
+  const id = shell.steps[i].id; stopPlacing();
+  if (['base', 'hollow', 'label', 'export'].includes(id)) { if (present().length) await ensureBuilt(); showModels(true); } else showModels(false);
+  syncUI();
+});
+paramsToUI(); syncUI(); shell.goto(0);
+S.ready();
+window.APP = { N, S, shell, viewer, scans, P, A, trim, state: { P, A }, ensureBuilt, rebuild, buildJaw, exportMesh, clipMesh: N.clipMesh, doTrim: trim.doTrim, setPaint: trim.setPaint, paintAt: trim.paintAt, showPaint: trim.showPaint, get painted() { return trim.painted; }, get hingeSpec() { return hingeSpec; } };
+</script>
+</body>
+</html>

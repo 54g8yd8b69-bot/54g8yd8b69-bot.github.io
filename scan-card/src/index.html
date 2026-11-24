@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en" class="hub">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan Card — models, analysis, splints, trays and wax-ups from one scan</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+/* the hub's layout, on top of the shared shell (html.hub keeps these ahead of the shell's own rules) */
+html.hub #app{grid-template-rows:auto 1fr}
+html.hub #top{min-height:48px;flex-wrap:wrap;row-gap:0;column-gap:12px}
+html.hub #top .sub{display:none}
+html.hub #top .brand{min-height:48px}
+#tabs{display:flex;gap:2px;align-self:stretch;align-items:stretch;min-width:0;overflow-x:auto;scrollbar-width:none;min-height:48px}
+#tabs::-webkit-scrollbar{display:none}
+html.hub #top #tabs button{background:none;border:0;border-radius:0;color:#b9cbe0;padding:0 13px;font-size:13px;font-weight:600;border-bottom:3px solid transparent;border-top:3px solid transparent;white-space:nowrap;display:flex;align-items:center;gap:6px;flex:none}
+html.hub #top #tabs button:hover{background:rgba(255,255,255,.07);color:#fff}
+html.hub #top #tabs button.on{color:#fff;border-bottom-color:var(--teal);background:rgba(255,255,255,.09)}
+#tabs button i{width:6px;height:6px;border-radius:50%;background:#5eead4;display:none}
+#tabs button.has i{display:block}
+html.hub #side{grid-row:2;grid-column:1}
+html.hub #view{grid-row:2;grid-column:2}
+#frames{grid-row:2;grid-column:1/3;position:relative;z-index:20;visibility:hidden;pointer-events:none;min-width:0;min-height:0}
+#frames.on{visibility:visible;pointer-events:auto;background:var(--bg)}
+#frames iframe{position:absolute;left:0;right:0;bottom:0;top:var(--offer,0px);width:100%;height:calc(100% - var(--offer,0px));border:0;visibility:hidden;background:var(--bg)}
+#frames.on iframe.on{visibility:visible}
+#opening{position:absolute;inset:0;display:none;place-items:center;color:var(--muted);font-size:14px;text-align:center;padding:20px;z-index:2;background:var(--bg)}
+#frames.on #opening.show{display:grid}
+#opening b{display:block;color:var(--navy);font-size:16px;margin-bottom:6px}
+#offer{position:absolute;left:0;right:0;top:0;z-index:3;display:none;align-items:center;gap:10px;flex-wrap:wrap;background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;font-size:12.5px;line-height:1.4;padding:8px 12px}
+#frames.on #offer.show{display:flex}
+#offer span{flex:1 1 260px;min-width:0}
+#offer .x{margin-left:auto;border:0;background:none;color:#92400e;font-size:16px;line-height:1;padding:2px 6px}
+#hubToast{position:fixed;left:50%;top:58px;transform:translateX(-50%);z-index:60;background:var(--navy);color:#fff;font-size:12.5px;padding:8px 13px;border-radius:8px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:min(86vw,560px);text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+#hubToast.show{opacity:1}
+#hubToast.err{background:#b91c1c}
+#lock{margin:10px 10px 0}
+#lock b{display:block;margin-bottom:3px}
+#lock .btn{margin-top:7px}
+#lock.flash{animation:lk .5s 2}
+@keyframes lk{50%{box-shadow:0 0 0 4px rgba(245,158,11,.45)}}
+.step .body[inert]{opacity:.45;pointer-events:none;user-select:none}
+.tool{display:block;width:100%;text-align:left;border:1px solid #cbd5e1;border-radius:9px;padding:9px 11px;margin:7px 0;background:#fff;color:var(--ink)}
+.tool:hover{border-color:var(--teal);box-shadow:0 0 0 3px rgba(20,184,166,.12)}
+.tool b{display:block;color:var(--navy);font-size:13px;margin-bottom:2px}
+.tool span{display:block;color:var(--muted);font-size:12px;line-height:1.4}
+.tool em{float:right;font-style:normal;font-size:10.5px;font-weight:600;color:var(--teal2);background:var(--tealsoft);border-radius:9px;padding:2px 7px}
+@media (max-width:1020px){#tabs{order:5;flex:1 0 100%;min-height:38px;border-top:1px solid var(--navy3);margin:0 -14px;padding:0 6px}}
+@media (max-width:820px){html.hub #app{grid-template-rows:auto 46% 1fr}html.hub #side{grid-row:3;grid-column:1}html.hub #view{grid-row:2;grid-column:1}#frames{grid-row:2/4;grid-column:1}}
+@media (max-width:520px){#tabs{margin:0 -8px;padding:0 20px 0 2px;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}html.hub #top #tabs button{padding:0 10px;font-size:12.5px}#hubToast{top:92px}}
+</style>
+</head>
+<body>
+<script type="module">
+// Scan Card — one app for everything that starts from a patient scan.
+// This page owns the scans (load, orient, tidy) and the case file. Each tool runs in its own frame below the tab bar:
+//   • Models, Analysis and Splint are pages built on the same core.js; they find `SCANHUB` above them, hide their own
+//     loading steps, take the scans from here and hand their work back when you leave the tab or save the case.
+//   • Trays (Tray Card) and Wax-up (Wax Card) are the existing apps, unchanged: the scans are passed to their own
+//     file loaders as if you had picked the files yourself.
+import * as N from './core.js';
+const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'];
+const CFG = window.SCAN_CARD || {};
+const TOOLS = [
+  { id: 'model', name: 'Models', what: 'Study and working models', blurb: 'Close the scan into a printable model: base, hollowing, label and an optional bite hinge.', url: 'model.html', path: '/scan-card/model/', kind: 'case', key: 'model', roles: ['upper-model', 'lower-model'] },
+  { id: 'analysis', name: 'Analysis', what: 'Model analysis', blurb: 'Tooth widths, Bolton, space, arch form, overjet and overbite, restorative space — with a report for the notes.', url: 'analysis.html', path: '/scan-card/analysis/', kind: 'case', key: 'analysis', roles: [] },
+  { id: 'splint', name: 'Splint', what: 'Splints and guards', blurb: 'A flat-plane splint or guard on either arch, checked against the opposing teeth.', url: 'splint.html', path: '/scan-card/splint/', kind: 'case', key: 'splint', roles: ['splint'] },
+  { id: 'tray', name: 'Trays', what: 'Special trays and record bases', blurb: 'Tray Card: special trays, record bases and Gothic arch plates on the scan.', url: '/tray-card/', path: '/tray-card/', kind: 'files' },
+  { id: 'wax', name: 'Wax-up', what: 'Digital wax-up', blurb: 'Wax Card: place library teeth on the scan, blend them in and check the occlusion.', url: '/wax-card/', path: '/wax-card/', kind: 'files' },
+].filter((t) => !CFG.tools || CFG.tools.includes(t.id)).map((t) => ({ ...t, url: (CFG.urls && CFG.urls[t.id]) || t.url }));
+const TOOL = Object.fromEntries(TOOLS.map((t) => [t.id, t])), CASE_TOOLS = TOOLS.filter((t) => t.kind === 'case');
+const OWN_KEYS = new Set(['model', 'analysis', 'splint']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint']);
+// Inside the single-file offline copy of the Notile suite there are no URLs to load: the suite hands over each page's HTML instead.
+const SUITE = (() => { try { return (window.parent !== window && window.parent.SUITE) || null; } catch (_) { return null; } })();
+if (SUITE && !window.SUITE) window.SUITE = SUITE;                // the tools' own offline shims look for it one level up
+
+const F = {};                                                    // tool id → { tool, el (iframe), api, sig (the scans it holds), ready }
+const H = { active: 'scans', sig: '', dirty: true, basis: {}, foreign: null, unlocked: false, q: Promise.resolve(), lru: [], step: {} };
+
+// ───────────── what the tool pages can ask of the hub ─────────────
+window.SCANHUB = {
+  version: 1,
+  register(win, api) { const f = Object.values(F).find((x) => x.el.contentWindow === win); if (f && f.res && (win.__HUB_TRY || 1) === f.try) { f.api = api; f.res(f); } },   // (a page from an earlier, abandoned attempt is ignored)
+  loadFiles: (files) => takeFiles(files),
+  saveCase: () => saveCase(),
+  saveFile: (name, data) => saveFromTool(name, data),
+  goto: (id) => show(id),
+  /** Inside a Claude artifact only the top page is given `claude` (which is how files are saved there). The two existing
+   *  apps look for window.claude themselves, so their frames are handed this stand-in: the real saving is done up here. */
+  get claude() {
+    const real = window.claude && typeof window.claude.use === 'function' ? window.claude : null; if (!real) return null;
+    return { use: async (name) => { const ns = await real.use(name); return name === 'downloads' && ns ? { save: async (o) => ns.save({ ...o, data: await ownData(o.data) }) } : ns; } };
+  },
+};
+
+// ───────────── shell: the Scans tab ─────────────
+const shell = N.createShell({
+  name: 'Scan Card', tagline: '', title: document.title, home: CFG.home || null, homeTitle: 'All Notile apps', lastLabel: 'Pick a tool above',
+  emptyHtml: '<div><b>No scan loaded</b>Drop an STL, PLY or OBJ scan here, or use “Load scans”.</div>',
+  onDropFiles: (f) => { if (isLocked()) flashLock(); else scans.loadFiles(f); },
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'trim', title: 'Tidy and trim', optional: true, html: '' },
+    { id: 'tools', title: 'Choose a tool', html: `
+      <p class="lead">The scans are loaded once, here. Every tool works on them — switch at any time with the tabs at the top.</p>
+      ${TOOLS.map((t) => `<button class="tool" type="button" data-tool="${t.id}" title="Open ${N.esc(t.what.toLowerCase())}"><em hidden>in use</em><b>${N.esc(t.what)}</b><span>${N.esc(t.blurb)}</span></button>`).join('')}
+      <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis and Splint in one file. Trays and Wax-up save their own project files from inside their tab.</p>
+      <p class="tip">Each tool is a design aid, not a certified medical device: check everything it makes against the scan and the patient before it is used.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Scan Card', loadStep: 'load', orientStep: 'orient', autosave: false,
+  onChange: (what) => { if (what === 'visibility') return; H.dirty = true; stashSoon(); syncUI(); },
+  readCase: (c) => {                                             // a case file (or the resumed copy) was opened: its tools' work belongs to these scans
+    H.dirty = true; const sig = refreshSig(); H.basis = {};
+    for (const t of CASE_TOOLS) if ((c.data && c.data[t.key] !== undefined) || t.roles.some((r) => c.get(r))) H.basis[t.id] = sig;
+    H.foreign = sig;
+  },
+});
+const trim = N.createTrimStep({ shell, viewer, scans, step: 'trim' });
+scans.saveCase = () => saveCase();
+
+// ───────────── tab bar, frames, messages ─────────────
+const tabsEl = N.el('nav', { id: 'tabs', role: 'tablist', 'aria-label': 'Tools' },
+  `<button type="button" role="tab" data-tab="scans" title="Load, orient and tidy the scans">Scans</button>` + TOOLS.map((t) => `<button type="button" role="tab" data-tab="${t.id}" title="${N.esc(t.what)}">${N.esc(t.name)}<i></i></button>`).join(''));
+$('top').insertBefore(tabsEl, $('top').querySelector('.sp'));
+const framesEl = N.el('div', { id: 'frames' }, '<div id="offer" role="status"></div><div id="opening"></div>'); shell.root.appendChild(framesEl);
+const toastEl = N.el('div', { id: 'hubToast', role: 'status' }); shell.root.appendChild(toastEl);
+const lockEl = N.el('div', { id: 'lock', class: 'note warn', hidden: '' }, '<b>These scans are in use</b><span></span><br><button class="btn" id="unlock" type="button" title="Unlock the steps below">Change the scans anyway</button>');
+$('side').insertBefore(lockEl, $('steps'));                    // beside the step list, not inside it (the shell finds steps by position)
+let toastT = 0;
+function toast(text, isErr) { toastEl.textContent = text; toastEl.classList.toggle('err', !!isErr); toastEl.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('show'), isErr ? 7000 : 3800); }
+const listOf = (a) => (a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
+const report = (e) => { console.error(e); toast(String((e && e.message) || e), true); };
+
+// ───────────── which scans are these? ─────────────
+// A signature of the scans as they are now (shape + position). A tool's work is kept only while it matches the
+// scans it was made on, so nothing designed on an earlier version of the scans is ever saved beside a later one.
+const crcOf = new WeakMap(), bytes = (a) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+function rawSig(raw) { let c = crcOf.get(raw); if (c === undefined) { c = `${raw.positions.length}.${raw.indices.length}.${N.crc32(bytes(raw.positions))}.${N.crc32(bytes(raw.indices))}`; crcOf.set(raw, c); } return c; }
+function refreshSig() {
+  if (!H.dirty) return H.sig;
+  const parts = []; for (const j of JAWS) { const sc = scans[j]; if (sc) parts.push(j, rawSig(sc.raw), Array.from(sc.matrix.elements, (v) => Math.round(v * 1e5) / 1e5).join(',')); }
+  H.sig = parts.length ? parts.join('|') + (scans.inBite ? '|bite' : '|apart') : ''; H.dirty = false; return H.sig;
+}
+/** The same for the two existing apps: they are given the scans in the scanner's own coordinates and line them up themselves, so turning the scans here does not concern them. */
+const rawSigNow = () => { const parts = []; for (const j of JAWS) if (scans[j]) parts.push(j, rawSig(scans[j].raw)); return parts.join('|'); };
+const sigFor = (t) => (t.kind === 'files' ? rawSigNow() : refreshSig());
+const valid = (t) => H.basis[t.id] !== undefined && H.basis[t.id] === refreshSig();
+/** The case as it should leave the hub: the scans, plus the work of the tools named — and only work made on these scans. */
+function buildCase(o = {}) {
+  const sig = refreshSig(), m = scans.toCase(), c = new N.DentalCase(), keep = new Set((o.tools || CASE_TOOLS.map((t) => t.id)).filter((id) => valid(TOOL[id]))), foreign = o.foreign !== false && H.foreign === sig;
+  c.meta = { ...m.meta };
+  const ownerOfRole = (r) => CASE_TOOLS.find((t) => t.roles.includes(r)), ownerOfKey = (k) => CASE_TOOLS.find((t) => t.key === k);
+  c.items = m.items.filter((it) => { if (/-scan$/.test(it.role)) return true; const t = ownerOfRole(it.role); return t ? keep.has(t.id) : (OWN_ROLES.has(it.role) ? false : foreign); });
+  for (const k of Object.keys(m.data || {})) { const t = ownerOfKey(k); if (t ? keep.has(t.id) : (OWN_KEYS.has(k) ? false : foreign)) c.data[k] = m.data[k]; }
+  return c;
+}
+const leftOut = () => CASE_TOOLS.filter((t) => H.basis[t.id] !== undefined && !valid(t)).map((t) => t.name);
+
+// ───────────── frames ─────────────
+// The two existing apps are driven through what they already expose (window.TC, window.__wax): on the Notile site their pages are used exactly as they are.
+const ADAPT = {
+  tray: {   // Tray Card: one working arch (its Maxilla / Mandible switch) plus the opposing arch for reference
+    ready: (w) => !!(w.TC && w.TC.S && w.TC.loadScan && w.document.getElementById('segArch')),
+    hasScans: (w) => !!w.TC.S.scanGeo, resumable: () => false,
+    hasWork: (w) => { const S = w.TC.S; return !!(S.trayMesh || (S.margin && S.margin.pts && S.margin.pts.length)); },
+    css: '#top .brand,#top .sub{display:none!important}',
+  },
+  wax: {    // Wax Card: an upper and a lower slot; it keeps its own autosaved case in this browser
+    ready: (w) => !!(w.__wax && w.__wax.S && w.__wax.loadScan),
+    hasScans: (w) => !!(w.__wax.S.scans.upper || w.__wax.S.scans.lower),
+    resumable: (w) => { const r = w.document.getElementById('resumeRow'); return !!r && !r.classList.contains('hidden'); },
+    hasWork: (w) => { try { return w.__wax.teeth().length > 0; } catch (_) { return true; } },
+    css: 'header a.brand,header .brand,header .sub,header .tag{display:none!important}',
+  },
+};
+const PRELUDE = (n) => `<script>window.__HUB_TRY=${n};try{if(!window.claude&&parent.SCANHUB&&parent.SCANHUB.claude)window.claude=parent.SCANHUB.claude}catch(e){}<\/script>`;
+/** Put a tool's page in its frame. 'src': the frame loads the address. 'srcdoc': this page fetches it and hands it over
+ *  (for places where a frame may not load an address by itself); <base> keeps the page's own relative files working. */
+async function fill(el, t, how, n) {
+  if (SUITE && SUITE.page) { el.srcdoc = await SUITE.page(t.path); return; }
+  if (how !== 'srcdoc') { el.src = t.url; return; }
+  const url = new URL(t.url, document.baseURI), r = await fetch(url); if (!r.ok) throw new Error(`${t.name} could not be fetched (${r.status})`);
+  const html = await r.text(), base = `<base href="${N.esc(url.href.replace(/[^/]*$/, ''))}">`;
+  el.removeAttribute('src'); el.srcdoc = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + base + PRELUDE(n)) : base + PRELUDE(n) + html;
+}
+function ensureFrame(id) {
+  let f = F[id]; if (f) return f.ready;
+  const t = TOOL[id], el = N.el('iframe', { title: t.what, 'data-tool': id, allow: 'clipboard-write; fullscreen' });
+  f = F[id] = { tool: t, el, api: null, sig: null };
+  const ways = SUITE ? ['suite'] : CFG.frames === 'srcdoc' ? ['srcdoc'] : CFG.frames === 'both' ? ['src', 'srcdoc'] : ['src'];
+  const attempt = (how, patient) => new Promise((res, rej) => {
+    const fail = () => rej(new Error(`${t.name} did not open. Check the connection and try the tab again.`));
+    let timer = setTimeout(fail, 90000); f.try = (f.try || 0) + 1;
+    f.res = (x) => { clearTimeout(timer); f.res = null; res(x); };
+    f.onload = () => {
+      clearTimeout(timer); timer = setTimeout(fail, patient ? 25000 : 9000);                 // the page arrived: its script should report in shortly
+      if (t.kind !== 'files') return;
+      const w = el.contentWindow, doc = w.document, A = ADAPT[id]; let n = 0;                 // an existing app: wait until its own script is up, then drive it from here
+      try {
+        for (const a of w.document.querySelectorAll('a[href="/"]')) a.target = '_top';          // their logo goes back to the launcher, not into the frame
+        if (!w.claude && SCANHUB.claude) w.claude = SCANHUB.claude;
+        if (A.css) { const st = w.document.createElement('style'); st.textContent = A.css; w.document.head.appendChild(st); }   // the hub's bar already says where you are
+        if (id === 'tray') w.document.getElementById('segArch').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) trayArch(f, b.dataset.v === 'maxilla' ? 'upper' : 'lower'); }, true);
+      } catch (_) {}
+      const tick = () => { let ok = false; try { ok = A.ready(w); } catch (_) {} if (ok) { if (f.res) { f.api = { win: w, ...A }; f.res(f); } } else if (++n < 150 && F[id] === f && el.contentDocument === doc) setTimeout(tick, 200); };
+      tick();
+    };
+    fill(el, t, how, f.try).catch(rej);
+  });
+  el.addEventListener('load', () => { if (f.onload) f.onload(); });
+  framesEl.appendChild(el);
+  f.ready = ways.reduce((p, how, i) => (i ? p.catch(() => attempt(how, true)) : attempt(how, ways.length === 1)), null);
+  f.ready.catch(() => { el.remove(); if (F[id] === f) delete F[id]; });
+  return f.ready;
+}
+/** Take a tool's work into the master case (called when its tab is left, and before saving). */
+async function pull(id) {
+  const f = F[id]; if (!f || !f.api || !f.api.exportPart || !f.sig) return;
+  const t = f.tool, p = await N.DentalCase.fromBlob(await f.api.exportPart()), m = scans.toCase();
+  for (const r of t.roles) m.remove(r);
+  for (const it of p.items) if (t.roles.includes(it.role)) m.items.push(it);
+  if (p.data && p.data[t.key] !== undefined) m.data[t.key] = p.data[t.key]; else delete m.data[t.key];
+  H.basis[id] = f.sig; H.step[id] = f.api.step ? f.api.step() : null; stashSoon();
+}
+/** Every open tool holds its own copy of the scans. With large scans (half a million triangles or more) only the tool
+ *  in front and the one used before it stay open; the others are closed — their work is already in the master case,
+ *  and they pick it up again (at the step they were on) when their tab is next opened. Tray Card and Wax Card keep
+ *  work the hub does not hold, so they are never closed this way. */
+const BIG = 500000;
+function closeIdle() {
+  const tris = JAWS.reduce((n, j) => n + (scans[j] ? scans[j].raw.indices.length / 3 : 0), 0); if (tris < BIG) return;
+  const idle = H.lru.filter((k) => k !== H.active && F[k] && F[k].api && F[k].tool.kind === 'case');
+  while (idle.length > 1) { const k = idle.shift(), f = F[k]; if (f.sig && H.basis[k] !== f.sig) continue; f.el.remove(); delete F[k]; }   // (never one whose work has not reached the case)
+}
+/** Give a tool the scans as they are now (with its own saved work, when that was made on these scans). */
+async function feed(id) {
+  const f = F[id]; if (!f || !f.api) return;
+  const t = f.tool, sig = sigFor(t); if (f.sig === sig) return;
+  if (t.kind === 'case') {
+    if (!sig) { if (f.api.hasScans()) f.api.clear(); f.sig = sig; return; }
+    const again = !!f.sig && !valid(t), back = !f.sig && valid(t) && H.step[id];
+    await f.api.importCase(await buildCase({ tools: [id], foreign: false }).toBlob('Scan Card', { compress: false }));
+    f.sig = sig; if (again) toast(`${t.name} has started again on the changed scans`);
+    if (back && f.api.goto) f.api.goto(back);                    // a tool that was closed to save memory comes back where it was
+    return;
+  }
+  // an existing app: it is never emptied or overwritten without being asked
+  if (!sig || f.declined === sig) return;
+  const w = f.api.win, go = () => feedFiles(f).catch(report);
+  if (!f.sig) {
+    if (f.api.hasScans(w)) offer(f, `${t.name} already has a scan loaded.`, 'Use the scans from the Scans tab', go);
+    else if (f.api.resumable(w)) offer(f, `${t.name} has an earlier case saved in this browser — resume it below, or start on the scans from the Scans tab.`, 'Use the scans from the Scans tab', go);
+    else await go();
+  } else if (f.api.hasWork(w)) offer(f, `The scans were changed on the Scans tab. Loading them here starts ${t.name} again — save its project first if you want to keep it.`, 'Load the changed scans', go);
+  else await go();
+}
+/** A scan as a file for an existing app: tidied, but still in the scanner's own coordinates — so whatever that app
+ *  exports lines up with the original scan in other software, exactly as if the file had been loaded there directly.
+ *  Colour scans go as PLY, the rest as STL. */
+function scanFile(w, jaw) {
+  const mesh = scans[jaw].raw, col = !!mesh.colors, data = col ? N.plyBinary(mesh) : N.stlBinary(mesh, null, 'Scan Card ' + jaw + ' scan, mm');
+  return new w.File([data], `${jaw}.${col ? 'ply' : 'stl'}`, { type: col ? 'application/octet-stream' : 'model/stl' });
+}
+async function feedFiles(f, trayJaw) {
+  const w = f.api.win, sig = sigFor(f.tool); if (!sig) return;
+  offer(f, null);
+  if (f.tool.id === 'wax') {
+    for (const j of JAWS) if (scans.has(j)) await w.__wax.loadScan(j, scanFile(w, j));
+  } else if (f.tool.id === 'tray') {
+    const on = w.document.querySelector('#segArch button.on'), want = trayJaw || (on && on.dataset.v === 'maxilla' ? 'upper' : 'lower'), jaw = scans.has(want) ? want : JAWS.find((j) => scans.has(j)), other = jaw === 'upper' ? 'lower' : 'upper';
+    w.TC.setArch(jaw === 'upper' ? 'maxilla' : 'mandible');
+    await w.TC.loadScan(scanFile(w, jaw));
+    if (scans.has(other) && scans.inBite) await w.TC.loadAnt(scanFile(w, other));
+    f.arch = jaw;
+  }
+  f.sig = sig; f.declined = null; paintTabs();
+}
+/** Tray Card's own Maxilla / Mandible switch chooses which of the hub's scans the tray is made on. */
+function trayArch(f, jaw) {
+  if (!f.api || f.sig !== sigFor(f.tool) || f.arch === jaw || !scans.has(jaw)) return;
+  const go = () => feedFiles(f, jaw).then(() => toast(`${jaw === 'upper' ? 'Upper' : 'Lower'} scan loaded for the tray`)).catch(report);
+  if (f.api.hasWork(f.api.win)) offer(f, `The tray so far was made on the ${f.arch} scan. Switching to the ${jaw} scan starts the tray again.`, `Load the ${jaw} scan`, go); else go();
+}
+/** Tray Card redraws on every animation frame whether or not anything changed. While an existing app's tab is hidden
+ *  its animation frames are held back, and handed over again when the tab is shown — so it costs nothing in the background. */
+function park(f, on) {
+  if (!f || f.tool.kind !== 'files' || !f.api) return; const w = f.api.win;
+  try {
+    if (on && !f.parked) { const real = w.requestAnimationFrame; f.parked = { real, q: [] }; w.requestAnimationFrame = (cb) => { const q = f.parked.q; q.push(cb); if (q.length > 240) q.shift(); return 0; }; }
+    else if (!on && f.parked) { const { real, q } = f.parked; f.parked = null; w.requestAnimationFrame = real; for (const cb of q) real.call(w, cb); }
+  } catch (_) {}
+}
+/** A one-line offer above a tool (never a blocking dialog): text, one action, and a way to dismiss it. */
+function offer(f, text, label, fn) {
+  f.offer = text ? { text, label, fn } : null; paintOffer();
+}
+function paintOffer() {
+  const f = F[H.active], o = f && f.offer, bar = $('offer');
+  bar.classList.toggle('show', !!o);
+  if (o) { bar.innerHTML = `<span>${N.esc(o.text)}</span><button class="btn pri" type="button" data-a="go">${N.esc(o.label)}</button><button class="x" type="button" data-a="x" title="Not now" aria-label="Not now">✕</button>`; }
+  framesEl.style.setProperty('--offer', o ? bar.offsetHeight + 'px' : '0px');
+}
+
+// ───────────── switching tabs ─────────────
+function paintTabs() {
+  for (const b of tabsEl.children) { const id = b.dataset.tab, on = id === H.active; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); if (id !== 'scans') b.classList.toggle('has', !!TOOL[id] && TOOL[id].kind === 'case' && valid(TOOL[id])); if (on && tabsEl.scrollWidth > tabsEl.clientWidth + 1) tabsEl.scrollLeft = Math.max(0, b.offsetLeft - (tabsEl.clientWidth - b.offsetWidth) / 2); }
+  for (const b of document.querySelectorAll('.tool')) { const f = F[b.dataset.tool]; b.querySelector('em').hidden = !(f && f.sig && f.sig === sigFor(f.tool)); }
+  paintOffer();
+}
+function show(id) { H.q = H.q.then(() => doShow(id)).catch(report); return H.q; }
+async function doShow(id) {
+  const prev = H.active; if (id === prev || (id !== 'scans' && !TOOL[id])) return;
+  H.active = id; H.unlocked = false;
+  framesEl.classList.toggle('on', id !== 'scans');
+  for (const k of Object.keys(F)) { F[k].el.classList.toggle('on', k === id); park(F[k], k !== id); }
+  paintTabs();
+  if (prev !== 'scans') await pull(prev).catch(report);
+  if (id === 'scans') { syncUI(); viewer.invalidate(); return; }
+  const op = $('opening'); let f;
+  if (!F[id] || !F[id].api) { op.innerHTML = `<div><b>Opening ${N.esc(TOOL[id].name)}…</b>${N.esc(TOOL[id].what)}</div>`; op.classList.add('show'); }
+  try { f = await ensureFrame(id); } catch (e) { op.classList.remove('show'); H.active = 'scans'; framesEl.classList.remove('on'); paintTabs(); syncUI(); throw e; }
+  op.classList.remove('show');
+  if (H.active !== id) return;
+  f.el.classList.add('on'); park(f, false);
+  H.lru = H.lru.filter((k) => k !== id).concat(id);
+  await feed(id);
+  closeIdle(); paintTabs();
+}
+tabsEl.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); });
+$('offer').addEventListener('click', (e) => { const b = e.target.closest('button'), f = F[H.active]; if (!b || !f || !f.offer) return; const o = f.offer; f.offer = null; if (b.dataset.a === 'go') H.q = H.q.then(() => o.fn()).catch(report); else f.declined = sigFor(f.tool); paintOffer(); });
+window.addEventListener('resize', () => paintOffer());
+shell.stepEl('tools').addEventListener('click', (e) => { const b = e.target.closest('.tool'); if (b) show(b.dataset.tool); });
+
+// ───────────── the lock: scans that tools are working on are not changed by accident ─────────────
+// Who depends on the scans as they are: every open tool that has them, and every tool whose work in the case was made on them
+// (a tool closed to save memory, or work that came in with a case file, counts just the same).
+const users = () => (refreshSig() ? TOOLS.filter((t) => (F[t.id] && F[t.id].sig && F[t.id].sig === sigFor(t)) || (t.kind === 'case' && valid(t))).map((t) => t.name) : []);
+const isLocked = () => !H.unlocked && users().length > 0;
+function flashLock() { shell.goto('load'); lockEl.classList.remove('flash'); void lockEl.offsetWidth; lockEl.classList.add('flash'); lockEl.scrollIntoView({ block: 'nearest' }); }
+function syncUI() {
+  const u = users(), locked = !H.unlocked && u.length > 0, any = scans.has('upper') || scans.has('lower');
+  lockEl.hidden = !locked;
+  if (locked) lockEl.querySelector('span').textContent = `${listOf(u)} ${u.length > 1 ? 'hold' : 'holds'} work made on them. That work is not carried over to scans that are replaced, turned or trimmed here: ${u.length > 1 ? 'those tools start' : 'that tool starts'} again on the changed scans.`;
+  for (const id of ['load', 'orient', 'trim']) shell.stepEl(id).querySelector('.body').toggleAttribute('inert', locked);
+  shell.markDone('load', any); shell.markDone('tools', u.length > 0);
+  paintTabs();
+}
+$('unlock').addEventListener('click', () => { H.unlocked = true; syncUI(); });
+// “Open case” in the top bar: from a tool tab, or while the scans are locked, it leads to the Scans tab first
+const openBtn = $('topBtns').children[0], fileInp = shell.stepEl('load').querySelector('[data-ss=file]');
+$('topBtns').addEventListener('click', (e) => { if (e.target.closest('button') === openBtn && isLocked()) { e.stopImmediatePropagation(); show('scans').then(flashLock); } }, true);
+fileInp.addEventListener('change', () => { if (H.active !== 'scans') show('scans'); });
+async function takeFiles(files) {                               // files dropped on a tool's view
+  const own = []; for (const f of files) own.push(new File([await new Response(f).arrayBuffer()], f.name));
+  await show('scans'); if (isLocked()) return flashLock();
+  return scans.loadFiles(own);
+}
+
+// ───────────── saving ─────────────
+let stashT = 0;
+function stashSoon() { clearTimeout(stashT); stashT = setTimeout(() => { if (scans.has('upper') || scans.has('lower')) N.stashCase(buildCase(), 'Scan Card'); }, 2000); }
+document.addEventListener('visibilitychange', () => { if (document.hidden && H.active !== 'scans') pull(H.active).catch(() => {}); });
+async function saveCase() {
+  if (!scans.has('upper') && !scans.has('lower')) return toast('Load a scan first', true);
+  try {
+    toast('Packing the case…');
+    if (H.active !== 'scans') await pull(H.active);
+    const out = leftOut(), r = await N.saveFile(`case-${new Date().toISOString().slice(0, 10)}.zip`, await buildCase().toBlob('Scan Card'));
+    toast(r.ok && out.length ? `${r.message} · ${listOf(out)} left out (made on the earlier scans)` : r.message, !r.ok && r.code !== 'declined');
+  } catch (e) { report(e); }
+}
+/** Data handed up from a frame, remade as this page's own (a Blob or typed array made in another frame is not quite the same thing here). */
+async function ownData(data) {
+  const tag = Object.prototype.toString.call(data);
+  if (tag === '[object Blob]' || tag === '[object File]') return new Blob([await new Response(data).arrayBuffer()], { type: data.type || 'application/octet-stream' });
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+  if (tag === '[object ArrayBuffer]') return new Uint8Array(data).slice();
+  return data;
+}
+/** A download asked for by a tool page: done from this page, so it also works where only the top page may save files. */
+async function saveFromTool(name, data) { return N.saveFile(name, await ownData(data)); }
+
+syncUI(); shell.goto(0);
+window.APP = { N, shell, viewer, scans, trim, H, F, TOOLS, show, pull, feed, buildCase, saveCase, refreshSig, valid, users, isLocked, toast };
+</script>
+</body>
+</html>

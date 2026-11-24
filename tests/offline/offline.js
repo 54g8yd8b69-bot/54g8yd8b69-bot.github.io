@@ -2,13 +2,14 @@ const { chromium } = require('playwright');
 const file = 'file://' + process.argv[2];
 let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); if (!c) fails++; };
 (async () => {
-  const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 900 } });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined }); const p = await b.newPage({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   await p.goto(file);
-  ok(await p.locator('#home a.app').count() === 14, 'launcher shows 14 apps');
+  ok(await p.locator('#home a.app').count() === 13, 'launcher shows 13 apps');
+  ok(await p.evaluate(() => [...document.querySelectorAll('#bar button[data-id]')].map(x => x.dataset.id).join()) === 'notile,chart,set-app,chrome-card,ortho-card,scan-card,dentmat,dentalaudit,smile-card,trauma-card,letter-card,implantref,guide-card', 'top bar: one button per launcher app (Wax Card and Tray Card open inside Scan Card)');
   const frameFor = async id => { await p.waitForTimeout(1500); return p.frames().find(f => f.parentFrame() && f.name() === '' && f !== p.mainFrame() && f._suiteId === undefined && true) };
-  const ids = ['notile','chart','set-app','chrome-card','ortho-card','dentmat','dentalaudit','smile-card','wax-card','tray-card','trauma-card','letter-card','implantref','guide-card'];
+  const ids = ['notile','chart','set-app','chrome-card','ortho-card','scan-card','dentmat','dentalaudit','smile-card','wax-card','tray-card','trauma-card','letter-card','implantref','guide-card'];
   for (const id of ids) {
     errs.length = 0;
     await p.evaluate(i => location.hash = i, id);
@@ -51,6 +52,34 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     try { await load('js/vendor/jspdf.umd.min.js'); await load('js/vendor/jspdf.plugin.autotable.min.js'); await load('js/vendor/docx.iife.min.js'); } catch (e) { return 'fail ' + e; }
     return [!!(w.jspdf && w.jspdf.jsPDF), !!(w.docx && w.docx.Document)].join(); });
   ok(lz === 'true,true', 'dentalaudit: export libraries resolve offline (' + lz + ')');
+  // Scan Card inside the single file: its tools are frames inside its own frame, filled from this file
+  errs.length = 0;
+  await p.evaluate(() => location.hash = 'scan-card'); await p.waitForTimeout(1500);
+  let hub = null; for (const f of p.frames()) { if (f.parentFrame() !== p.mainFrame()) continue; try { if (await f.evaluate(() => !!(window.APP && window.APP.TOOLS && window.SCANHUB))) { hub = f; break; } } catch (e) {} }
+  ok(!!hub, 'scan-card: the hub page is running');
+  const settle = () => hub.evaluate(() => APP.H.q), child = async (test) => { for (const f of p.frames()) { if (f.parentFrame() !== hub) continue; try { if (await f.evaluate(test)) return f; } catch (e) {} } return null; };
+  await hub.evaluate(() => APP.scans.loadDemo({ res: 0.6 }));
+  await hub.waitForFunction(() => APP.scans.has('upper') && APP.scans.has('lower') && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 60000 });
+  await hub.click('#tabs [data-tab=model]'); await settle();
+  const mo = await child(() => !!(window.APP && window.APP.A && window.__SUITE_APP === 'scan-model'));
+  ok(!!mo, 'scan-card: Models opened inside it from this file');
+  await mo.waitForFunction(() => APP.A.lower.model && APP.A.upper.model && !APP.A.lower.dirty && !APP.A.upper.dirty, null, { timeout: 240000 });
+  ok(await mo.evaluate(() => APP.N.EMBED && APP.A.lower.info.watertight && APP.A.upper.info.watertight && document.fonts.size > 0), 'scan-card: Models built both models from the hub scans (watertight), with the suite fonts');
+  await mo.evaluate(() => APP.shell.goto('export'));
+  const [dl] = await Promise.all([p.waitForEvent('download'), mo.click('#exStl')]);
+  ok(dl.suggestedFilename() === 'models.zip', 'scan-card: Download STL works from inside the file (' + dl.suggestedFilename() + ')');
+  for (const [id, app, test] of [['analysis', 'scan-analysis', () => window.__SUITE_APP === 'scan-analysis' && !!window.APP && APP.scans.has('lower')], ['splint', 'scan-splint', () => window.__SUITE_APP === 'scan-splint' && !!window.APP && APP.scans.has('lower')],
+      ['tray', 'tray-card', () => window.__SUITE_APP === 'tray-card' && !!window.TC && !!TC.S.scanGeo && !!TC.S.antMesh], ['wax', 'wax-card', () => window.__SUITE_APP === 'wax-card' && !!window.__wax && !!(__wax.S.scans.upper && __wax.S.scans.lower)]]) {
+    await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
+    ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
+  }
+  await hub.click('#tabs [data-tab=scans]'); await settle();
+  ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Trays,Wax-up', 'scan-card: all five tools are working on the one pair of scans');
+  const [dc] = await Promise.all([p.waitForEvent('download'), hub.click('#topBtns button:nth-child(2)')]);
+  ok(/^case-.*\.zip$/.test(dc.suggestedFilename()), 'scan-card: Save case works from inside the file (' + dc.suggestedFilename() + ')');
+  await hub.click('#top a.brand'); await p.waitForTimeout(400);
+  ok(await p.isVisible('#home'), 'scan-card: its logo returns to the launcher');
+  ok(errs.length === 0, 'scan-card: no errors ' + errs.slice(0, 3).join(' | '));
   await p.evaluate(() => location.hash = ''); await p.waitForTimeout(300);
   ok(await p.isVisible('#home'), 'back to launcher');
   await b.close(); console.log(fails ? fails + ' FAILED' : 'ALL PASSED'); process.exit(fails ? 1 : 0);

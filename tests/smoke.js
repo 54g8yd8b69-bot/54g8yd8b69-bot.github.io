@@ -1,8 +1,9 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all fifteen apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/dentmat/','/dentalaudit/','/smile-card/','/wax-card/','/tray-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+  await test('shows all fourteen apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/scan-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+    expect(hrefs.length===14&&!hrefs.includes('/wax-card/')&&!hrefs.includes('/tray-card/'),'Wax Card and Tray Card are opened from inside Scan Card now, not from tiles of their own');
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -90,6 +91,63 @@ run({name:'Landing page',fn:async()=>{
     await pg.evaluate(()=>TC.gotoStep(6));await pg.fill('#tText','');await pg.type('#tText','john smith 1234');
     const label=await pg.inputValue('#tText');expect(label.length<=4&&/^[A-Z0-9-]*$/.test(label),'ID label not limited: '+label);
     await noErrors(pg)});
+  // Scan Card: one app for everything that starts from a scan. The hub loads the scans once; each tool is a tab.
+  await test('Scan Card opens under the site CSP: scans loaded once feed Models, Analysis and Splint, and their work comes back as one case',async()=>{const pg=await page('/scan-card/');
+    await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
+    expect((await pg.request.get(BASE+'/scan-card/manifest.webmanifest')).ok(),'Scan Card manifest missing');
+    expect(await pg.locator('#tabs button').count()===6,'expected the Scans tab and five tools');
+    const tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/')),settle=()=>pg.evaluate(()=>APP.H.q);
+    const sig=fr=>fr.evaluate(()=>['upper','lower'].map(j=>APP.scans[j]?[APP.scans[j].raw.positions.length,APP.N.crc32(new Uint8Array(APP.scans[j].raw.positions.buffer)),APP.N.crc32(new Uint8Array(APP.scans[j].raw.indices.buffer)),Array.from(APP.scans[j].matrix.elements).join()].join(':'):'-').join('|'));
+    await pg.click('[data-ss=demo]');await pg.waitForFunction(()=>APP.scans.has('upper')&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
+    const want=await sig(pg);
+    await pg.click('#tabs [data-tab=model]');await settle();const m=tool('model');expect(!!m,'Models did not open');
+    await m.waitForFunction(()=>window.APP&&APP.A.lower.model&&APP.A.upper.model&&!APP.A.lower.dirty&&!APP.A.upper.dirty,null,{timeout:240000});
+    const mi=await m.evaluate(()=>({embed:APP.N.EMBED,hidden:[...document.querySelectorAll('.step')].filter(s=>s.hidden).map(s=>s.dataset.id).join(),wt:APP.A.lower.info.watertight&&APP.A.upper.info.watertight,brand:getComputedStyle(document.querySelector('#top .brand')).display}));
+    expect(mi.embed&&mi.hidden==='load,orient,trim'&&mi.wt&&mi.brand==='none','Models inside Scan Card: '+JSON.stringify(mi));
+    expect(await sig(m)===want,'Models is not working on the same scans');
+    for(const id of ['analysis','splint']){await pg.click(`#tabs [data-tab=${id}]`);await settle();const fr=tool(id);expect(!!fr,id+' did not open');
+      await fr.waitForFunction(()=>window.APP&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
+      expect(await sig(fr)===want,id+' is not working on the same scans');
+      expect(await fr.evaluate(()=>[...document.querySelectorAll('.step')].filter(s=>s.hidden).map(s=>s.dataset.id).join())==='load,orient',id+' still shows its own loading steps')}
+    await pg.click('#tabs [data-tab=scans]');await settle();
+    expect(await pg.evaluate(()=>APP.isLocked()&&!document.getElementById('lock').hidden&&APP.shell.stepEl('trim').querySelector('.body').inert===true),'the scans are not locked while tools are using them');
+    const [dl]=await Promise.all([pg.waitForEvent('download'),pg.click('#topBtns button:nth-child(2)')]);expect(/^case-\d{4}-\d\d-\d\d\.zip$/.test(dl.suggestedFilename()),'case file '+dl.suggestedFilename());
+    const kept=await pg.evaluate(()=>{const c=APP.buildCase();return c.items.map(i=>i.role).sort().join()+' / '+Object.keys(c.data).sort().join()});
+    expect(kept==='lower-model,lower-scan,upper-model,upper-scan / analysis,model,splint','the case holds '+kept);
+    // changing the scans (after unlocking) starts a tool again on the new scans, and its earlier work is not saved beside them
+    await pg.click('#unlock');await pg.evaluate(()=>{APP.shell.goto('trim');const r=document.getElementById('trDepth');r.value=9;r.dispatchEvent(new Event('input'));r.dispatchEvent(new Event('change'));document.getElementById('trApply').click()});
+    await pg.waitForFunction(w=>APP.refreshSig()!==''&&!APP.valid(APP.TOOLS[0])&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
+    expect(await pg.evaluate(()=>APP.buildCase().items.map(i=>i.role).sort().join())==='lower-scan,upper-scan','work made on the earlier scans would be saved with the trimmed ones');
+    const want2=await sig(pg);expect(want2!==want,'the trim did not change the scan');
+    await pg.click('#tabs [data-tab=model]');await settle();await m.waitForFunction(()=>APP.A.lower.model&&!APP.A.lower.dirty&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:240000});
+    expect(await sig(m)===want2,'Models did not take the trimmed scans');await noErrors(pg)});
+  await test('Scan Card hands its scans to Tray Card and Wax Card in the scanner’s own coordinates',async()=>{const pg=await page('/scan-card/');
+    await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});const settle=()=>pg.evaluate(()=>APP.H.q),fr=p=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith(p));
+    await pg.evaluate(()=>APP.scans.loadDemo({res:0.6}));await pg.waitForFunction(()=>APP.scans.has('upper')&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
+    await pg.evaluate(()=>{APP.scans.applyTransform(APP.N.rotationAbout('x',25));APP.H.dirty=true});   // turned on the Scans tab: the two existing apps must still get the scan as the scanner exported it
+    const box=(m)=>{const b=APP.N.meshBounds(m);return m.indices.length/3+' tris, '+b.size.map(v=>v.toFixed(1)).join(' × ')+' from '+b.min.map(v=>v.toFixed(1)).join(',')};
+    const raw=await pg.evaluate(`(()=>{const box=${box};return Object.fromEntries(['upper','lower'].map(j=>[j,{raw:box(APP.scans[j].raw),turned:box(APP.scans.framed(j))}]))})()`);
+    expect(raw.lower.raw!==raw.lower.turned,'test set-up: turning the scan should move its bounding box');
+    // what was in the STL file a frame was given (binary STL: 80-byte header, count, 50 bytes a triangle)
+    const stl=`async(file)=>{const dv=new DataView(file instanceof ArrayBuffer?file:await file.arrayBuffer()),n=dv.getUint32(80,true),mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];for(let i=0;i<n;i++)for(let v=0;v<3;v++)for(let k=0;k<3;k++){const x=dv.getFloat32(84+i*50+12+v*12+k*4,true);if(x<mn[k])mn[k]=x;if(x>mx[k])mx[k]=x}return n+' tris, '+mn.map((v,k)=>(mx[k]-v).toFixed(1)).join(' × ')+' from '+mn.map(v=>v.toFixed(1)).join(',')}`;
+    await pg.click('#tabs [data-tab=tray]');await settle();const t=fr('/tray-card/');expect(!!t,'Tray Card did not open');
+    await t.waitForFunction(()=>!!TC.S.scanGeo&&!!TC.S.antMesh,null,{timeout:60000});
+    const ti=await t.evaluate(`(async()=>({name:TC.S.scanSrc.name,file:await (${stl})(TC.S.scanSrc.file),ant:await (${stl})(TC.S.antSrc.file),arch:document.querySelector('#segArch button.on').dataset.v,home:document.querySelector('#top a.brand').target}))()`);
+    expect(ti.arch==='mandible'&&ti.name==='lower.stl'&&ti.file===raw.lower.raw&&ti.ant===raw.upper.raw&&ti.home==='_top','Tray Card got '+JSON.stringify(ti)+', expected '+JSON.stringify(raw));
+    await t.click('#segArch [data-v=maxilla]');await t.waitForFunction(()=>TC.S.scanSrc.name==='upper.stl'&&!!TC.S.antMesh&&TC.S.antSrc&&TC.S.antSrc.name==='lower.stl',null,{timeout:60000});
+    expect(await t.evaluate(`(async()=>await (${stl})(TC.S.scanSrc.file))()`)===raw.upper.raw,'Tray Card’s Maxilla / Mandible switch did not load the upper scan');
+    await pg.click('#tabs [data-tab=wax]');await settle();const w=fr('/wax-card/');expect(!!w,'Wax Card did not open');
+    await w.waitForFunction(()=>!!(__wax.S.scans.upper&&__wax.S.scans.lower),null,{timeout:90000});
+    const wi=await w.evaluate(`(async()=>{const o={};for(const j of ['upper','lower'])o[j]=__wax.S.scans[j].name+': '+await (${stl})(__wax.S.scans[j].buffer);return o})()`);
+    expect(wi.upper==='upper.stl: '+raw.upper.raw&&wi.lower==='lower.stl: '+raw.lower.raw,'Wax Card got '+JSON.stringify(wi));
+    await pg.click('#tabs [data-tab=scans]');await settle();
+    expect(await pg.evaluate(()=>APP.users().join())==='Trays,Wax-up','the Scans tab does not show Trays and Wax-up as using the scans');
+    expect(await t.evaluate(()=>new Promise(res=>{let n=0;for(const P of [WebGLRenderingContext.prototype,WebGL2RenderingContext.prototype]){const o=P.drawElements;P.drawElements=function(...a){n++;return o.apply(this,a)}}setTimeout(()=>res(n),700)}))===0,'Tray Card keeps drawing while its tab is hidden');
+    await noErrors(pg)});
+  await test('Scan Card’s tools still open on their own, and their logo leads back to Scan Card',async()=>{const pg=await page('/scan-card/model/');
+    await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
+    expect(await pg.evaluate(()=>!APP.N.EMBED&&!APP.shell.stepEl('load').hidden&&document.querySelectorAll('#topBtns button').length===2),'Model Card on its own should have its own loading steps');
+    await Promise.all([pg.waitForURL(BASE+'/scan-card/'),pg.click('#top a.brand')]);await pg.waitForFunction(()=>window.APP&&APP.TOOLS,null,{timeout:20000});await noErrors(pg)});
   await test('ImplantRef opens under its CSP with all 3,961 records, exact REF lookup and torque evidence',async()=>{const pg=await page('/implantref/');
     await pg.waitForFunction(()=>window.IMPLANTREF_DATA&&window.ImplantRefCore&&document.querySelector('.page-head h1'),null,{timeout:15000});
     expect(await pg.evaluate(()=>IMPLANTREF_DATA.records.length)===3961,'catalogue incomplete');
@@ -180,7 +238,7 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#hoImport');await pg.waitForTimeout(300);
     const txt=await pg.innerText('#page');expect(/Lateral luxation/.test(txt)&&/Assessment: Monitor/.test(txt),'trauma findings missing from the letter');
     expect(await pg.evaluate(()=>localStorage.getItem('notile:letterHandoff'))===null,'handoff left on the device');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

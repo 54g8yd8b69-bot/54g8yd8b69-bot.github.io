@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis Card — model analysis</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+/* app-specific extras only — the core injects the shared look */
+button{touch-action:manipulation}
+.chart{margin:8px 0 4px;user-select:none;-webkit-user-select:none}
+.chart .cap{display:flex;justify-content:space-between;font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:1px}
+.chart .crow{display:flex;gap:2px;align-items:stretch;margin:3px 0;opacity:.62}
+.chart .crow.act{opacity:1}
+.chart .mid{width:0;flex:none;border-left:2px solid var(--navy);margin:0 2px}
+.chart .t{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:6px;background:#fff;padding:4px 0 2px;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--navy);line-height:1}
+.chart .t b{font-size:11px;font-weight:700}
+.chart .t i{font-style:normal;font-size:9px;color:#475569;font-variant-numeric:tabular-nums;min-height:9px;letter-spacing:-.2px}
+.chart .t.done{background:var(--tealsoft);border-color:#5eead4}
+.chart .t.half{background:#fffbeb;border-color:#fcd34d}
+.chart .t.miss{background:#f1f5f9;color:#94a3b8;border-style:dashed}
+.chart .t.miss b{text-decoration:line-through}
+.chart .t.skip{color:#94a3b8;border-style:dotted}
+.chart .t.cur{border-color:var(--teal2);box-shadow:0 0 0 2px rgba(20,184,166,.4)}
+.chart .t:disabled{opacity:.35;cursor:not-allowed}
+.prompt{display:flex;align-items:baseline;gap:8px;background:var(--navy);color:#fff;border-radius:8px;padding:8px 10px;margin:8px 0 6px}
+.prompt b{font-size:14.5px;font-weight:600}
+.prompt span{font-size:11px;color:#9fb6cf;margin-left:auto;white-space:nowrap}
+.prompt.done{background:var(--teal2)}
+.prompt.done span{color:#ccfbf1}
+table.tbl td.k{color:#334155}
+table.tbl tr.sum td{font-weight:600;color:var(--navy)}
+table.tbl tr.dim td{color:#94a3b8}
+table.tbl tr.pick{cursor:pointer}
+table.tbl tr.pick:hover td{background:#f8fafc}
+table.tbl tr.pick.sel td{background:#ccfbf1}
+table.tbl td small{display:block;font-size:10.5px;color:var(--muted);font-weight:400}
+table.tbl td .x{border:0;background:none;color:var(--muted);font-size:13px;padding:0 4px;line-height:1}
+table.tbl td .x:hover{color:var(--bad)}
+.flag{display:inline-block;font-size:9.5px;font-weight:600;border-radius:9px;padding:1px 6px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;vertical-align:1px}
+.btn.auto{border-style:dashed}
+.btn.none{color:#94a3b8}
+.row .unit{color:var(--muted);flex:none}
+.row input.sm{width:58px}
+.fine{margin:2px 0 0!important;font-size:11px!important}
+.rep{white-space:pre-wrap;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px;max-height:240px;overflow:auto;color:#0f172a;user-select:text;-webkit-user-select:text;margin:6px 0}
+#labels .lbl.w{font-size:10.5px;padding:1px 5px;background:rgba(13,148,136,.92)}
+#labels .lbl.sel{background:rgba(192,38,211,.95)}
+#labels .lbl.gap{background:rgba(180,83,9,.95)}
+#labels .lbl.blue{background:rgba(37,99,235,.95)}
+#labels .lbl.tag{background:rgba(15,42,68,.85);font-weight:500}
+#hint b{color:#fff;font-size:13px}
+.panel{width:auto;min-width:150px}
+.secp{position:absolute;left:10px;bottom:52px;width:min(480px,calc(100% - 20px));height:270px;background:#0b1d31;border:1px solid rgba(255,255,255,.28);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);overflow:hidden;z-index:3}
+.secp canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.secp .cap{position:absolute;left:10px;top:7px;right:34px;color:#dbe7f3;font-size:11.5px;pointer-events:none}
+.secp .x{position:absolute;right:5px;top:3px;border:0;background:none;color:#dbe7f3;font-size:15px;padding:3px 7px}
+@media (max-width:820px){.secp{height:210px;bottom:48px}}
+#sheet{position:absolute;inset:0;background:rgba(8,20,36,.9);overflow:auto;padding:14px 14px 50px;z-index:4;display:none;-webkit-overflow-scrolling:touch}
+#sheet.show{display:block}
+#sheet canvas{display:block;width:100%;max-width:1120px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.45);background:#fff}
+</style>
+</head><body>
+<script type="module">
+import * as N from './core.js';
+const THREE = N.THREE, V3 = THREE.Vector3, $ = N.$;
+const APPNAME = 'Analysis Card', KEY = 'analysis';
+
+// ───────────────────────────── norms ─────────────────────────────
+// Every figure here is shown with its source in the Bolton step's "Sources" tip.
+const BOLTON = {
+  anterior: { mean: 77.2, sd: 1.65, lo: 74.5, hi: 80.4, teeth: [3, 2, 1], label: 'Anterior ratio (3–3)' },
+  overall: { mean: 91.3, sd: 1.91, lo: 87.5, hi: 94.8, teeth: [6, 5, 4, 3, 2, 1], label: 'Overall ratio (6–6)' },
+};
+
+// ───────────────────────────── teeth ─────────────────────────────
+const JAWS = ['upper', 'lower'], QUADS = { upper: [1, 2], lower: [4, 3] };            // [patient's right, patient's left]
+const JN = { upper: 'Upper', lower: 'Lower' };
+const jawOf = (f) => (f < 30 ? 'upper' : 'lower');
+const other = (jaw) => (jaw === 'upper' ? 'lower' : 'upper');
+const isRight = (f) => { const q = (f / 10) | 0; return q === 1 || q === 4; };
+const contra = (f) => ({ 1: 2, 2: 1, 3: 4, 4: 3 })[(f / 10) | 0] * 10 + (f % 10);
+const PAL = { 1: 'UR', 2: 'UL', 3: 'LL', 4: 'LR' };
+const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+const sgn = (v, d = 1) => (Number.isFinite(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) : '–');
+const neg = (v, d = 1) => (Number.isFinite(v) ? (v < 0 ? '−' : '') + Math.abs(v).toFixed(d) : '–');
+
+// ───────────────────────────── state (all of it is saved in the case under data.analysis) ─────────────────────────────
+// Landmarks are stored in the scan's own (scanner) coordinates, so they stay on the scan if it is re-oriented later.
+const fresh = () => ({
+  v: 1, notation: 'fdi', widthMode: 'plane', include7: false,
+  teeth: {},                       // fdi → { st:'p'|'m'|'s' (present / missing / not measured), m:[x,y,z]|null, d:[x,y,z]|null }
+  substitute: false,               // Bolton: use the opposite side's width for a tooth with none
+  gapTol: 0.5,                     // a gap between neighbouring teeth below this is treated as a contact
+  line: { upper: null, lower: null },   // arch line: { pts:[[x,y,z]…]|null (null = fitted to the contact points), smooth:bool }
+  tips: {},                        // cusp tips 't13' … → { p:[x,y,z], auto:bool }
+  occ: { u: null, uAuto: true, l: null, lAuto: true },   // incisal edge points used for overjet and overbite
+  resto: {},                       // 'a-b' (the teeth either side of a space) → { crest:[[..],[..]]|null, ridge:[..]|null, plan:{fdi:mm}, impD, impC }
+  prop: null,                      // planned width as a percentage of the central incisor
+  measures: [],                    // free measurements: { t:'d'|'a'|'s', pts:[{ j:'upper'|'lower', p:[x,y,z] }…], q:[[along, z]…] (two points measured on a section) }
+  fp: { upper: null, lower: null },   // which scan the landmarks were picked on
+});
+const state = fresh();
+const ui = { jaw: 'upper', sel: null, cur: null, lock: true, step: 'load', aview: 'upper', arm: null, span: null, rview: 'occ', msel: -1, rarm: null, mtool: 'd', pend: [], back: null, sheet: true };
+let C = null;                      // everything derived from state — see recalc()
+
+function archOrder(jaw, with7 = state.include7) { const [r, l] = QUADS[jaw], a = [], top = with7 ? 7 : 6; for (let n = top; n >= 1; n--) a.push(r * 10 + n); for (let n = 1; n <= top; n++) a.push(l * 10 + n); return a; }
+const tname = (f) => (state.notation === 'palmer' ? PAL[(f / 10) | 0] + (f % 10) : String(f));
+const chartNum = (f) => (state.notation === 'palmer' ? String(f % 10) : String(f));
+const tlist = (a) => a.map(tname).join(', ');
+const tooth = (f) => state.teeth[f] || (state.teeth[f] = { st: 'p', m: null, d: null });
+const stOf = (f) => (state.teeth[f] ? state.teeth[f].st : 'p');
+const hasPt = (f, k) => !!(state.teeth[f] && state.teeth[f][k]);
+const ptOrder = (f) => (isRight(f) ? ['d', 'm'] : ['m', 'd']);          // the order the points are met going round the arch from the patient's right
+const KN = { m: 'mesial', d: 'distal' };
+const modeName = () => (state.widthMode === 'plane' ? 'in the occlusal plane' : 'straight 3D');
+
+// ───────────────────────────── shell ─────────────────────────────
+let scans;
+const shell = N.createShell({
+  name: APPNAME, tagline: 'Model analysis · tooth widths, Bolton, space, arch form', title: document.title,
+  emptyHtml: '<div><b>No scan loaded</b>Drop an STL, PLY or OBJ scan here, or use “Load scans”.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '<p class="tip">Everything measured “in the occlusal plane”, and overjet, overbite and the midline, use the plane and midline set here — so get the biting surfaces level and the midline on the centre line before measuring. Landmarks stay on the scan if you come back and adjust this later, and the figures are worked out again.</p>' },
+    { id: 'widths', title: 'Tooth widths', html: `
+      <p class="lead">Click the two contact points of each tooth, working round the arch. Two clicks per tooth.</p>
+      <div class="row"><label>Arch</label><div class="seg" id="wJaw"><button data-v="upper" type="button" title="Measure the upper teeth">Upper</button><button data-v="lower" type="button" title="Measure the lower teeth">Lower</button></div></div>
+      <div class="chart" id="chart"></div>
+      <div class="prompt" id="wPrompt"><b></b><span></span></div>
+      <div class="btns">
+        <button class="btn" id="wUndo" type="button" title="Take back the last click or change (Ctrl+Z)">Undo</button>
+        <button class="btn" id="wMiss" type="button" title="This tooth is absent. Its space is kept and listed under Spaces.">Missing</button>
+        <button class="btn" id="wSkip" type="button" title="The tooth is there but is left out of the analysis">Not measured</button>
+        <button class="btn" id="wRedo" type="button" title="Clear this tooth’s two points and click them again">Redo tooth</button>
+      </div>
+      <table class="tbl" id="wSums"></table>
+      <div class="h4">Options</div>
+      <div class="row"><label>Tooth numbers</label><div class="seg" id="wNot"><button data-v="fdi" type="button" title="Two-digit FDI numbers (16, 21 …)">FDI</button><button data-v="palmer" type="button" title="Palmer quadrants (UR6, UL1 …)">Palmer</button></div></div>
+      <div class="row"><label>Width measured</label><div class="seg" id="wMode"><button data-v="plane" type="button" title="Distance between the two points measured parallel to the occlusal plane">In occlusal plane</button><button data-v="3d" type="button" title="Straight-line distance between the two points in 3D">Straight 3D</button></div></div>
+      <div class="row"><label><input type="checkbox" id="w7"> Include second molars</label></div>
+      <div class="row"><label><input type="checkbox" id="wLock" checked> Keep the occlusal view (no rotation)</label></div>
+      <div class="btns"><button class="btn" id="wClear" type="button" title="Remove every landmark on this arch (Undo brings them back)">Clear this arch</button></div>
+      <p class="tip"><b>What to click.</b> For each tooth click its mesial and its distal contact point — the two points furthest apart along the arch, where it touches (or would touch) its neighbours. The prompt names the next point; the order runs round the arch from the patient’s right, so on the right side the distal point comes first. The view is a true parallel (orthographic) view straight onto the biting surfaces, so what you see is to scale.</p>
+      <p class="tip"><b>How the width is worked out.</b> <i>In occlusal plane</i> (default): the distance between the two points measured parallel to the occlusal plane set in step 2, like calipers held level with the biting surfaces. It ignores any height difference between your two clicks, which you cannot control well from this view. A tooth whose mesio-distal axis is tipped out of the plane measures short by the cosine of the tip (about 6% at 20°). <i>Straight 3D</i>: the true point-to-point distance — use it for a markedly tipped tooth, and turn the model to place both points at contact level.</p>
+      <p class="tip"><b>Editing.</b> Drag any point to refine it. Click a tooth in the chart to jump to it. <i>Missing</i> = tooth absent (its space is kept and measured). <i>Not measured</i> = tooth present but left out. Either way the tooth is left out of the sums, and the Bolton step says so. Third molars and separate primary teeth are not charted.</p>` },
+    { id: 'bolton', title: 'Bolton analysis', html: `
+      <p class="lead">Tooth-size ratios, lower to upper, set against Bolton’s values.</p>
+      <div id="bOut"></div>
+      <div class="row"><label><input type="checkbox" id="bSub"> Use the opposite side’s width for a tooth with no width</label></div>
+      <p class="tip"><b>Ratios.</b> Anterior = sum of the six lower front teeth ÷ sum of the six upper front teeth × 100. Overall = sum of the twelve lower teeth (first molar to first molar) ÷ sum of the twelve upper teeth × 100.</p>
+      <p class="tip"><b>Size of the discrepancy.</b> As in Bolton’s method: if the ratio is above his mean the lower teeth are relatively large, and the excess is lower sum − (upper sum × mean ÷ 100); if below, the upper teeth are relatively large, and the excess is upper sum − (lower sum × 100 ÷ mean). “Or shortfall” is the same discrepancy seen from the other arch: how much larger that arch’s teeth would need to be to reach the mean ratio.</p>
+      <p class="tip"><b>Incomplete data.</b> A ratio is only calculated when every tooth it needs has a width. Ticking the box fills a gap with the width of the same tooth on the other side; the result is then marked as an estimate and names the teeth.</p>
+      <p class="tip"><b>Sources.</b> Means, standard deviations and ranges: Bolton WA. Disharmony in tooth size and its relation to the analysis and treatment of malocclusion. <i>Angle Orthod</i> 1958;28:113–130 — 55 cases with excellent occlusion; overall ratio mean 91.3%, SD 1.91, range 87.5–94.8; anterior ratio mean 77.2%, SD 1.65, range 74.5–80.4. Size of the discrepancy: Bolton WA. The clinical application of a tooth-size analysis. <i>Am J Orthod</i> 1962;48:504–529. How large a discrepancy matters is not agreed: Bolton suggested looking closer beyond 1 SD; many studies use 2 SD (e.g. Crosby &amp; Alexander 1989); Othman &amp; Harradine (<i>Angle Orthod</i> 2007;77:668–674) recommend judging by the millimetres of correction needed, with 2 mm as their threshold. This app reports the figures and does not grade them.</p>` },
+    { id: 'space', title: 'Spaces and space analysis', html: `
+      <p class="lead">Spaces between the teeth, and space available against space required.</p>
+      <div class="row"><label>Arch</label><div class="seg" id="sJaw"><button data-v="upper" type="button" title="Show the upper arch">Upper</button><button data-v="lower" type="button" title="Show the lower arch">Lower</button></div></div>
+      <div class="h4">Spaces</div>
+      <div id="sGaps"></div>
+      <div class="row"><label>Ignore gaps under</label><input type="number" id="sTol" min="0" max="3" step="0.1" value="0.5" title="A gap between neighbouring teeth smaller than this is treated as a contact (it is within clicking error)"><span class="unit">mm</span></div>
+      <div class="h4">Space analysis</div>
+      <div id="sOut"></div>
+      <div class="row"><label>Arch line</label><div class="seg" id="sSmooth"><button data-v="1" type="button" title="A smooth curve through the points">Curve</button><button data-v="0" type="button" title="Straight segments between the points">Segments</button></div></div>
+      <div class="btns"><button class="btn" id="sDel" type="button" title="Remove the selected point of the arch line (or right-click / Alt-click a point)">Delete point</button><button class="btn" id="sReset" type="button" title="Draw the arch line again from the contact points">Reset line</button><button class="btn" id="sUndo" type="button" title="Take back the last change (Ctrl+Z)">Undo</button></div>
+      <p class="tip"><b>Spaces.</b> Taken from the contact points picked in step 3. Between two neighbouring teeth the space is the separation of their facing contact points measured along the arch, so a tooth that is simply displaced in or out is not counted as a space. Where a tooth is marked missing, the span is the straight distance between the contact points either side of it.</p>
+      <p class="tip"><b>Space analysis.</b> Space available = length of the arch line from the mesial contact of one first molar round to the mesial contact of the other. Space required = sum of the widths of the teeth between them. Available − required: negative = crowding, positive = spacing. Missing and unmeasured teeth add nothing to “required” and are named.</p>
+      <p class="tip"><b>The arch line.</b> It starts as a smooth curve fitted to all your contact points, with seven points you can drag. Drag them to where the line of the arch should run; click on the line to add a point; select a point and press Delete point to remove it. Where teeth are crowded or displaced the line is your judgement of the corrected arch, and the result depends on it. On perfectly aligned test arches the curve read within 0.1 mm of the sum of the widths, while six straight segments read 0.4–0.7 mm short because they cut the corners — add points if you prefer segments.</p>` },
+    { id: 'arch', title: 'Arch dimensions and occlusion', html: `
+      <p class="lead">Arch widths and depth, and how the incisors meet.</p>
+      <div class="row"><label>Show</label><div class="seg" id="aView"><button data-v="upper" type="button" title="Upper arch from the biting side: cusp tips, widths and depth">Upper</button><button data-v="lower" type="button" title="Lower arch from the biting side: cusp tips, widths and depth">Lower</button><button data-v="front" type="button" title="Both arches in the bite, from the front: incisal points and midlines">Front</button><button data-v="section" type="button" title="Both arches cut through the upper incisal point, seen from the patient’s right: overjet and overbite">Section</button></div></div>
+      <div id="aOut"></div>
+      <div class="h4">Landmarks</div>
+      <div class="btns" id="aChips"></div>
+      <div class="btns"><button class="btn" id="aFind" type="button" title="Find the cusp tips and incisal edges again from the scan (replaces the ones you have moved, too)">Find again</button><button class="btn" id="aUndo" type="button" title="Take back the last change (Ctrl+Z)">Undo</button></div>
+      <div id="aNote"></div>
+      <p class="tip"><b>Intercanine width</b> = distance between the cusp tips of the right and left canines. <b>Intermolar width</b> = distance between the mesiobuccal cusp tips of the right and left first molars. <b>Arch depth</b> = distance, measured in the occlusal plane, from the incisor point (midway between the mesial contact points of the two central incisors) to the line joining the mesial contact points of the first molars, at right angles to that line.</p>
+      <p class="tip"><b>Overjet</b> = from the upper incisal point straight back, parallel to the occlusal plane, to the labial surface of the lower incisors at that height (the most forward lower point within 1.5 mm either side). Negative = lower incisors in front. If the lower incisors do not reach that height it is measured to the lower incisal point instead, and says so. <b>Overbite</b> = how far the upper incisal point passes the lower incisal point, at right angles to the occlusal plane; negative = an open bite. <b>Midlines</b> = sideways distance between the upper and lower dental midlines (each midway between the mesial contact points of the central incisors). These three need both scans exported together in the bite.</p>
+      <p class="tip"><b>Landmarks.</b> Cusp tips are found for you as the point of the crown nearest the opposing arch in the expected place (middle of the canine; mesial-buccal quarter of the first molar), and the incisal points as the middle of the edge of the more forward upper central incisor and the highest point of the lower incisors in line with it. They are a first guess: check each on the model and drag any that are off, or pick one in the list and click where it should be. Dashed buttons are still automatic. <i>Section</i> cuts both scans through the upper incisal point so the overjet and overbite lines can be checked against the profile of the incisors; there, a point is moved within the cut and snaps to the nearest surface.</p>` },
+    { id: 'resto', title: 'Restorative space', optional: true, html: `
+      <p class="lead">For each space left by a missing tooth: its width at contact level and at the crest, the room to the opposing teeth, and a what-if for the planned tooth.</p>
+      <div id="rList"></div>
+      <div id="rSel"></div>
+      <p class="tip"><b>Contact level</b> = straight distance between the contact points either side of the space (from step 3). <b>Crest level</b> = distance between two points you click on the neighbouring teeth at the gum margin. <b>Vertical space</b> = distance from the ridge point straight up or down (at right angles to the occlusal plane) to the first surface of the opposing scan; it needs both scans in the bite. The ridge point starts on the gum under the middle of the span — drag it to where you need the reading.</p>
+      <p class="tip"><b>What-if.</b> Space at contact level minus the planned width(s). A planned width can be typed, or taken as a percentage of this patient’s measured central incisor. No percentage is pre-set, because published proportions describe different things. Levin’s golden proportion (lateral about 62% of central; <i>J Prosthet Dent</i> 1978;40:244–252), Preston’s measured 66% (<i>J Esthet Dent</i> 1993;5:247–251) and Ward’s RED proportion (70% preferred; <i>Dent Clin North Am</i> 2001;45:143–154) all refer to the widths <i>seen from the front</i>, not the true mesio-distal widths measured here. Mean true widths reported for upper centrals and laterals (Magne et al., <i>J Prosthet Dent</i> 2003;89:453–461; Orozco-Varo et al., <i>J Prosthet Dent</i> 2015;113:565–570, as tabulated by Cinelli et al., <i>Dent J</i> 2024;12:3) work out at a lateral of about 77–78% of the central.</p>
+      <p class="tip"><b>Implant sum.</b> Simple arithmetic on the numbers you enter: diameter + twice the clearance, set against the width at crest level (or contact level if no crest width is measured). A surface scan shows crowns and gum only — not roots or bone. For reference, Buser, Martin &amp; Belser (<i>Int J Oral Maxillofac Implants</i> 2004;19 Suppl:43–61) describe a zone about 1.0–1.5 mm wide next to each adjacent root to stay out of, and at least 3 mm between two adjacent implants. Nothing here is a recommendation.</p>` },
+    { id: 'measure', title: 'Measure', optional: true, html: `
+      <p class="lead">Measure anything on the scans. The “Measure” button in the top bar brings you here from any step and takes you back.</p>
+      <div class="row"><label>Tool</label><div class="seg" id="mTool"><button data-v="d" type="button" title="Distance between two points">Distance</button><button data-v="a" type="button" title="Angle at the second of three points">Angle</button><button data-v="s" type="button" title="A straight cut down through two points: shows the outline of the scans there, to measure on">Section</button></div></div>
+      <div id="mOut"></div>
+      <div class="btns"><button class="btn" id="mUndo" type="button" title="Take back the last point or change (Ctrl+Z)">Undo</button><button class="btn" id="mClear" type="button" title="Remove every free measurement (Undo brings them back)">Clear all</button></div>
+      <p class="tip"><b>Distance</b>: click two points. The list gives the straight 3D distance, and its parts in the occlusal plane and at right angles to it. <b>Angle</b>: click three points; the angle is at the second. <b>Section</b>: click two points; the scans that are showing are cut straight down through them (at right angles to the occlusal plane) and the outline appears in a panel, to scale. Click two places on the outline to measure between them — the clicks snap to the outline, and the list gives the distance with its parts along the cut and vertically. Drag any point on the model to adjust it. Measurements are saved with the case and listed in the report.</p>` },
+    { id: 'report', title: 'Report', html: `
+      <p class="lead">A summary of everything measured, for the notes or the lab.</p>
+      <div class="btns"><button class="btn pri" id="pCopy" type="button" title="Copy the summary as plain text, ready to paste into clinical notes">Copy as text</button><button class="btn" id="pPng" type="button" title="Save the report sheet as a PNG image">Save image</button><button class="btn" id="pCsv" type="button" title="Save every measurement and landmark as a CSV file for a spreadsheet">Save CSV</button></div>
+      <div class="btns"><button class="btn" id="pSheet" type="button" title="Show or hide the report sheet over the 3D view">Show the model</button></div>
+      <div class="rep" id="pText" tabindex="0"></div>
+      <div class="note">Planning and lab-communication aid — not a certified medical device. Every figure depends on the landmarks placed and on the orientation set in step 2. The report holds no patient details; add them where you file it.</div>
+      <p class="tip">The text is what “Copy as text” puts on the clipboard; if copying is blocked, select it here and copy by hand. Tooth numbers follow the FDI / Palmer choice in step 3. Figures marked * rest on a landmark placed automatically and not yet moved by you. The case file (“Save case”) keeps every landmark, so the analysis reopens exactly as it is.</p>` },
+  ],
+});
+
+// ───────────────────────────── viewer: orthographic, so the occlusal view is true to scale ─────────────────────────────
+const viewer = N.createViewer(shell.view, { ortho: true });
+N.addViewButtons(shell, viewer);
+const mmPerPx = () => { const c = viewer.camera; return (c.top - c.bottom) / c.zoom / viewer.size.h; };
+{ // the core's markers are sized for a perspective camera; in a parallel view their size has to follow the zoom
+  const dots = new Set(), base = viewer.marker.bind(viewer);
+  viewer.marker = (p, o = {}) => { const s = base(p, o); s.userData.px = o.px || 11; const w = s.userData.px * mmPerPx(); s.scale.set(w, w, 1); dots.add(s); return s; };
+  viewer.onRender(() => { const k = mmPerPx(); let dirty = false; for (const s of dots) { if (!s.parent) { dots.delete(s); continue; } const w = s.userData.px * k; if (Math.abs(s.scale.x - w) > 1e-7) { s.scale.set(w, w, 1); dirty = true; } } if (dirty) viewer.invalidate(); });
+}
+viewer.renderer.localClippingEnabled = true;
+/** Frame a box from a direction, filling the view except for the given margins (px). */
+function frame(box, dir, inset = {}) {
+  if (!box || box.isEmpty()) return;
+  viewer.fit(box, { dir });
+  const cam = viewer.camera, { w: W, h: H } = viewer.size; cam.updateMatrixWorld(true);
+  const r = new V3().setFromMatrixColumn(cam.matrixWorld, 0), u = new V3().setFromMatrixColumn(cam.matrixWorld, 1), c = new V3();
+  let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+  for (let k = 0; k < 8; k++) { c.set(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z); const a = c.dot(r), b = c.dot(u); a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
+  const l = inset.l ?? 14, rr = inset.r ?? 14, t = inset.t ?? 14, bb = inset.b ?? 14, fw = cam.right - cam.left, fh = cam.top - cam.bottom;
+  cam.zoom = Math.min((fw * Math.max(50, W - l - rr) / W) / Math.max(1, a1 - a0), (fh * Math.max(50, H - t - bb) / H) / Math.max(1, b1 - b0)); cam.updateProjectionMatrix();
+  const mm = fh / cam.zoom / H, tg = viewer.controls.target;
+  const sh = r.clone().multiplyScalar((a0 + a1) / 2 - tg.dot(r) + (rr - l) / 2 * mm).add(u.clone().multiplyScalar((b0 + b1) / 2 - tg.dot(u) + (t - bb) / 2 * mm));
+  tg.add(sh); cam.position.add(sh); viewer.controls.update(); viewer.invalidate();
+}
+const OCC_DIR = { upper: [0, -0.0015, -1], lower: [0, -0.0015, 1] };
+const boxOf = (jaws) => { const b = new THREE.Box3(); for (const j of jaws) if (scans[j]) b.union(new THREE.Box3().setFromObject(scans[j].object)); return b; };
+function occlusalView(jaw) { if (scans[jaw]) frame(boxOf([jaw]), OCC_DIR[jaw], jaw === 'lower' ? { t: 64, b: 46 } : { t: 22, b: 46 }); }
+function showOnly(jaw) { for (const j of JAWS) if (scans[j] && scans[j].object.visible !== (jaw === 'both' || j === jaw)) scans.setVisible(j, jaw === 'both' || j === jaw); }
+const isoView = () => frame(boxOf(JAWS), [0.45, -0.85, 0.45], { t: 30, b: 46 });
+
+// ───────────────────────────── scans ─────────────────────────────
+scans = N.createScanSet({
+  shell, viewer, appName: APPNAME, loadStep: 'load', orientStep: 'orient',
+  demos: [{ label: 'Try the demo scans', opts: {} }, { label: 'Demo: missing laterals', opts: { missing: { 12: 5.5, 22: 5.5 }, spacing: 0.4 } }],
+  onChange: (what) => onScans(what),
+  extendCase: (dcase) => { dcase.data[KEY] = JSON.parse(JSON.stringify(state)); },
+  readCase: (dcase) => { loadState(dcase.data && dcase.data[KEY]); undo.length = 0; },
+});
+{ const ld = scans.loadDemo; scans.loadDemo = (o) => { loadState(null); undo.length = 0; return ld(o); }; }     // a demo is a new case
+
+// ───────────────────────────── frames, distances, rays ─────────────────────────────
+const inv = { upper: null, lower: null };
+const r4 = (v) => Math.round(v * 1e4) / 1e4;
+function toWorld(jaw, a) { const sc = scans[jaw]; return sc && a ? new V3(a[0], a[1], a[2]).applyMatrix4(sc.matrix) : null; }
+function toRaw(jaw, v) { const sc = scans[jaw]; if (!inv[jaw]) inv[jaw] = sc.matrix.clone().invert(); const p = v.clone().applyMatrix4(inv[jaw]); return [r4(p.x), r4(p.y), r4(p.z)]; }
+/** distance by the chosen width definition: in the occlusal plane (default) or straight 3D */
+const dlen = (a, b) => (state.widthMode === 'plane' ? Math.hypot(a.x - b.x, a.y - b.y) : a.distanceTo(b));
+const dvec = (a, b) => new V3(b.x - a.x, b.y - a.y, state.widthMode === 'plane' ? 0 : b.z - a.z);
+const midp = (a, b) => a.clone().add(b).multiplyScalar(0.5);
+function fingerprint(jaw) { const sc = scans[jaw]; if (!sc) return null; const P = sc.raw.positions, st = Math.max(3, Math.floor(P.length / 3000) * 3), u = new Uint32Array(P.buffer, P.byteOffset, P.length); let h = 2166136261; for (let i = 0; i < u.length; i += st) { h ^= u[i]; h = Math.imul(h, 16777619); } return `${P.length}:${sc.raw.indices.length}:${(h >>> 0).toString(36)}`; }
+const caster = new THREE.Raycaster(); caster.firstHitOnly = true;
+/** first point where a ray meets a scan (works on hidden scans too) */
+function rayHit(jaw, origin, dir) { const sc = scans[jaw]; if (!sc) return null; caster.set(origin, dir); caster.near = 0; caster.far = Infinity; const h = caster.intersectObject(sc.object, false); return h.length ? h[0].point.clone() : null; }
+const UP = { upper: -1, lower: 1 };                                   // z direction the teeth of each arch point in
+
+// ───────────────────────────── derived values ─────────────────────────────
+function bolton(w, subst) {
+  const out = {};
+  for (const kind of ['anterior', 'overall']) {
+    const B = BOLTON[kind], r = { kind, upper: 0, lower: 0, lacking: [], subs: [], ratio: null };
+    for (const jaw of JAWS) for (const q of QUADS[jaw]) for (const n of B.teeth) {
+      const f = q * 10 + n; let v = w[f];
+      if (v == null && subst && w[contra(f)] != null) { v = w[contra(f)]; r.subs.push(f); }
+      if (v == null) r.lacking.push(f); else r[jaw] += v;
+    }
+    if (!r.lacking.length) {
+      r.ratio = r.lower / r.upper * 100; r.diff = r.ratio - B.mean; r.sd = r.diff / B.sd;
+      const idealLower = r.upper * B.mean / 100, idealUpper = r.lower * 100 / B.mean;
+      if (r.ratio >= B.mean) { r.arch = 'lower'; r.excess = r.lower - idealLower; r.altArch = 'upper'; r.alt = idealUpper - r.upper; }
+      else { r.arch = 'upper'; r.excess = r.upper - idealUpper; r.altArch = 'lower'; r.alt = idealLower - r.lower; }
+    }
+    out[kind] = r;
+  }
+  return out;
+}
+/** if the only teeth a ratio lacks are missing teeth of one arch: what they would have to total for Bolton's mean ratio (arithmetic only) */
+function boltonRemainder(r) {
+  if (!r.lacking.length || !r.lacking.every((f) => stOf(f) === 'm')) return null; const jaw = jawOf(r.lacking[0]); if (r.lacking.some((f) => jawOf(f) !== jaw)) return null;
+  const B = BOLTON[r.kind], ideal = jaw === 'upper' ? r.lower * 100 / B.mean : r.upper * B.mean / 100;
+  return { jaw, teeth: r.lacking, ideal, have: r[jaw], left: ideal - r[jaw], n: B.teeth.length * 2 - r.lacking.length, opp: r[other(jaw)] };
+}
+function sumOf(jaw, top, w) { let s = 0, n = 0; for (const q of QUADS[jaw]) for (let k = 1; k <= top; k++) if (w[q * 10 + k] != null) { s += w[q * 10 + k]; n++; } return { sum: s, n, of: top * 2 }; }
+const facing = (f, side) => { const P = C.P[f]; return side === 'next' ? (isRight(f) ? P.m : P.d) : (isRight(f) ? P.d : P.m); };   // going round from the patient's right
+function gapsFor(jaw) {
+  const out = []; let prev = null, between = [];
+  for (const f of archOrder(jaw)) {
+    if (C.w[f] == null) { between.push(f); continue; }
+    if (prev != null) {
+      const a = facing(prev, 'next'), b = facing(f, 'prev'), miss = between.filter((x) => stOf(x) === 'm'), unk = between.filter((x) => stOf(x) !== 'm');
+      const u = dvec(midp(C.P[prev].m, C.P[prev].d), midp(C.P[f].m, C.P[f].d)); u.normalize();
+      const g = { jaw, a: prev, b: f, pa: a, pb: b, missing: miss, unknown: unk, straight: dlen(a, b), sep: dvec(a, b).dot(u), key: prev + '-' + f };
+      g.kind = unk.length ? 'unknown' : miss.length ? 'span' : g.sep >= state.gapTol ? 'gap' : 'contact';
+      g.width = g.kind === 'span' ? g.straight : g.kind === 'gap' ? g.sep : null;
+      out.push(g);
+    }
+    prev = f; between = [];
+  }
+  return out;
+}
+function polyfit(ts, vs, deg) {                                  // least-squares polynomial, coefficients low → high
+  const n = deg + 1, A = Array.from({ length: n }, () => new Float64Array(n + 1));
+  for (let k = 0; k < ts.length; k++) { const p = [1]; for (let i = 1; i <= 2 * deg; i++) p.push(p[i - 1] * ts[k]); for (let i = 0; i < n; i++) { for (let j = 0; j < n; j++) A[i][j] += p[i + j]; A[i][n] += p[i] * vs[k]; } }
+  for (let i = 0; i < n; i++) { let pv = i; for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[pv][i])) pv = r; const t = A[i]; A[i] = A[pv]; A[pv] = t; const d = A[i][i] || 1e-12; for (let j = i; j <= n; j++) A[i][j] /= d; for (let r = 0; r < n; r++) { if (r === i) continue; const f = A[r][i]; if (f) for (let j = i; j <= n; j++) A[r][j] -= f * A[i][j]; } }
+  return A.map((r) => r[n]);
+}
+const polyval = (c, x) => { let s = 0; for (let i = c.length - 1; i >= 0; i--) s = s * x + c[i]; return s; };
+/** where the arch line starts and ends: the mesial contact of each first molar, or failing that the distal contact of the last measured tooth in front of it */
+function lineEnds(jaw) {
+  const [qr, ql] = QUADS[jaw], end = (q) => { if (C.w[q * 10 + 6] != null) return { p: C.P[q * 10 + 6].m, n: 5, label: tname(q * 10 + 6) + ' mesial' }; for (let n = 5; n >= 3; n--) if (C.w[q * 10 + n] != null) return { p: C.P[q * 10 + n].d, n, label: tname(q * 10 + n) + ' distal' }; return null; };
+  const a = end(qr), b = end(ql); if (!a || !b) return null;
+  const teeth = []; for (let n = a.n; n >= 1; n--) teeth.push(qr * 10 + n); for (let n = 1; n <= b.n; n++) teeth.push(ql * 10 + n);
+  return { a, b, teeth };
+}
+/** a smooth curve fitted (least squares) to every contact point between the two ends, returned as seven points to drag */
+function autoLine(jaw, e) {
+  const chain = [e.a.p]; for (const f of e.teeth) { if (C.w[f] == null) continue; const [k1, k2] = ptOrder(f); chain.push(C.P[f][k1], C.P[f][k2]); } chain.push(e.b.p);
+  if (chain.length < 6) return chain.map((p) => p.clone());
+  const t = [0]; for (let i = 1; i < chain.length; i++) t.push(t[i - 1] + Math.hypot(chain[i].x - chain[i - 1].x, chain[i].y - chain[i - 1].y));
+  const T = t[t.length - 1] || 1, u = t.map((v) => 2 * v / T - 1), deg = Math.min(5, Math.floor((chain.length - 1) / 2));
+  const cx = polyfit(u, chain.map((p) => p.x), deg), cy = polyfit(u, chain.map((p) => p.y), deg), cz = polyfit(u, chain.map((p) => p.z), Math.min(2, deg)), pts = [];
+  for (let i = 0; i < 7; i++) { const x = -1 + i / 3; pts.push(new V3(polyval(cx, x), polyval(cy, x), polyval(cz, x))); }
+  pts[0].copy(e.a.p); pts[6].copy(e.b.p); return pts;
+}
+const plannedOf = (f) => { for (const k in state.resto) { const v = state.resto[k].plan && state.resto[k].plan[f]; if (Number.isFinite(v) && v > 0) return v; } return null; };
+const curvePts = (pts) => (pts.length < 3 ? pts : new THREE.CatmullRomCurve3(pts, false, 'centripetal').getPoints((pts.length - 1) * 16));
+function spaceFor(jaw) {
+  const e = lineEnds(jaw); if (!e) return { ok: false };
+  const L = state.line[jaw] || {}, auto = !L.pts, smooth = L.smooth !== false, ctrl = auto ? autoLine(jaw, e) : L.pts.map((a) => toWorld(jaw, a));
+  const path = smooth ? curvePts(ctrl) : ctrl; let avail = 0; for (let i = 1; i < path.length; i++) avail += dlen(path[i - 1], path[i]);
+  let req = 0; const used = [], missing = [], unknown = []; for (const f of e.teeth) { if (C.w[f] != null) { req += C.w[f]; used.push(f); } else (stOf(f) === 'm' ? missing : unknown).push(f); }
+  const plans = missing.map(plannedOf), planned = missing.length && plans.every((v) => v != null) ? plans.reduce((a, b) => a + b, 0) : null;
+  return { ok: true, e, ctrl, path, auto, smooth, avail, req, diff: avail - req, used, missing, unknown, planned, diffPlanned: planned != null ? avail - req - planned : null };
+}
+const tipOf = (f) => { const t = state.tips['t' + f]; return t ? toWorld(jawOf(f), t.p) : null; };
+const tipAuto = (f) => !!(state.tips['t' + f] && state.tips['t' + f].auto);
+function archDims(jaw) {
+  const [qr, ql] = QUADS[jaw], r = { c1: tipOf(qr * 10 + 3), c2: tipOf(ql * 10 + 3), m1: tipOf(qr * 10 + 6), m2: tipOf(ql * 10 + 6), icw: null, imw: null, depth: null };
+  if (r.c1 && r.c2) { r.icw = dlen(r.c1, r.c2); r.icwAuto = tipAuto(qr * 10 + 3) || tipAuto(ql * 10 + 3); }
+  if (r.m1 && r.m2) { r.imw = dlen(r.m1, r.m2); r.imwAuto = tipAuto(qr * 10 + 6) || tipAuto(ql * 10 + 6); }
+  r.depthNeeds = [qr * 10 + 6, qr * 10 + 1, ql * 10 + 1, ql * 10 + 6].filter((f) => C.w[f] == null);
+  if (C.w[qr * 10 + 1] != null && C.w[ql * 10 + 1] != null) r.I = midp(C.P[qr * 10 + 1].m, C.P[ql * 10 + 1].m);          // incisor point = dental midline at contact level
+  if (!r.depthNeeds.length) { const a = C.P[qr * 10 + 6].m, b = C.P[ql * 10 + 6].m, I = r.I, bx = b.x - a.x, by = b.y - a.y, t = ((I.x - a.x) * bx + (I.y - a.y) * by) / (bx * bx + by * by || 1); r.a = a; r.b = b; r.foot = new V3(a.x + bx * t, a.y + by * t, a.z + (b.z - a.z) * t); r.depth = Math.hypot(I.x - r.foot.x, I.y - r.foot.y); }
+  return r;
+}
+function occlusion() {
+  const o = { can: C.has.upper && C.has.lower && scans.inBite, why: '' };
+  if (!o.can) { o.why = !(C.has.upper && C.has.lower) ? 'Overjet, overbite and the midlines need both the upper and the lower scan.' : 'The two scans were not exported in the same bite, so overjet, overbite and the midlines cannot be measured.'; return o; }
+  const U = toWorld('upper', state.occ.u), Lp = toWorld('lower', state.occ.l); o.U = U; o.L = Lp;
+  if (U && Lp) o.overbite = Lp.z - U.z;
+  if (U) {
+    let best = null; for (let k = -3; k <= 3; k++) { const h = rayHit('lower', new V3(U.x + k * 0.5, U.y - 40, U.z), new V3(0, 1, 0)); if (h && (!best || h.y < best.y)) best = h; }
+    if (best) { o.overjet = best.y - U.y; o.H = best; o.ojTo = 'surface'; } else if (Lp) { o.overjet = Lp.y - U.y; o.H = new V3(U.x, Lp.y, U.z); o.ojTo = 'edge'; }
+  }
+  o.auto = !!((U && state.occ.uAuto) || (Lp && state.occ.lAuto));
+  const a = C.arch.upper.I, b = C.arch.lower.I; if (a && b) { o.mid = b.x - a.x; o.mU = a; o.mL = b; }
+  return o;
+}
+function restoList() {
+  const out = [];
+  for (const jaw of JAWS) for (const g of C.gaps[jaw]) {
+    if (g.kind !== 'span') continue;
+    const s = state.resto[g.key] || {}, r = { key: g.key, jaw, g, contact: g.straight, crest: null, vert: null, plan: s.plan || {}, impD: s.impD ?? null, impC: s.impC ?? null };
+    if (s.crest && s.crest[0] && s.crest[1]) { r.cp = [toWorld(jaw, s.crest[0]), toWorld(jaw, s.crest[1])]; r.crest = dlen(r.cp[0], r.cp[1]); } else if (s.crest && s.crest[0]) r.cp = [toWorld(jaw, s.crest[0])];
+    const mid = midp(g.pa, g.pb);
+    if (s.ridge) { r.ridge = toWorld(jaw, s.ridge); r.ridgeAuto = false; } else { r.ridge = rayHit(jaw, new V3(mid.x, mid.y, UP[jaw] * 60), new V3(0, 0, -UP[jaw])); r.ridgeAuto = true; }
+    r.canVert = C.has.upper && C.has.lower && scans.inBite;
+    if (r.ridge && r.canVert) { const h = rayHit(other(jaw), r.ridge.clone().add(new V3(0, 0, UP[jaw] * 0.01)), new V3(0, 0, UP[jaw])); if (h) { r.vert = Math.abs(h.z - r.ridge.z); r.vhit = h; r.beyond = UP[jaw] * h.z; } }      // beyond: how far past the occlusal plane (z = 0) the opposing surface lies
+    const vals = g.missing.map((f) => r.plan[f]); r.planTotal = vals.every((v) => Number.isFinite(v) && v > 0) ? vals.reduce((a, b) => a + b, 0) : null;
+    r.spare = r.planTotal != null ? r.contact - r.planTotal : null;
+    r.impNeed = Number.isFinite(r.impD) && r.impD > 0 && Number.isFinite(r.impC) && r.impC >= 0 ? r.impD + 2 * r.impC : null; r.impAt = r.crest != null ? 'crest' : 'contact';
+    r.impSpare = r.impNeed != null ? (r.crest != null ? r.crest : r.contact) - r.impNeed : null;
+    const q = (g.missing[0] / 10) | 0, own = q * 10 + 1, opp = contra(own); r.central = C.w[own] != null ? own : C.w[opp] != null ? opp : null;
+    r.name = `${tlist(g.missing)} space`;
+    out.push(r);
+  }
+  return out;
+}
+function measureList() {
+  return state.measures.map((m, i) => {
+    const P = m.pts.map((q) => toWorld(q.j, q.p)), r = { i, t: m.t, P, ok: P.every(Boolean) && P.length === (m.t === 'a' ? 3 : 2) };
+    if (!r.ok) return r;
+    if (m.t === 's') { r.len = Math.hypot(P[0].x - P[1].x, P[0].y - P[1].y); r.q = m.q || null; if (r.q && r.q.length === 2) { r.qs = Math.abs(r.q[0][0] - r.q[1][0]); r.qz = Math.abs(r.q[0][1] - r.q[1][1]); r.qd = Math.hypot(r.qs, r.qz); } }
+    else if (m.t === 'd') { r.d = P[0].distanceTo(P[1]); r.plane = Math.hypot(P[0].x - P[1].x, P[0].y - P[1].y); r.vert = Math.abs(P[0].z - P[1].z); }
+    else { const a = P[0].clone().sub(P[1]), b = P[2].clone().sub(P[1]); r.ang = THREE.MathUtils.radToDeg(a.angleTo(b)); }
+    return r;
+  });
+}
+function recalc() {
+  C = { P: {}, w: {}, has: { upper: scans.has('upper'), lower: scans.has('lower') } };
+  for (const f in state.teeth) { const t = state.teeth[f], jaw = jawOf(+f); if (!C.has[jaw]) continue; const m = toWorld(jaw, t.m), d = toWorld(jaw, t.d); C.P[f] = { m, d }; C.w[f] = t.st === 'p' && m && d && (state.include7 || f % 10 < 7) ? dlen(m, d) : null; }
+  for (const jaw of JAWS) for (const f of archOrder(jaw, true)) { if (!C.P[f]) C.P[f] = { m: null, d: null }; if (!(f in C.w)) C.w[f] = null; }
+  C.bolton = bolton(C.w, state.substitute); for (const k in C.bolton) C.bolton[k].rem = C.has.upper && C.has.lower ? boltonRemainder(C.bolton[k]) : null;
+  C.sums = {}; C.gaps = {}; C.space = {}; C.arch = {};
+  for (const jaw of JAWS) { C.sums[jaw] = { a: sumOf(jaw, 3, C.w), o: sumOf(jaw, 6, C.w) }; C.gaps[jaw] = C.has[jaw] ? gapsFor(jaw) : []; C.space[jaw] = C.has[jaw] ? spaceFor(jaw) : { ok: false }; C.arch[jaw] = C.has[jaw] ? archDims(jaw) : {}; }
+  C.occ = occlusion(); C.resto = restoList(); C.meas = measureList();
+  return C;
+}
+
+// ───────────────────────────── finding cusp tips and incisal edges on the scan ─────────────────────────────
+function archCentre(jaw) { let x = 0, y = 0, n = 0; for (const f of archOrder(jaw, true)) for (const k of ['m', 'd']) { const p = C.P[f] && C.P[f][k]; if (p) { x += p.x; y += p.y; n++; } } return n ? { x: x / n, y: y / n } : { x: 0, y: 0 }; }
+/** the point of a crown nearest the opposing arch inside a box set out from the tooth's two contact points: along the tooth a0…a1 (fractions of its width from its middle, + = mesial), across it b0…b1 mm (+ = buccal) */
+function crownPeak(f, a0, a1, b0, b1) {
+  const jaw = jawOf(f), P = C.P[f]; if (!P || !P.m || !P.d || C.w[f] == null || !scans[jaw]) return null;
+  const pos = scans.framed(jaw).positions, ax = new V3(P.m.x - P.d.x, P.m.y - P.d.y, 0), w = ax.length() || 1; ax.multiplyScalar(1 / w);
+  const c = midp(P.m, P.d), cen = archCentre(jaw), bu = new V3(-ax.y, ax.x, 0); if (bu.x * (c.x - cen.x) + bu.y * (c.y - cen.y) < 0) bu.negate();
+  const up = UP[jaw], inBox = (i) => { const dx = pos[i] - c.x, dy = pos[i + 1] - c.y, a = dx * ax.x + dy * ax.y; if (a < a0 * w || a > a1 * w) return false; const b = dx * bu.x + dy * bu.y; return b >= b0 && b <= b1; };
+  let best = -Infinity, bi = -1; for (let i = 0; i < pos.length; i += 3) { if (!inBox(i)) continue; const h = pos[i + 2] * up; if (h > best) { best = h; bi = i; } }
+  if (bi < 0) return null;
+  let sx = 0, sy = 0, n = 0; for (let i = 0; i < pos.length; i += 3) { if (pos[i + 2] * up < best - 0.08 || Math.hypot(pos[i] - pos[bi], pos[i + 1] - pos[bi + 1]) > 1.2 || !inBox(i)) continue; sx += pos[i]; sy += pos[i + 1]; n++; }
+  return N.closestOnMesh(scans[jaw].object, new V3(sx / n, sy / n, pos[bi + 2])).point;
+}
+const findCusp = (f) => (f % 10 >= 6 ? crownPeak(f, 0.05, 0.5, 0.5, 6) : crownPeak(f, -0.35, 0.35, -3, 4.5));
+function findUpperIncisal() { let best = null; for (const f of [11, 21]) { const p = crownPeak(f, -0.17, 0.17, -4, 5); if (p && (!best || p.y < best.y)) best = p; } return best; }      // the middle of the edge of the more forward central
+function findLowerIncisal(U) {
+  if (!U || !scans.lower) return null; const pos = scans.framed('lower').positions; let best = -Infinity, bi = -1;
+  const inBox = (i) => Math.abs(pos[i] - U.x) <= 2.5 && pos[i + 1] >= U.y - 12 && pos[i + 1] <= U.y + 15;
+  for (let i = 0; i < pos.length; i += 3) if (inBox(i) && pos[i + 2] > best) { best = pos[i + 2]; bi = i; }
+  if (bi < 0) return null;
+  let sx = 0, sy = 0, n = 0; for (let i = 0; i < pos.length; i += 3) { if (pos[i + 2] < best - 0.08 || !inBox(i) || Math.hypot(pos[i] - pos[bi], pos[i + 1] - pos[bi + 1]) > 1.2) continue; sx += pos[i]; sy += pos[i + 1]; n++; }
+  return N.closestOnMesh(scans.lower.object, new V3(sx / n, sy / n, best)).point;
+}
+const TIPS = { upper: [16, 13, 23, 26], lower: [46, 43, 33, 36] };
+/** fill in (or refresh) every landmark that is still automatic; ones the user has placed are left alone unless force is set */
+function autoLandmarks(force = false) {
+  for (const jaw of JAWS) { if (!scans[jaw]) continue; for (const f of TIPS[jaw]) { const k = 't' + f, cur = state.tips[k]; if (cur && !cur.auto && !force) continue; const p = findCusp(f); if (p) state.tips[k] = { p: toRaw(jaw, p), auto: true }; else if (cur && cur.auto) delete state.tips[k]; } }
+  const o = state.occ;
+  if (scans.upper && (o.uAuto || !o.u || force)) { const p = findUpperIncisal(); if (p) { o.u = toRaw('upper', p); o.uAuto = true; } else if (o.uAuto) o.u = null; }
+  if (scans.lower && (o.lAuto || !o.l || force)) { const p = scans.upper && scans.inBite ? findLowerIncisal(toWorld('upper', o.u)) : null; if (p) { o.l = toRaw('lower', p); o.lAuto = true; } else if (o.lAuto) o.l = null; }
+}
+
+// ───────────────────────────── overlays (lines, dots and labels on the model) ─────────────────────────────
+const COL = { tooth: 0x2dd4bf, sel: 0xe879f9, gap: 0xf59e0b, line: 0x60a5fa, dim: 0x94a3b8, white: 0xffffff };
+function makeLayer() {
+  const items = [];
+  return {
+    dot(p, color, px = 9) { const s = viewer.marker(p, { color, px }); items.push(s); return s; },
+    line(pts, o = {}) { const l = viewer.line(pts, { depthTest: false, ...o }); items.push(l); return l; },
+    label(text, p, o = {}) { const l = viewer.label(text, p, o); items.push(l); return l; },
+    clear() { for (const it of items) { if (it.isSprite) viewer.scene.remove(it); else if (it.dispose) it.dispose(); else it.remove(); } items.length = 0; viewer.invalidate(); },
+  };
+}
+const layer = makeLayer();
+const vis = (j) => !!(scans[j] && scans[j].object.visible);
+function drawTeeth(jaw, o = {}) {
+  for (const f of archOrder(jaw)) {
+    const P = C.P[f]; if (!P) continue; const sel = o.select && f === ui.sel, col = o.color ?? (sel ? COL.sel : COL.tooth);
+    if (P.m && P.d) { layer.line([P.m, P.d], { color: col, width: sel ? 3.5 : o.thin ? 1.5 : 2.5, opacity: o.thin ? 0.7 : 1 }); if (o.labels && C.w[f] != null) layer.label(fmt(C.w[f]), midp(P.m, P.d), { class: 'w' + (sel ? ' sel' : '') }); }
+    if (!o.thin) for (const k of ['m', 'd']) if (P[k]) layer.dot(P[k], col, sel ? 11 : 8);
+  }
+}
+function drawGaps(jaw) {
+  for (const g of C.gaps[jaw]) { if (g.kind !== 'span' && g.kind !== 'gap') continue; layer.line([g.pa, g.pb], { color: COL.gap, width: 3, dashed: g.kind === 'span' }); layer.label(fmt(g.width), midp(g.pa, g.pb), { class: 'gap' }); }
+}
+function drawLine(jaw) {
+  const S = C.space[jaw]; if (!S.ok) return;
+  layer.line(S.path, { color: COL.line, width: 3 });
+  S.ctrl.forEach((p, i) => layer.dot(p, i === lineSel ? COL.sel : COL.line, i === lineSel ? 12 : 10));
+}
+function drawArch(jaw) {
+  const A = C.arch[jaw], arm = ui.arm;
+  if (A.c1 && A.c2) { layer.line([A.c1, A.c2], { color: COL.tooth, width: 2.5 }); layer.label('Canines ' + fmt(A.icw), midp(A.c1, A.c2), { class: 'w' }); }
+  if (A.m1 && A.m2) { layer.line([A.m1, A.m2], { color: COL.line, width: 2.5 }); layer.label('Molars ' + fmt(A.imw), midp(A.m1, A.m2), { class: 'blue' }); }
+  if (A.depth != null) { layer.line([A.a, A.b], { color: COL.gap, width: 1.5, dashed: true }); layer.line([A.I, A.foot], { color: COL.gap, width: 2.5 }); layer.label('Depth ' + fmt(A.depth), midp(A.I, A.foot), { class: 'gap' }); layer.dot(A.I, COL.gap, 7); }
+  for (const f of TIPS[jaw]) { const p = tipOf(f); if (p) layer.dot(p, arm === 't' + f ? COL.sel : f % 10 === 3 ? COL.tooth : COL.line, arm === 't' + f ? 12 : 10); }
+}
+function drawOcc() {
+  const o = C.occ; if (!o.can) return; const sec = ui.aview === 'section';
+  if (o.U) layer.dot(o.U, ui.arm === 'u' ? COL.sel : COL.tooth, 11);
+  if (o.L) layer.dot(o.L, ui.arm === 'l' ? COL.sel : COL.line, 11);
+  if (sec && o.U && o.H) { layer.line([o.U, new V3(o.U.x, o.H.y, o.U.z)], { color: COL.gap, width: 3 }); layer.label('Overjet ' + neg(o.overjet), new V3(o.U.x, (o.U.y + o.H.y) / 2, o.U.z), { class: 'gap', dy: 16 }); }
+  if (o.U && o.L) {
+    const y = Math.min(o.U.y, o.L.y) - 2.5, x = sec ? o.U.x : o.U.x + (o.U.x < 0 ? -1 : 1) * 4.5, a = new V3(x, y, o.U.z), b = new V3(x, y, o.L.z);
+    layer.line([a, b], { color: COL.sel, width: 3 }); layer.line([o.U, a], { color: COL.sel, width: 1, opacity: 0.7 }); layer.line([o.L, b], { color: COL.sel, width: 1, opacity: 0.7 });
+    layer.label('Overbite ' + neg(o.overbite), midp(a, b), { class: 'sel', dx: sec ? 50 : (o.U.x < 0 ? -50 : 50) });
+  }
+  if (!sec && o.mU && o.mL) {
+    const yy = Math.min(o.mU.y, o.mL.y) - 3;
+    layer.line([new V3(o.mU.x, yy, o.mU.z - 1), new V3(o.mU.x, yy, o.mU.z + 7)], { color: COL.white, width: 2.5 }); layer.line([new V3(o.mL.x, yy, o.mL.z - 7), new V3(o.mL.x, yy, o.mL.z + 1)], { color: COL.gap, width: 2.5 });
+    layer.label(Math.abs(o.mid) < 0.05 ? 'Midlines coincide' : 'Midlines ' + fmt(Math.abs(o.mid)) + ' apart', new V3(o.mU.x, yy, o.mU.z + 7), { class: 'tag', dy: -12 });
+  }
+}
+function drawResto() {
+  const side = ui.rview === 'side', level = (a, b) => { if (!side || state.widthMode !== 'plane') return [a, b]; const z = (a.z + b.z) / 2; return [new V3(a.x, a.y, z), new V3(b.x, b.y, z)]; };   // an in-plane width is drawn level when seen from the side
+  for (const jaw of JAWS) if (vis(jaw)) for (const g of C.gaps[jaw]) { if (g.kind !== 'span') continue; const on = g.key === ui.span, ln = level(g.pa, g.pb); layer.line(ln, { color: COL.gap, width: on ? 3 : 2, dashed: true, opacity: on ? 1 : 0.55 }); if (on) layer.label('Contact ' + fmt(g.width), midp(ln[0], ln[1]), side ? { class: 'gap', dx: -74 } : { class: 'gap', dy: -20 }); }
+  const r = C.resto.find((x) => x.key === ui.span); if (!r || !vis(r.jaw)) return;
+  if (r.cp) { if (r.cp.length === 2) { const ln = level(r.cp[0], r.cp[1]); layer.line(ln, { color: COL.line, width: 3 }); layer.label('Crest ' + fmt(r.crest), midp(ln[0], ln[1]), side ? { class: 'blue', dx: -66 } : { class: 'blue', dy: 20 }); } r.cp.forEach((p) => layer.dot(p, COL.line, 10)); }
+  if (r.ridge) { layer.dot(r.ridge, COL.sel, 10); if (r.vhit) { layer.line([r.ridge, r.vhit], { color: COL.sel, width: 3 }); layer.label('Vertical ' + fmt(r.vert), side ? midp(r.ridge, r.vhit) : r.ridge, { class: 'sel', dx: 58 }); } }
+}
+function drawMeasures() {
+  C.meas.forEach((m, i) => {
+    if (!m.ok || !state.measures[i].pts.every((q) => vis(q.j))) return;
+    if (m.t === 'd') { layer.line(m.P, { color: COL.sel, width: 2.5 }); layer.label(`D${i + 1}  ${fmt(m.d, 2)}`, midp(m.P[0], m.P[1]), { class: 'sel' }); }
+    else if (m.t === 'a') { layer.line(m.P, { color: COL.line, width: 2.5 }); layer.label(`A${i + 1}  ${fmt(m.ang)}°`, m.P[1], { class: 'blue', dy: -16 }); }
+    else {
+      const on = i === ui.msel; layer.line(m.P, { color: COL.gap, width: on ? 3 : 2, dashed: true }); layer.label(`S${i + 1}`, m.P[0], { class: 'gap', dy: -16 });
+      if (on && m.q) { const d = new V3(m.P[1].x - m.P[0].x, m.P[1].y - m.P[0].y, 0).normalize(), w = m.q.map((q) => new V3(m.P[0].x + d.x * q[0], m.P[0].y + d.y * q[0], q[1])); w.forEach((p) => layer.dot(p, COL.sel, 8)); if (w.length === 2) layer.line(w, { color: COL.sel, width: 2.5 }); }
+    }
+    m.P.forEach((p) => layer.dot(p, m.t === 'd' ? COL.sel : m.t === 'a' ? COL.line : COL.gap, 9));
+  });
+  const pend = ui.pend.map((q) => toWorld(q.j, q.p)).filter(Boolean); pend.forEach((p) => layer.dot(p, COL.gap, 10)); if (pend.length > 1) layer.line(pend, { color: COL.gap, width: 2 });
+}
+function draw() {
+  layer.clear(); if (!C) return; const s = ui.step;
+  if (s === 'widths') { if (vis(ui.jaw)) drawTeeth(ui.jaw, { labels: true, select: true }); }
+  else if (s === 'space') { if (vis(ui.jaw)) { drawTeeth(ui.jaw, { thin: true, color: COL.dim }); drawGaps(ui.jaw); drawLine(ui.jaw); } }
+  else if (s === 'arch') { if (biteView()) drawOcc(); else if (vis(ui.aview)) { drawTeeth(ui.aview, { thin: true, color: COL.dim }); drawArch(ui.aview); } }
+  else if (s === 'resto') drawResto();
+  else if (s === 'measure') drawMeasures();
+}
+
+// ───────────────────────────── picking tool shared by the landmark steps ─────────────────────────────
+const hitTol = (i) => (i.pointerType === 'mouse' ? 13 : 24);
+function nearest(list, x, y, tol, prefer) { let best = null, bd = tol; for (const h of list) { if (!h.p) continue; const s = viewer.toScreen(h.p); if (!s.visible) continue; const d = Math.hypot(s.x - x, s.y - y) - (prefer && prefer(h) ? 5 : 0); if (d < bd) { bd = d; best = h; } } return best; }
+/** cfg: handles() → [{p:Vector3, …}], targets(handle|null) → meshes (or locate(handle|null, i) → {point} to find the point some other way), onPick(hit), onDrag(handle, hit), onDragEnd(handle), onSelect(handle), onDelete(handle), prefer(handle),
+ *  placing() → true while a new point is being asked for: a plain click then always places it, even on top of an existing point (neighbours share a contact) */
+function makeTool(cfg) {
+  let drag = null, moved = false, sx = 0, sy = 0;
+  return {
+    cursor: 'crosshair',
+    onDown(i) { if (i.button !== 0) return false; const h = nearest(cfg.handles(), i.x, i.y, hitTol(i), cfg.prefer); if (!h) return false; drag = h; moved = false; sx = i.x; sy = i.y; return true; },
+    onMove(i) { if (!i.dragging || !drag) return; if (!moved) { if (Math.hypot(i.x - sx, i.y - sy) < (i.pointerType === 'mouse' ? 4 : 8)) return; moved = true; snap(); } const hit = cfg.locate ? cfg.locate(drag, i) : i.pick(cfg.targets(drag)); if (hit) cfg.onDrag(drag, hit); },
+    onUp() { const h = drag; drag = null; if (h && moved && cfg.onDragEnd) cfg.onDragEnd(h); },
+    onClick(i) { const h = cfg.placing && cfg.placing() && i.button === 0 && !i.alt ? null : nearest(cfg.handles(), i.x, i.y, hitTol(i), cfg.prefer); if (h) { if ((i.button === 2 || i.alt) && cfg.onDelete) cfg.onDelete(h); else if (cfg.onSelect) cfg.onSelect(h); return; } if (i.button !== 0 || i.alt) return; const hit = cfg.locate ? cfg.locate(null, i) : i.pick(cfg.targets(null)); if (hit && cfg.onPick) cfg.onPick(hit, i); },
+    onKey(e) { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoLast(); } },
+  };
+}
+
+// ───────────────────────────── undo ─────────────────────────────
+const undo = [];
+function snap() { undo.push(JSON.stringify({ s: state, u: { jaw: ui.jaw, sel: ui.sel, cur: ui.cur } })); if (undo.length > 200) undo.shift(); }
+function undoLast() { const j = undo.pop(); if (!j) { shell.status('Nothing to undo'); return; } const o = JSON.parse(j), jawWas = ui.jaw; loadState(o.s); Object.assign(ui, o.u); if (ui.jaw !== jawWas && (ui.step === 'widths' || ui.step === 'space')) { showOnly(ui.jaw); occlusalView(ui.jaw); } changed(); shell.status('Undone'); }
+
+// ───────────────────────────── step 3: tooth widths ─────────────────────────────
+function seq(jaw) { const a = []; for (const f of archOrder(jaw)) { if (stOf(f) !== 'p') continue; for (const k of ptOrder(f)) a.push({ f, k }); } return a; }
+function nextOpen(jaw, after) { const s = seq(jaw); if (!s.length) return null; let i0 = after ? s.findIndex((x) => x.f === after.f && x.k === after.k) : -1; if (after && i0 < 0) { const ord = archOrder(jaw), pos = ord.indexOf(after.f); i0 = s.findIndex((x) => ord.indexOf(x.f) > pos) - 1; if (i0 < -1) i0 = s.length - 1; } for (let n = 1; n <= s.length; n++) { const c = s[(i0 + n + s.length) % s.length]; if (!hasPt(c.f, c.k)) return c; } return null; }
+function firstOpenOf(f) { if (stOf(f) !== 'p') return null; for (const k of ptOrder(f)) if (!hasPt(f, k)) return { f, k }; return null; }
+function setJaw(jaw, view = true) { if (!scans.has(jaw)) { if (scans.has(other(jaw))) jaw = other(jaw); else return; } ui.jaw = jaw; lineSel = -1; if (ui.step === 'widths' || ui.step === 'space') { showOnly(jaw); if (view) occlusalView(jaw); } }
+function advance(from) {
+  let c = nextOpen(ui.jaw, from);
+  if (!c && scans.has(other(ui.jaw))) { const o = nextOpen(other(ui.jaw), null); if (o) { const was = ui.jaw; setJaw(other(was)); c = o; shell.status(`${JN[was]} arch done — now the ${ui.jaw} arch`); } }
+  ui.cur = c; if (c) ui.sel = c.f;
+}
+function placePoint(p) {
+  if (!ui.cur) { shell.status(ui.sel != null && stOf(ui.sel) === 'p' && hasPt(ui.sel, 'm') && hasPt(ui.sel, 'd') ? `${tname(ui.sel)} already has both points — drag a point to adjust it, or press Redo tooth` : 'Pick a tooth in the chart first'); return; }
+  snap(); const c = ui.cur; tooth(c.f)[c.k] = toRaw(jawOf(c.f), p); advance(c); changed();
+}
+function selectTooth(f) { if (jawOf(f) !== ui.jaw) setJaw(jawOf(f)); ui.sel = f; ui.cur = firstOpenOf(f); changed(false); }
+function setStatus(st) { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); if (t.st === st) { t.st = 'p'; ui.cur = firstOpenOf(f); } else { t.st = st; t.m = t.d = null; advance({ f, k: ptOrder(f)[1] }); if (!ui.cur) ui.sel = f; } changed(); }
+function redoTooth() { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); t.st = 'p'; t.m = t.d = null; ui.cur = firstOpenOf(f); changed(); }
+function clearArch(jaw) { snap(); dropJaw(jaw); ui.cur = nextOpen(jaw, null); ui.sel = ui.cur ? ui.cur.f : null; changed(); }
+const widthTool = makeTool({
+  handles: () => { const a = []; if (!C) return a; for (const f of archOrder(ui.jaw)) for (const k of ['m', 'd']) if (C.P[f] && C.P[f][k]) a.push({ p: C.P[f][k], f, k }); return a; },
+  prefer: (h) => h.f === ui.sel,
+  placing: () => !!ui.cur,
+  targets: () => (scans[ui.jaw] ? [scans[ui.jaw].object] : []),
+  onPick: (hit) => placePoint(hit.point),
+  onDrag: (h, hit) => { tooth(h.f)[h.k] = toRaw(ui.jaw, hit.point); ui.sel = h.f; recalc(); draw(); renderWidths(); },
+  onDragEnd: (h) => { changed(); shell.status(`${tname(h.f)} ${KN[h.k]} point moved${C.w[h.f] != null ? ' — width now ' + C.w[h.f].toFixed(1) + ' mm' : ''} (Undo puts it back)`); },      // said out loud, because a slipped tap on a shared contact moves the neighbour's point
+  onSelect: (h) => selectTooth(h.f),
+});
+function renderWidths() {
+  $('wJaw').querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.v === ui.jaw); b.disabled = !scans.has(b.dataset.v); });
+  let h = '<div class="cap"><span>Patient’s right</span><span>Patient’s left</span></div>';
+  for (const jaw of JAWS) {
+    const order = archOrder(jaw), has = scans.has(jaw);
+    h += `<div class="crow${jaw === ui.jaw ? ' act' : ''}">`;
+    order.forEach((f, idx) => {
+      const t = state.teeth[f] || {}, st = t.st || 'p', w = C.w[f], cls = ['t'];
+      if (st === 'm') cls.push('miss'); else if (st === 's') cls.push('skip'); else if (t.m && t.d) cls.push('done'); else if (t.m || t.d) cls.push('half');
+      if (f === ui.sel) cls.push('cur');
+      const sub = st === 'm' ? '✕' : st === 's' ? '–' : w != null ? w.toFixed(1) : '', tt = `${tname(f)}: ${st === 'm' ? 'missing' : st === 's' ? 'not measured' : w != null ? w.toFixed(2) + ' mm' : t.m || t.d ? 'one point placed' : 'to do'}`;
+      h += `<button type="button" class="${cls.join(' ')}" data-f="${f}" title="${tt}"${has ? '' : ' disabled'}><b>${chartNum(f)}</b><i>${sub}</i></button>`;
+      if (idx === order.length / 2 - 1) h += '<span class="mid"></span>';
+    });
+    h += '</div>';
+  }
+  $('chart').innerHTML = h;
+  const pr = $('wPrompt'), has = scans.has('upper') || scans.has('lower'), on = JAWS.filter((j) => scans.has(j)), total = on.reduce((s, j) => s + seq(j).length, 0), placed = on.reduce((s, j) => s + seq(j).filter((c) => hasPt(c.f, c.k)).length, 0);
+  let msg, hint = ''; const sub = total ? `${placed} of ${total} points` : '';
+  if (!has) msg = 'Load a scan first';
+  else if (ui.cur) { msg = `${tname(ui.cur.f)} — ${KN[ui.cur.k]} contact`; hint = `<b>Click the ${KN[ui.cur.k]} contact point of ${tname(ui.cur.f)}</b><br>Drag a point to adjust it · scroll or pinch to zoom`; }
+  else if (ui.sel != null && stOf(ui.sel) !== 'p') { msg = `${tname(ui.sel)} — ${stOf(ui.sel) === 'm' ? 'missing' : 'not measured'}`; hint = 'Press the button again to put the tooth back'; }
+  else if (total && placed >= total) { msg = 'All teeth measured'; hint = 'Drag any point to adjust it, or go on to the Bolton analysis'; }
+  else if (ui.sel != null && C.w[ui.sel] != null) { msg = `${tname(ui.sel)} — ${fmt(C.w[ui.sel], 2)} mm`; hint = 'Drag a point to adjust it, or press Redo tooth'; }
+  else msg = 'Pick a tooth in the chart';
+  pr.querySelector('b').textContent = msg; pr.querySelector('span').textContent = sub; pr.classList.toggle('done', !!total && placed >= total);
+  if (ui.step === 'widths') shell.hint(hint);
+  const sel = ui.sel, st = sel != null ? stOf(sel) : 'p';
+  $('wMiss').classList.toggle('on', st === 'm'); $('wSkip').classList.toggle('on', st === 's');
+  $('wMiss').disabled = $('wSkip').disabled = $('wRedo').disabled = sel == null; $('wUndo').disabled = !undo.length;
+  const row = (lab, k) => `<tr><td class="k">${lab}</td>${JAWS.map((j) => { const s = C.sums[j][k]; return `<td class="num">${s.n ? s.sum.toFixed(1) : '–'}${s.n && s.n < s.of ? ` <span class="flag">${s.n}/${s.of}</span>` : ''}</td>`; }).join('')}</tr>`;
+  $('wSums').innerHTML = `<tr><th>Sum of widths (mm)</th><th class="num">Upper</th><th class="num">Lower</th></tr>${row('Front six (3–3)', 'a')}${row('Molar to molar (6–6)', 'o')}`;
+  for (const [id, v] of [['wNot', state.notation], ['wMode', state.widthMode]]) $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  $('w7').checked = state.include7; $('wLock').checked = ui.lock;
+}
+
+// ───────────────────────────── step 4: Bolton ─────────────────────────────
+const remText = (r) => { const m = r.rem, B = BOLTON[r.kind], grp = r.kind === 'anterior' ? 'front six' : 'twelve teeth'; return `At Bolton’s mean ${r.kind} ratio (${B.mean}%) the ${m.jaw} ${grp} would total ${m.ideal.toFixed(1)} mm to match the ${other(m.jaw)} ${grp} (${m.opp.toFixed(1)} mm). The ${m.n} measured total ${m.have.toFixed(1)} mm, which leaves ${m.left.toFixed(1)} mm for ${tlist(m.teeth)}${m.teeth.length > 1 ? ` (${(m.left / m.teeth.length).toFixed(1)} mm each if equal)` : ''}. Arithmetic only, not a recommendation.`; };
+function renderBolton() {
+  const B = C.bolton, cell = (f) => ['anterior', 'overall'].map((k) => `<td class="num">${f(B[k], BOLTON[k])}</td>`).join(''), has = (r) => r.ratio != null;
+  let h = `<table class="tbl"><tr><th>mm</th><th class="num">Anterior 3–3</th><th class="num">Overall 6–6</th></tr>
+    <tr><td class="k">Lower sum</td>${cell((r) => (has(r) ? r.lower.toFixed(1) : '–'))}</tr>
+    <tr><td class="k">Upper sum</td>${cell((r) => (has(r) ? r.upper.toFixed(1) : '–'))}</tr>
+    <tr class="sum"><td>Ratio %</td>${cell((r) => (has(r) ? r.ratio.toFixed(1) + (r.subs.length ? ' <span class="flag">est.</span>' : '') : '–'))}</tr>
+    <tr><td class="k">Bolton mean %</td>${cell((r, b) => b.mean.toFixed(1))}</tr>
+    <tr><td class="k">Bolton SD</td>${cell((r, b) => b.sd.toFixed(2))}</tr>
+    <tr><td class="k">Bolton range</td>${cell((r, b) => `${b.lo}–${b.hi}`)}</tr>
+    <tr><td class="k">Difference</td>${cell((r) => (has(r) ? sgn(r.diff) : '–'))}</tr>
+    <tr><td class="k">… in SDs</td>${cell((r) => (has(r) ? sgn(r.sd) : '–'))}</tr>
+    <tr class="sum"><td>Excess</td>${cell((r) => (has(r) ? `${JN[r.arch]} ${r.excess.toFixed(1)}` : '–'))}</tr>
+    <tr><td class="k">Or shortfall</td>${cell((r) => (has(r) ? `${JN[r.altArch]} ${r.alt.toFixed(1)}` : '–'))}</tr></table>`;
+  if (!(C.has.upper && C.has.lower)) h += '<div class="note warn">Bolton’s ratios compare the lower teeth with the upper teeth, so both scans are needed.</div>';
+  else for (const k of ['anterior', 'overall']) {
+    const r = B[k], miss = r.lacking.filter((f) => stOf(f) === 'm'), skip = r.lacking.filter((f) => stOf(f) === 's'), rest = r.lacking.filter((f) => stOf(f) === 'p');
+    if (r.lacking.length) h += `<div class="note warn"><b>${BOLTON[k].label} not calculated.</b> ${[miss.length ? 'Missing: ' + tlist(miss) : '', skip.length ? 'Not measured: ' + tlist(skip) : '', rest.length ? 'Still to measure: ' + tlist(rest) : ''].filter(Boolean).join('. ')}.</div>`;
+    else if (r.subs.length) h += `<div class="note warn"><b>${BOLTON[k].label} is an estimate.</b> ${r.subs.map((f) => `${tname(f)} taken as ${tname(contra(f))} (${C.w[contra(f)].toFixed(1)} mm)`).join('; ')}.</div>`;
+    if (r.rem && (k === 'anterior' || !B.anterior.rem)) h += `<div class="note">${remText(r)}</div>`;
+  }
+  $('bOut').innerHTML = h; $('bSub').checked = state.substitute;
+}
+
+// ───────────────────────────── step 5: spaces and space analysis ─────────────────────────────
+let lineSel = -1;
+const gapWhat = (g) => (g.kind === 'span' ? `${tlist(g.missing)} missing` : g.kind === 'gap' ? 'space' : g.kind === 'unknown' ? `${tlist(g.unknown)} not measured` : 'contact');
+function renderSpace() {
+  $('sJaw').querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.v === ui.jaw); b.disabled = !scans.has(b.dataset.v); });
+  const G = C.gaps[ui.jaw], listed = G.filter((g) => g.kind !== 'contact'), contacts = G.length - listed.length, total = G.reduce((s, g) => s + (g.width || 0), 0);
+  let h = '';
+  if (!G.length) h = '<div class="note">Measure the teeth in step 3 first — spaces are worked out from their contact points.</div>';
+  else {
+    h = '<table class="tbl"><tr><th>Between</th><th>What</th><th class="num">mm</th></tr>';
+    for (const g of listed) h += `<tr${g.kind === 'unknown' ? ' class="dim"' : ''}><td>${tname(g.a)} – ${tname(g.b)}</td><td>${gapWhat(g)}</td><td class="num">${g.width != null ? g.width.toFixed(1) : '–'}</td></tr>`;
+    if (!listed.length) h += '<tr class="dim"><td colspan="3">No spaces — every pair of neighbours is in contact.</td></tr>';
+    h += `<tr class="sum"><td colspan="2">Total spacing</td><td class="num">${total.toFixed(1)}</td></tr></table><p class="fine">${contacts} contact${contacts === 1 ? '' : 's'} (under ${state.gapTol.toFixed(1)} mm) not listed.</p>`;
+  }
+  $('sGaps').innerHTML = h; if (document.activeElement !== $('sTol')) $('sTol').value = state.gapTol;
+  const S = C.space[ui.jaw];
+  if (!S.ok) h = '<div class="note">Needs a measured tooth each side to run the arch line between (ideally both first molars).</div>';
+  else {
+    const d = S.diff, word = Math.abs(d) < 0.05 ? 'Balanced' : d < 0 ? 'Crowding' : 'Spacing';
+    h = `<table class="tbl"><tr><td class="k">Space available<small>${S.e.a.label} → ${S.e.b.label}${S.auto ? '' : ' · line edited'}</small></td><td class="num">${S.avail.toFixed(1)}</td></tr>
+      <tr><td class="k">Space required<small>sum of ${S.used.length} tooth width${S.used.length === 1 ? '' : 's'}</small></td><td class="num">${S.req.toFixed(1)}</td></tr>
+      <tr class="sum"><td>${word}</td><td class="num">${Math.abs(d).toFixed(1)} mm</td></tr>${S.planned != null ? `<tr><td class="k">With planned ${tlist(S.missing)}<small>${S.planned.toFixed(1)} mm planned in step 7</small></td><td class="num">${Math.abs(S.diffPlanned) < 0.05 ? 'balanced' : (S.diffPlanned < 0 ? 'crowding ' : 'spacing ') + Math.abs(S.diffPlanned).toFixed(1)}</td></tr>` : ''}</table>`;
+    if (S.missing.length || S.unknown.length) h += `<div class="note warn">Not in “required”: ${[S.missing.length ? tlist(S.missing) + ' (missing)' : '', S.unknown.length ? tlist(S.unknown) + ' (not measured)' : ''].filter(Boolean).join('; ')}. The difference includes their space.</div>`;
+    if (state.widthMode === '3d') h += '<div class="note">Widths are set to straight 3D, so the arch line is measured in 3D too. Space analysis is normally done in the occlusal plane.</div>';
+  }
+  $('sOut').innerHTML = h;
+  $('sSmooth').querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.v === '1') === (S.ok ? S.smooth : true)));
+  $('sDel').disabled = !(S.ok && lineSel >= 0 && S.ctrl.length > 2); $('sReset').disabled = !(S.ok && !S.auto); $('sUndo').disabled = !undo.length;
+  if (ui.step === 'space') shell.hint(S.ok ? '<b>Drag the blue points to shape the arch line</b><br>Click on the line to add a point · click a point to select it' : '');
+}
+function ownLine(jaw) { const S = C.space[jaw]; if (!S.ok) return null; if (!state.line[jaw]) state.line[jaw] = { pts: null, smooth: true }; const L = state.line[jaw]; if (!L.pts) L.pts = S.ctrl.map((p) => toRaw(jaw, p)); return L; }
+const lineTool = makeTool({
+  handles: () => { const S = C && C.space[ui.jaw]; return S && S.ok ? S.ctrl.map((p, i) => ({ p, i })) : []; },
+  targets: () => (scans[ui.jaw] ? [scans[ui.jaw].object] : []),
+  onDrag: (h, hit) => { const L = ownLine(ui.jaw); if (!L) return; L.pts[h.i] = toRaw(ui.jaw, hit.point); lineSel = h.i; recalc(); draw(); renderSpace(); },
+  onDragEnd: () => changed(),
+  onSelect: (h) => { lineSel = lineSel === h.i ? -1 : h.i; draw(); renderSpace(); },
+  onDelete: (h) => { lineSel = h.i; deleteLinePoint(); },
+  onPick: (hit) => {
+    const S = C.space[ui.jaw]; if (!S.ok) return; const p = hit.point; let best = -1, bd = 4, near = Infinity;
+    for (let i = 0; i < S.ctrl.length - 1; i++) { const a = S.ctrl[i], b = S.ctrl[i + 1], abx = b.x - a.x, aby = b.y - a.y, t = N.clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1), 0, 1), d = Math.hypot(p.x - a.x - abx * t, p.y - a.y - aby * t); if (d < bd) { bd = d; best = i; } }
+    for (const q of S.path) near = Math.min(near, Math.hypot(p.x - q.x, p.y - q.y));
+    if (best < 0 || near > 3) { shell.status('Click on the arch line to add a point, or drag a point'); return; }
+    snap(); const L = ownLine(ui.jaw); L.pts.splice(best + 1, 0, toRaw(ui.jaw, p)); lineSel = best + 1; changed();
+  },
+});
+function deleteLinePoint() { const S = C.space[ui.jaw]; if (!S.ok || lineSel < 0 || S.ctrl.length <= 2) return; snap(); const L = ownLine(ui.jaw); L.pts.splice(lineSel, 1); lineSel = -1; changed(); }
+
+// ───────────────────────────── step 6: arch dimensions and occlusion ─────────────────────────────
+function LM() {
+  const a = [];
+  for (const jaw of JAWS) for (const f of TIPS[jaw]) a.push({ id: 't' + f, jaw, name: `${tname(f)} ${f % 10 === 3 ? 'cusp tip' : 'mesiobuccal cusp tip'}`, short: tname(f), p: state.tips['t' + f] ? state.tips['t' + f].p : null, auto: tipAuto(f) });
+  a.push({ id: 'u', jaw: 'upper', name: 'upper incisal edge', short: 'Upper incisor', p: state.occ.u, auto: state.occ.uAuto }, { id: 'l', jaw: 'lower', name: 'lower incisal edge', short: 'Lower incisor', p: state.occ.l, auto: state.occ.lAuto });
+  return a;
+}
+function setLandmark(id, jaw, world) {
+  const raw = toRaw(jaw, world);
+  if (id === 'u') { state.occ.u = raw; state.occ.uAuto = false; if (state.occ.lAuto) { const p = findLowerIncisal(world); if (p) state.occ.l = toRaw('lower', p); } }
+  else if (id === 'l') { state.occ.l = raw; state.occ.lAuto = false; }
+  else state.tips[id] = { p: raw, auto: false };
+}
+const biteView = () => ui.aview === 'front' || ui.aview === 'section';
+let sectionX = 0, sectionOn = false;
+const archTool = makeTool({
+  handles: () => LM().filter((l) => l.p && scans[l.jaw] && (biteView() ? l.id === 'u' || l.id === 'l' : l.id[0] === 't' && l.jaw === ui.aview)).map((l) => ({ p: toWorld(l.jaw, l.p), id: l.id, jaw: l.jaw })),
+  prefer: (h) => h.id === ui.arm,
+  placing: () => !!ui.arm,
+  locate: (h, i) => {
+    const jaw = h ? h.jaw : ui.arm ? LM().find((l) => l.id === ui.arm).jaw : null; if (!jaw || !scans[jaw]) return null;
+    if (!sectionOn) return i.pick([scans[jaw].object]);
+    // in the section view: the point under the pointer on the cutting plane, snapped to the nearest surface of that scan
+    const { w, h: hh } = viewer.size; caster.setFromCamera(new THREE.Vector2(i.x / w * 2 - 1, -(i.y / hh) * 2 + 1), viewer.camera);
+    const o = caster.ray.origin, d = caster.ray.direction; if (Math.abs(d.x) < 1e-6) return null;
+    return { point: N.closestOnMesh(scans[jaw].object, o.clone().addScaledVector(d, (sectionX - o.x) / d.x)).point };
+  },
+  onPick: (hit) => { if (!ui.arm) return; const l = LM().find((x) => x.id === ui.arm); snap(); setLandmark(l.id, l.jaw, hit.point); ui.arm = null; changed(); if (sectionOn) setSection(true); },
+  onDrag: (h, hit) => { setLandmark(h.id, h.jaw, hit.point); recalc(); draw(); renderArch(); },
+  onDragEnd: () => { changed(); if (sectionOn) setSection(true); },
+  onSelect: (h) => { ui.arm = ui.arm === h.id ? null : h.id; draw(); renderArch(); },
+});
+/** cut both scans through the upper incisal point (a display aid only: nothing is removed from the scans) */
+function setSection(on) {
+  const want = !!on && !!(C && C.occ && C.occ.U), x = want ? C.occ.U.x : 0;
+  if (want === sectionOn && (!want || Math.abs(x - sectionX) < 1e-4)) return;
+  sectionOn = want; sectionX = x;
+  for (const j of JAWS) if (scans[j]) { const m = scans[j].object.material; m.clippingPlanes = want ? [new THREE.Plane(new V3(1, 0, 0), -(x - 0.02))] : null; m.needsUpdate = true; }
+  viewer.invalidate();
+}
+function setArchView(v) {
+  const both = scans.has('upper') && scans.has('lower');
+  if ((v === 'front' || v === 'section') && !both) v = scans.has('upper') ? 'upper' : 'lower';
+  if ((v === 'upper' || v === 'lower') && !scans.has(v) && scans.has(other(v))) v = other(v);
+  if (v === 'section' && !(C && C.occ && C.occ.U)) { v = 'front'; shell.status('Place the upper incisal point first: pick “Upper incisor” and click its edge'); }
+  ui.aview = v; ui.arm = null; setSection(v === 'section' && ui.step === 'arch');
+  if (ui.step !== 'arch') return;
+  const U = C && C.occ && C.occ.U, c = U || boxOf(JAWS).getCenter(new V3());
+  if (v === 'front') { showOnly('both'); frame(U ? new THREE.Box3(new V3(-24, c.y - 4, c.z - 15), new V3(24, c.y + 20, c.z + 15)) : boxOf(JAWS), [0, -1, 0.03], { t: 30, b: 50 }); }
+  else if (v === 'section') { showOnly('both'); frame(new THREE.Box3(new V3(c.x, c.y - 9, c.z - 13), new V3(c.x + 1, c.y + 17, c.z + 13)), [-1, 0, 0], { t: 30, b: 50 }); }
+  else { showOnly(v); occlusalView(v); }
+}
+function renderArch() {
+  $('aView').querySelectorAll('button').forEach((b) => { const v = b.dataset.v; b.classList.toggle('on', v === ui.aview); b.disabled = v === 'front' || v === 'section' ? !C.occ.can : !scans.has(v); });
+  const A = C.arch, star = (v, a) => (v != null ? v.toFixed(1) + (a ? '*' : '') : '–');
+  let h = `<table class="tbl"><tr><th>mm</th><th class="num">Upper</th><th class="num">Lower</th></tr>
+    <tr><td class="k">Intercanine width</td>${JAWS.map((j) => `<td class="num">${star(A[j].icw, A[j].icwAuto)}</td>`).join('')}</tr>
+    <tr><td class="k">Intermolar width</td>${JAWS.map((j) => `<td class="num">${star(A[j].imw, A[j].imwAuto)}</td>`).join('')}</tr>
+    <tr><td class="k">Arch depth</td>${JAWS.map((j) => `<td class="num">${fmt(A[j].depth)}</td>`).join('')}</tr></table>`;
+  const o = C.occ;
+  h += '<div class="h4">Occlusion</div>';
+  if (!o.can) h += `<div class="note warn">${o.why}</div>`;
+  else {
+    const mid = o.mid == null ? '–' : Math.abs(o.mid) < 0.05 ? '0.0<small>coincident</small>' : `${Math.abs(o.mid).toFixed(1)}<small>lower to patient’s ${o.mid > 0 ? 'left' : 'right'}</small>`;
+    h += `<table class="tbl"><tr><th>mm</th><th class="num"></th></tr><tr><td class="k">Overjet${o.ojTo === 'edge' ? '<small>to the lower incisal point — no vertical overlap</small>' : ''}</td><td class="num">${o.overjet != null ? neg(o.overjet) + (o.auto ? '*' : '') : '–'}</td></tr>
+      <tr><td class="k">Overbite${o.overbite != null && o.overbite < 0 ? '<small>negative = open bite</small>' : ''}</td><td class="num">${o.overbite != null ? neg(o.overbite) + (o.auto ? '*' : '') : '–'}</td></tr>
+      <tr><td class="k">Midlines apart</td><td class="num">${mid}</td></tr></table>`;
+  }
+  $('aOut').innerHTML = h;
+  const lm = LM();
+  $('aChips').innerHTML = lm.map((l) => `<button type="button" class="btn${ui.arm === l.id ? ' on' : ''}${l.p ? (l.auto ? ' auto' : '') : ' none'}" data-lm="${l.id}" title="${l.p ? (l.auto ? 'Found automatically — check it. ' : '') + 'Press, then click the ' + l.name + ' on the model to move it there' : 'Not placed. Press, then click the ' + l.name + ' on the model'}"${scans.has(l.jaw) ? '' : ' disabled'}>${l.short}</button>`).join('');
+  const anyAuto = lm.some((l) => l.p && l.auto && scans.has(l.jaw)), needs = [];
+  for (const j of JAWS) if (scans.has(j) && A[j].depthNeeds && A[j].depthNeeds.length) needs.push(`${JN[j]} arch depth needs widths for ${tlist(A[j].depthNeeds)}`);
+  const noTip = lm.filter((l) => !l.p && scans.has(l.jaw) && l.id[0] === 't'); if (noTip.length) needs.push(`No cusp tip yet for ${noTip.map((l) => l.short).join(', ')} — measure the tooth in step 3, or pick it above and click it`);
+  if (o.can && !o.U) needs.push('For overjet and overbite pick “Upper incisor” above and click the incisal edge of the most prominent upper central incisor');
+  $('aNote').innerHTML = (anyAuto ? '<div class="note">* Landmarks with a dashed button were found automatically. Check each on the model and drag any that are off.</div>' : '') + (needs.length ? `<div class="note warn">${needs.join('. ')}.</div>` : '');
+  $('aUndo').disabled = !undo.length;
+  if (ui.step === 'arch') { const l = ui.arm && lm.find((x) => x.id === ui.arm); shell.hint(l ? `<b>Click the ${l.name}</b><br>or drag its point` : biteView() ? '<b>Drag a point to adjust it</b><br>Green = upper incisal point · blue = lower incisal point' : '<b>Drag a point to adjust it</b><br>Green = canine cusp tips · blue = mesiobuccal cusp tips'); }
+}
+
+// ───────────────────────────── step 7: restorative space ─────────────────────────────
+const vmark = (r) => (r.vert == null ? '' : (r.ridgeAuto ? '*' : '') + (r.beyond > 5 ? '†' : ''));
+const restoOf = (key) => state.resto[key] || (state.resto[key] = { crest: null, ridge: null, plan: {}, impD: null, impC: null });
+const curSpan = () => (C ? C.resto.find((r) => r.key === ui.span) || null : null);
+const restoTool = makeTool({
+  handles: () => { const r = curSpan(), a = []; if (!r) return a; if (r.cp) r.cp.forEach((p, i) => a.push({ p, id: 'c' + i })); if (r.ridge) a.push({ p: r.ridge, id: 'r' }); return a; },
+  placing: () => !!ui.rarm,
+  targets: () => { const r = curSpan(); return r && scans[r.jaw] ? [scans[r.jaw].object] : []; },
+  onPick: (hit) => {
+    const r = curSpan(); if (!r || !ui.rarm) return; snap(); const s = restoOf(r.key), raw = toRaw(r.jaw, hit.point);
+    if (ui.rarm === 'ridge') { s.ridge = raw; ui.rarm = null; } else if (!s.crest || (s.crest[0] && s.crest[1])) s.crest = [raw, null]; else { s.crest[1] = raw; ui.rarm = null; }
+    changed();
+  },
+  onDrag: (h, hit) => { const r = curSpan(); if (!r) return; const s = restoOf(r.key), raw = toRaw(r.jaw, hit.point); if (h.id === 'r') s.ridge = raw; else s.crest[+h.id[1]] = raw; recalc(); draw(); renderResto(); },
+  onDragEnd: () => changed(),
+});
+function selectSpan(key, view = true) {
+  ui.span = key; ui.rarm = null; const r = curSpan(); if (!r || ui.step !== 'resto') return;
+  const c = midp(r.g.pa, r.g.pb), both = scans.has('upper') && scans.has('lower'); if (!both) ui.rview = 'occ';
+  if (ui.rview === 'side') {                                      // from the cheek side, level with the occlusal plane, both arches shown
+    showOnly('both'); const ac = archCentre(r.jaw), n = new V3(-(r.g.pb.y - r.g.pa.y), r.g.pb.x - r.g.pa.x, 0).normalize(); if (n.x * (c.x - ac.x) + n.y * (c.y - ac.y) < 0) n.negate();
+    if (view) frame(new THREE.Box3().setFromCenterAndSize(new V3(c.x, c.y, 0), new V3(26, 26, 30)), [n.x, n.y, 0.06], { t: 30, b: 50 });
+  } else { showOnly(r.jaw); if (view) frame(new THREE.Box3().setFromCenterAndSize(c, new V3(44, 34, 8)), OCC_DIR[r.jaw], { t: 30, b: 50 }); }
+}
+function renderResto() {
+  const R = C.resto; if (!R.find((r) => r.key === ui.span)) ui.span = R.length ? R[0].key : null;
+  if (!R.length) { $('rList').innerHTML = '<div class="note">No missing-tooth spaces yet. In step 3 mark a tooth as <b>Missing</b> and measure the teeth either side of it; its space then appears here.</div>'; $('rSel').innerHTML = ''; if (ui.step === 'resto') shell.hint(''); return; }
+  let h = '<table class="tbl"><tr><th>Space (mm)</th><th class="num">Contact</th><th class="num">Crest</th><th class="num">Vertical</th></tr>';
+  for (const r of R) h += `<tr class="pick${r.key === ui.span ? ' sel' : ''}" data-span="${r.key}" title="Show this space"><td><b>${tlist(r.g.missing)}</b><small>${tname(r.g.a)} – ${tname(r.g.b)}</small></td><td class="num">${r.contact.toFixed(1)}</td><td class="num">${fmt(r.crest)}</td><td class="num">${r.vert != null ? r.vert.toFixed(1) + vmark(r) : '–'}</td></tr>`;
+  $('rList').innerHTML = h + '</table>' + (R.some((r) => r.vert != null && r.beyond > 5) ? '<p class="fine">† the opposing surface met is more than 5 mm beyond the occlusal plane — probably gum, not a tooth.</p>' : '');
+  const r = curSpan(), s = state.resto[r.key] || {}, half = !!(s.crest && s.crest[0] && !s.crest[1]);
+  h = `<div class="row"><label>View</label><div class="seg"><button data-r="v-occ" type="button" class="${ui.rview === 'occ' ? 'on' : ''}" title="Straight onto the biting surfaces of this arch">Occlusal</button><button data-r="v-side" type="button" class="${ui.rview === 'side' ? 'on' : ''}" title="From the cheek side with both arches, to see the vertical space"${r.canVert ? '' : ' disabled'}>From the side</button></div></div>
+    <div class="btns"><button class="btn${ui.rarm === 'crest' ? ' on' : ''}" data-r="crest" type="button" title="Click two points at the gum margin: one on each tooth beside the space">Crest width: 2 clicks</button><button class="btn${ui.rarm === 'ridge' ? ' on' : ''}" data-r="ridge" type="button" title="Click the point on the ridge where the vertical space should be read">Ridge point: 1 click</button><button class="btn" data-r="undo" type="button" title="Take back the last change (Ctrl+Z)"${undo.length ? '' : ' disabled'}>Undo</button></div>`;
+  if (!r.canVert) h += '<div class="note warn">Vertical space needs both scans, exported together in the bite.</div>';
+  else if (r.vert == null) h += '<div class="note warn">Nothing lies directly opposite the ridge point, so there is no vertical reading. Drag the point or click a new one.</div>';
+  else if (r.beyond > 5) h += `<div class="note warn">The opposing surface met lies ${r.beyond.toFixed(1)} mm beyond the occlusal plane — probably gum, not a tooth. Drag the pink point (or click a new ridge point) to where a tooth opposes the space.</div>`;
+  else if (r.ridgeAuto) h += '<div class="note">* Vertical space is read under the middle of the span. Drag the pink point, or click a new ridge point, to read it elsewhere.</div>';
+  h += `<div class="h4">What-if: ${r.name}</div>`;
+  for (const f of r.g.missing) h += `<div class="row"><label>Planned width of ${tname(f)}</label><input type="number" class="sm" data-plan="${f}" min="0" max="20" step="0.1" value="${Number.isFinite(r.plan[f]) ? r.plan[f] : ''}" title="The mesio-distal width planned for this tooth"><span class="unit">mm</span></div>`;
+  if (r.central != null) { const cw = C.w[r.central], pv = Number.isFinite(state.prop) ? cw * state.prop / 100 : null; h += `<div class="row"><label>or <input type="number" class="sm" id="rProp" min="20" max="150" step="1" value="${Number.isFinite(state.prop) ? state.prop : ''}" title="A percentage of this patient’s measured central incisor. No value is pre-set — see the tip (?) for published proportions and what they describe."> % of ${tname(r.central)} (${cw.toFixed(1)})</label><span class="kv">${pv != null ? pv.toFixed(1) : '–'}</span><button class="btn" data-r="useprop" type="button" title="Put this width in as the planned width"${pv != null ? '' : ' disabled'}>Use</button></div>`; }
+  h += `<table class="tbl"><tr><td class="k">Space at contact level</td><td class="num">${r.contact.toFixed(1)}</td></tr><tr><td class="k">Planned width${r.g.missing.length > 1 ? 's, total' : ''}</td><td class="num">${fmt(r.planTotal)}</td></tr><tr class="sum"><td>${r.spare == null ? 'Difference' : r.spare >= 0 ? 'Spare' : 'Short by'}</td><td class="num">${r.spare == null ? '–' : Math.abs(r.spare).toFixed(1) + ' mm'}</td></tr></table>`;
+  h += `<div class="h4">Implant sum <span class="opt">optional</span></div>
+    <div class="row"><label>Implant diameter</label><input type="number" class="sm" data-imp="impD" min="0" max="10" step="0.1" value="${Number.isFinite(s.impD) ? s.impD : ''}" title="Diameter of the planned implant at the crest"><span class="unit">mm</span></div>
+    <div class="row"><label>Clearance each side</label><input type="number" class="sm" data-imp="impC" min="0" max="5" step="0.1" value="${Number.isFinite(s.impC) ? s.impC : ''}" title="The gap you want between the implant and each neighbouring tooth. No value is pre-set — see the tip (?)."><span class="unit">mm</span></div>
+    <table class="tbl"><tr><td class="k">Needs<small>diameter + 2 × clearance</small></td><td class="num">${fmt(r.impNeed)}</td></tr><tr><td class="k">Width at ${r.impAt} level</td><td class="num">${(r.crest != null ? r.crest : r.contact).toFixed(1)}</td></tr><tr class="sum"><td>${r.impSpare == null ? 'Difference' : r.impSpare >= 0 ? 'Spare' : 'Short by'}</td><td class="num">${r.impSpare == null ? '–' : Math.abs(r.impSpare).toFixed(1) + ' mm'}</td></tr></table>
+    <p class="fine">A scan shows crowns and gum only, not roots or bone.</p>`;
+  const sel = $('rSel'), act = document.activeElement, keep = act && sel.contains(act) && act.tagName === 'INPUT' ? (act.dataset.plan ? `[data-plan="${act.dataset.plan}"]` : act.dataset.imp ? `[data-imp="${act.dataset.imp}"]` : '#rProp') : null;
+  sel.innerHTML = h; if (keep) { const e = sel.querySelector(keep); if (e) e.focus(); }
+  if (ui.step === 'resto') shell.hint(ui.rarm === 'crest' ? `<b>Click the gum margin of ${half ? 'the tooth on the other side' : 'a tooth beside the space'}</b>` : ui.rarm === 'ridge' ? '<b>Click the ridge where the vertical space should be read</b>' : '<b>Drag a point to adjust it</b><br>Pink = ridge point · blue = crest-level points');
+}
+
+// ───────────────────────────── step 8: measure ─────────────────────────────
+const MT = { d: 'D', a: 'A', s: 'S' }, MNAME = { d: 'Distance', a: 'Angle', s: 'Section' };
+const measureTool = makeTool({
+  handles: () => { const a = []; if (C) C.meas.forEach((m, i) => { if (m.ok) m.P.forEach((p, k) => a.push({ p, i, k })); }); return a; },
+  placing: () => true,
+  targets: (h) => (h ? [scans[state.measures[h.i].pts[h.k].j].object] : scans.objects()),
+  onPick: (hit) => {
+    const j = hit.object.userData.jaw; if (!j) return; ui.pend.push({ j, p: toRaw(j, hit.point) });
+    if (ui.pend.length >= (ui.mtool === 'a' ? 3 : 2)) { const pts = ui.pend; ui.pend = []; snap(); state.measures.push({ t: ui.mtool, pts }); if (ui.mtool === 's') ui.msel = state.measures.length - 1; changed(); } else { draw(); renderMeasure(); }
+  },
+  onDrag: (h, hit) => { const m = state.measures[h.i], q = m.pts[h.k]; q.p = toRaw(q.j, hit.point); if (m.t === 's') { m.q = null; ui.msel = h.i; } recalc(); draw(); renderMeasure(); },
+  onDragEnd: () => changed(),
+});
+// a section: the outline of the scans where a vertical plane through the two points cuts them, as (distance along the cut, height) pairs
+let secCache = { key: '', data: null }, secEl = null, secMap = null;
+function sectionProfile(m) {
+  const A = m.P[0], B = m.P[1], len = m.len; if (!(len > 0.3)) return null;
+  const ux = (B.x - A.x) / len, uy = (B.y - A.y) / len, nx = uy, ny = -ux, js = JAWS.filter(vis), lo = -6, hi = len + 6;
+  const key = [A.x, A.y, B.x, B.y].map((v) => v.toFixed(3)).join() + js.map((j) => j + scans[j].matrix.elements.map((v) => v.toFixed(4)).join()).join('|');
+  if (secCache.key === key) return secCache.data;
+  const segs = []; let z0 = Infinity, z1 = -Infinity;
+  for (const j of js) {
+    const mesh = scans.framed(j), P = mesh.positions, I = mesh.indices, list = [], pts = [];
+    const cut = (p, q, dp, dq) => { if ((dp > 0) === (dq > 0)) return; const t = dp / (dp - dq), x = P[p] + (P[q] - P[p]) * t, y = P[p + 1] + (P[q + 1] - P[p + 1]) * t; pts.push((x - A.x) * ux + (y - A.y) * uy, P[p + 2] + (P[q + 2] - P[p + 2]) * t); };
+    for (let t = 0; t < I.length; t += 3) {
+      const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3, da = (P[a] - A.x) * nx + (P[a + 1] - A.y) * ny, db = (P[b] - A.x) * nx + (P[b + 1] - A.y) * ny, dc = (P[c] - A.x) * nx + (P[c + 1] - A.y) * ny;
+      if ((da > 0) === (db > 0) && (db > 0) === (dc > 0)) continue;
+      pts.length = 0; cut(a, b, da, db); cut(b, c, db, dc); cut(c, a, dc, da);
+      if (pts.length === 4 && Math.max(pts[0], pts[2]) >= lo && Math.min(pts[0], pts[2]) <= hi) { list.push(pts[0], pts[1], pts[2], pts[3]); z0 = Math.min(z0, pts[1], pts[3]); z1 = Math.max(z1, pts[1], pts[3]); }
+    }
+    segs.push({ j, s: Float32Array.from(list) });
+  }
+  if (!Number.isFinite(z0)) { z0 = -5; z1 = 5; }
+  const data = { segs, len, lo, hi, z0: z0 - 1.5, z1: z1 + 1.5 }; secCache = { key, data }; return data;
+}
+function drawSection() {
+  const m = ui.step === 'measure' && C.meas[ui.msel] && C.meas[ui.msel].t === 's' && C.meas[ui.msel].ok ? C.meas[ui.msel] : null, data = m && sectionProfile(m);
+  if (!secEl) { secEl = N.el('div', { class: 'secp' }, '<canvas></canvas><div class="cap"></div><button class="x" type="button" title="Close the section panel (the section stays in the list)">✕</button>'); shell.view.appendChild(secEl); secEl.querySelector('.x').addEventListener('click', () => { ui.msel = -1; draw(); renderMeasure(); }); secEl.querySelector('canvas').addEventListener('pointerdown', sectionClick); }
+  secEl.hidden = !data; secMap = null; if (!data) return;
+  const cv = secEl.querySelector('canvas'), W = secEl.clientWidth, H = secEl.clientHeight, pr = Math.min(window.devicePixelRatio || 1, 2); cv.width = W * pr; cv.height = H * pr; const g = cv.getContext('2d'); g.setTransform(pr, 0, 0, pr, 0, 0);
+  const top = 26, k = Math.min((W - 20) / (data.hi - data.lo), (H - top - 12) / (data.z1 - data.z0)), ox = W / 2 - (data.lo + data.hi) / 2 * k, oy = top + (H - top - 12) / 2 + (data.z0 + data.z1) / 2 * k, X = (sv) => ox + sv * k, Y = (z) => oy - z * k;
+  secMap = { k, ox, oy, data };
+  g.fillStyle = '#0b1d31'; g.fillRect(0, 0, W, H); g.lineWidth = 1;
+  for (let v = Math.ceil(data.lo / 5) * 5; v <= data.hi; v += 5) { g.strokeStyle = 'rgba(255,255,255,.07)'; g.beginPath(); g.moveTo(X(v), top); g.lineTo(X(v), H); g.stroke(); }
+  for (let v = Math.ceil(data.z0 / 5) * 5; v <= data.z1; v += 5) { g.strokeStyle = v === 0 ? 'rgba(94,234,212,.35)' : 'rgba(255,255,255,.07)'; g.beginPath(); g.moveTo(0, Y(v)); g.lineTo(W, Y(v)); g.stroke(); }
+  for (const e of [0, data.len]) { g.strokeStyle = 'rgba(245,158,11,.7)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(X(e), top); g.lineTo(X(e), H); g.stroke(); g.setLineDash([]); }
+  for (const sg of data.segs) { g.strokeStyle = sg.j === 'upper' ? '#eadfcb' : '#b9c7d6'; g.lineWidth = 1.6; g.beginPath(); for (let i = 0; i < sg.s.length; i += 4) { g.moveTo(X(sg.s[i]), Y(sg.s[i + 1])); g.lineTo(X(sg.s[i + 2]), Y(sg.s[i + 3])); } g.stroke(); }
+  g.strokeStyle = '#dbe7f3'; g.lineWidth = 2; g.beginPath(); g.moveTo(W - 14 - 5 * k, H - 10); g.lineTo(W - 14, H - 10); g.stroke(); g.fillStyle = '#dbe7f3'; g.font = '11px Inter, system-ui, sans-serif'; g.textAlign = 'right'; g.fillText('5 mm', W - 14, H - 15);
+  if (m.q) { g.strokeStyle = '#e879f9'; g.fillStyle = '#e879f9'; g.lineWidth = 2; if (m.q.length === 2) { g.beginPath(); g.moveTo(X(m.q[0][0]), Y(m.q[0][1])); g.lineTo(X(m.q[1][0]), Y(m.q[1][1])); g.stroke(); } for (const q of m.q) { g.beginPath(); g.arc(X(q[0]), Y(q[1]), 4, 0, 6.3); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke(); g.strokeStyle = '#e879f9'; g.lineWidth = 2; } }
+  secEl.querySelector('.cap').textContent = `S${m.i + 1} · ${m.qd != null ? m.qd.toFixed(2) + ' mm  (along ' + m.qs.toFixed(2) + ', vertical ' + m.qz.toFixed(2) + ')' : m.q ? 'click the second point on the outline' : 'click two points on the outline to measure'} · green line = occlusal plane`;
+}
+function sectionClick(e) {
+  const sm = state.measures[ui.msel]; if (!secMap || !sm || e.button > 0) return; e.preventDefault();
+  const r = e.currentTarget.getBoundingClientRect(); let sv = (e.clientX - r.left - secMap.ox) / secMap.k, z = (secMap.oy - (e.clientY - r.top)) / secMap.k, bd = (e.pointerType === 'mouse' ? 10 : 18) / secMap.k, best = null;
+  for (const sg of secMap.data.segs) for (let i = 0; i < sg.s.length; i += 2) { const d = Math.hypot(sg.s[i] - sv, sg.s[i + 1] - z); if (d < bd) { bd = d; best = [sg.s[i], sg.s[i + 1]]; } }      // snap to the outline
+  if (best) { sv = best[0]; z = best[1]; }
+  snap(); if (!sm.q || sm.q.length >= 2) sm.q = [[r4(sv), r4(z)]]; else sm.q.push([r4(sv), r4(z)]); changed();
+}
+function renderMeasure() {
+  $('mTool').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === ui.mtool));
+  if (!(C.meas[ui.msel] && C.meas[ui.msel].t === 's')) ui.msel = -1;
+  let h = '';
+  if (!C.meas.length) h = '<div class="note">Nothing measured yet. Click two points on the model for a distance.</div>';
+  else {
+    h = '<table class="tbl"><tr><th></th><th class="num">Value</th><th></th></tr>';
+    C.meas.forEach((m, i) => {
+      const sub = !m.ok ? '' : m.t === 'd' ? `in plane ${m.plane.toFixed(2)} · vertical ${m.vert.toFixed(2)}` : m.t === 's' ? (m.qd != null ? `along ${m.qs.toFixed(2)} · vertical ${m.qz.toFixed(2)} · ` : '') + `cut ${m.len.toFixed(1)} mm long` : '';
+      const val = !m.ok ? '–' : m.t === 'd' ? m.d.toFixed(2) + ' mm' : m.t === 'a' ? m.ang.toFixed(1) + '°' : m.qd != null ? m.qd.toFixed(2) + ' mm' : '–';
+      h += `<tr${m.t === 's' ? ` class="pick${i === ui.msel ? ' sel' : ''}" data-sec="${i}" title="Show this section"` : ''}><td><b>${MT[m.t]}${i + 1}</b>${sub ? `<small>${sub}</small>` : ''}</td><td class="num">${val}</td><td class="num"><button class="x" type="button" data-del="${i}" title="Delete this measurement">✕</button></td></tr>`;
+    });
+    h += '</table>';
+  }
+  $('mOut').innerHTML = h; $('mUndo').disabled = !undo.length && !ui.pend.length; $('mClear').disabled = !state.measures.length;
+  const need = ui.mtool === 'a' ? 3 : 2, n = ui.pend.length;
+  if (ui.step === 'measure') shell.hint(scans.has('upper') || scans.has('lower') ? `<b>${MNAME[ui.mtool]}: click point ${n + 1} of ${need}</b><br>${ui.mtool === 'a' ? 'The angle is measured at the second point' : ui.mtool === 's' ? 'The scans are cut straight down through the two points' : 'Drag a point to adjust it'}` : '');
+  drawSection();
+}
+
+// ───────────────────────────── step 9: report ─────────────────────────────
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const today = () => { const d = new Date(); return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`; };
+const QN = { 1: 'Upper right', 2: 'Upper left', 3: 'Lower left', 4: 'Lower right' };
+function reportText() {
+  const L = [], top = state.include7 ? 7 : 6, B = C.bolton, has = JAWS.filter((j) => C.has[j]);
+  L.push(`MODEL ANALYSIS — ${today()} (Analysis Card)`);
+  L.push(`Tooth widths, mm (measured ${modeName()}):`);
+  for (const q of [1, 2, 4, 3]) { if (!C.has[jawOf(q * 10 + 1)]) continue; const a = []; for (let n = 1; n <= top; n++) { const f = q * 10 + n, st = stOf(f); a.push(`${tname(f)} ${st === 'm' ? 'missing' : C.w[f] != null ? C.w[f].toFixed(1) : st === 's' ? 'not measured' : '–'}`); } L.push(`  ${QN[q]}: ${a.join(', ')}`); }
+  for (const k of ['anterior', 'overall']) {
+    const r = B[k], b = BOLTON[k];
+    if (r.ratio != null) L.push(`${b.label}: ${r.ratio.toFixed(1)}%${r.subs.length ? ' (estimate: ' + r.subs.map((f) => `${tname(f)} taken as ${tname(contra(f))}`).join(', ') + ')' : ''} — lower ${r.lower.toFixed(1)} / upper ${r.upper.toFixed(1)} mm; Bolton mean ${b.mean}% (SD ${b.sd}); ${r.arch} excess ${r.excess.toFixed(1)} mm.`);
+    else if (has.length === 2) L.push(`${b.label}: not calculated (no width for ${tlist(r.lacking)}).${r.rem && (k === 'anterior' || !B.anterior.rem) ? ' ' + remText(r) : ''}`);
+  }
+  for (const j of has) {
+    const G = C.gaps[j].filter((g) => g.width != null); if (!C.gaps[j].length) continue;
+    L.push(`${JN[j]} spaces: ${G.length ? G.map((g) => `${tname(g.a)}–${tname(g.b)} ${g.width.toFixed(1)} mm${g.kind === 'span' ? ' (' + tlist(g.missing) + ' missing)' : ''}`).join('; ') + `; total ${G.reduce((s, g) => s + g.width, 0).toFixed(1)} mm` : 'none'}.`);
+  }
+  for (const j of has) { const S = C.space[j]; if (!S.ok) continue; const none = S.missing.concat(S.unknown); L.push(`${JN[j]} space analysis (${S.e.a.label} to ${S.e.b.label}): available ${S.avail.toFixed(1)}, required ${S.req.toFixed(1)} mm — ${Math.abs(S.diff) < 0.05 ? 'balanced' : (S.diff < 0 ? 'crowding ' : 'spacing ') + Math.abs(S.diff).toFixed(1) + ' mm'}${none.length ? ` (no width counted for ${tlist(none)})` : ''}${S.planned != null ? `; with the planned ${tlist(S.missing)} (${S.planned.toFixed(1)} mm) ${Math.abs(S.diffPlanned) < 0.05 ? 'balanced' : (S.diffPlanned < 0 ? 'crowding ' : 'spacing ') + Math.abs(S.diffPlanned).toFixed(1) + ' mm'}` : ''}.`); }
+  const A = C.arch, dim = (k, ak) => has.filter((j) => A[j][k] != null).map((j) => `${j} ${A[j][k].toFixed(1)}${ak && A[j][ak] ? '*' : ''}`).join(', ');
+  const d1 = dim('icw', 'icwAuto'), d2 = dim('imw', 'imwAuto'), d3 = dim('depth'); let star = /\*/.test(d1 + d2);
+  if (d1 || d2 || d3) L.push(`Arch (mm): ${[d1 ? 'intercanine width ' + d1 : '', d2 ? 'intermolar width ' + d2 : '', d3 ? 'arch depth ' + d3 : ''].filter(Boolean).join('; ')}.`);
+  const o = C.occ;
+  if (o.can && (o.overjet != null || o.overbite != null || o.mid != null)) { if (o.auto && (o.overjet != null || o.overbite != null)) star = true; L.push(`Occlusion: ${[o.overjet != null ? `overjet ${neg(o.overjet)} mm${o.auto ? '*' : ''}${o.ojTo === 'edge' ? ' (to the lower incisal edge)' : ''}` : '', o.overbite != null ? `overbite ${neg(o.overbite)} mm${o.auto ? '*' : ''}` : '', o.mid != null ? (Math.abs(o.mid) < 0.05 ? 'midlines coincident' : `lower midline ${Math.abs(o.mid).toFixed(1)} mm to patient’s ${o.mid > 0 ? 'left' : 'right'} of upper`) : ''].filter(Boolean).join('; ')}.`); }
+  let dag = false; for (const r of C.resto) { if (r.vert != null && r.ridgeAuto) star = true; if (r.vert != null && r.beyond > 5) dag = true; L.push(`${r.name} (${tname(r.g.a)}–${tname(r.g.b)}): contact level ${r.contact.toFixed(1)} mm${r.crest != null ? `, crest level ${r.crest.toFixed(1)} mm` : ''}${r.vert != null ? `, vertical space ${r.vert.toFixed(1)} mm${vmark(r)}` : ''}${r.planTotal != null ? `; planned width ${r.planTotal.toFixed(1)} mm — ${r.spare >= 0 ? 'spare ' : 'short by '}${Math.abs(r.spare).toFixed(1)} mm` : ''}${r.impNeed != null ? `; implant sum ${r.impNeed.toFixed(1)} mm against ${r.impAt} level — ${r.impSpare >= 0 ? 'spare ' : 'short by '}${Math.abs(r.impSpare).toFixed(1)} mm` : ''}.`); }
+  const M = C.meas.filter((m) => m.ok && (m.t !== 's' || m.qd != null)); if (M.length) L.push(`Other measurements: ${M.map((m) => (m.t === 'd' ? `D${m.i + 1} ${m.d.toFixed(2)} mm` : m.t === 'a' ? `A${m.i + 1} ${m.ang.toFixed(1)}°` : `S${m.i + 1} ${m.qd.toFixed(2)} mm (on a section)`)).join('; ')}.`);
+  if (star) L.push('* uses a landmark placed automatically and not adjusted by hand.');
+  if (dag) L.push('† the opposing surface met is more than 5 mm beyond the occlusal plane (probably gum, not a tooth).');
+  L.push('Digital model measurements from user-placed landmarks. Planning aid, not a certified medical device.');
+  return L.join('\n');
+}
+function reportCsv() {
+  const rows = [['section', 'item', 'value', 'unit', 'x', 'y', 'z', 'note']], q = (v) => (/[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v)), add = (...a) => rows.push(a), n = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '');
+  add('info', 'date', today(), '', '', '', '', APPNAME); add('info', 'width definition', modeName(), '', '', '', '', ''); add('info', 'tooth numbering', state.notation === 'palmer' ? 'Palmer' : 'FDI', '', '', '', '', 'coordinates are in the case frame: x to patient’s left, y posterior, z up');
+  for (const jaw of JAWS) { if (!C.has[jaw]) continue; for (const f of archOrder(jaw)) { const st = stOf(f); add('tooth width', tname(f), n(C.w[f]), 'mm', '', '', '', st === 'm' ? 'missing' : st === 's' ? 'not measured' : C.w[f] == null ? 'not measured yet' : ''); } }
+  for (const jaw of JAWS) { if (!C.has[jaw]) continue; add('sum', `${jaw} 3-3`, n(C.sums[jaw].a.sum), 'mm', '', '', '', `${C.sums[jaw].a.n} of 6 teeth`); add('sum', `${jaw} 6-6`, n(C.sums[jaw].o.sum), 'mm', '', '', '', `${C.sums[jaw].o.n} of 12 teeth`); }
+  for (const k of ['anterior', 'overall']) { const r = C.bolton[k], b = BOLTON[k]; add('bolton', `${k} ratio`, n(r.ratio), '%', '', '', '', r.ratio == null ? 'not calculated: no width for ' + tlist(r.lacking) : r.subs.length ? 'estimate: ' + r.subs.map((f) => `${tname(f)} taken as ${tname(contra(f))}`).join('; ') : ''); add('bolton', `${k} Bolton mean`, b.mean, '%', '', '', '', `SD ${b.sd}; range ${b.lo}-${b.hi} (Bolton 1958)`); if (r.rem) add('bolton', `${k}: total left for ${tlist(r.rem.teeth)} at Bolton mean`, n(r.rem.left), 'mm', '', '', '', `${r.rem.jaw} ideal sum ${n(r.rem.ideal)}; measured ${n(r.rem.have)}; arithmetic only`); if (r.ratio != null) { add('bolton', `${k} difference from mean`, n(r.diff), '%', '', '', '', `${n(r.sd)} SD`); add('bolton', `${k} excess`, n(r.excess), 'mm', '', '', '', `${r.arch} arch`); add('bolton', `${k} shortfall`, n(r.alt), 'mm', '', '', '', `${r.altArch} arch (the same discrepancy seen from the other arch)`); } }
+  for (const jaw of JAWS) for (const g of C.gaps[jaw]) add('space', `${tname(g.a)}-${tname(g.b)}`, n(g.width != null ? g.width : g.kind === 'contact' ? g.sep : NaN), 'mm', '', '', '', gapWhat(g));
+  for (const jaw of JAWS) { const S = C.space[jaw]; if (!S.ok) continue; add('space analysis', `${jaw} available`, n(S.avail), 'mm', '', '', '', `arch line ${S.e.a.label} to ${S.e.b.label}; ${S.smooth ? 'curve' : 'segments'}; ${S.auto ? 'fitted to contact points' : 'edited by hand'}`); add('space analysis', `${jaw} required`, n(S.req), 'mm', '', '', '', `sum of ${S.used.length} widths` + (S.missing.length || S.unknown.length ? '; none counted for ' + tlist(S.missing.concat(S.unknown)) : '')); add('space analysis', `${jaw} difference`, n(S.diff), 'mm', '', '', '', S.diff < 0 ? 'crowding' : 'spacing'); }
+  for (const jaw of JAWS) { const A = C.arch[jaw]; if (!C.has[jaw]) continue; add('arch', `${jaw} intercanine width`, n(A.icw), 'mm', '', '', '', A.icw != null && A.icwAuto ? 'cusp tip found automatically' : ''); add('arch', `${jaw} intermolar width`, n(A.imw), 'mm', '', '', '', A.imw != null && A.imwAuto ? 'cusp tip found automatically' : ''); add('arch', `${jaw} arch depth`, n(A.depth), 'mm', '', '', '', ''); }
+  const o = C.occ; if (o.can) { add('occlusion', 'overjet', n(o.overjet), 'mm', '', '', '', [o.ojTo === 'edge' ? 'to the lower incisal edge' : '', o.auto ? 'incisal point found automatically' : ''].filter(Boolean).join('; ')); add('occlusion', 'overbite', n(o.overbite), 'mm', '', '', '', o.auto ? 'incisal point found automatically' : ''); add('occlusion', 'lower midline relative to upper', n(o.mid), 'mm', '', '', '', '+ = to patient’s left'); }
+  for (const r of C.resto) { add('restorative space', `${r.name} contact level`, n(r.contact), 'mm', '', '', '', `${tname(r.g.a)}-${tname(r.g.b)}`); add('restorative space', `${r.name} crest level`, n(r.crest), 'mm', '', '', '', ''); add('restorative space', `${r.name} vertical`, n(r.vert), 'mm', '', '', '', [r.vert != null && r.ridgeAuto ? 'ridge point under the middle of the span' : '', r.vert != null && r.beyond > 5 ? `opposing surface ${n(r.beyond, 1)} mm beyond the occlusal plane (probably gum)` : ''].filter(Boolean).join('; ')); for (const f of r.g.missing) if (Number.isFinite(r.plan[f])) add('restorative space', `planned width ${tname(f)}`, n(r.plan[f]), 'mm', '', '', '', ''); if (r.spare != null) add('restorative space', `${r.name} space minus planned`, n(r.spare), 'mm', '', '', '', ''); if (r.impNeed != null) { add('restorative space', `${r.name} implant sum`, n(r.impNeed), 'mm', '', '', '', `diameter ${r.impD} + 2 x ${r.impC}`); add('restorative space', `${r.name} ${r.impAt} level minus implant sum`, n(r.impSpare), 'mm', '', '', '', ''); } }
+  for (const m of C.meas) if (m.ok) add('measurement', MT[m.t] + (m.i + 1), m.t === 'd' ? n(m.d) : m.t === 'a' ? n(m.ang, 1) : n(m.qd), m.t === 'a' ? 'deg' : 'mm', '', '', '', m.t === 'd' ? `in plane ${n(m.plane)}; vertical ${n(m.vert)}` : m.t === 'a' ? 'angle at the second point' : `measured on a vertical section ${n(m.len, 1)} mm long` + (m.qd != null ? `; along ${n(m.qs)}; vertical ${n(m.qz)}` : '; nothing measured on it'));
+  const pt = (sec, item, p, note = '') => { if (p) add(sec, item, '', 'mm', n(p.x, 3), n(p.y, 3), n(p.z, 3), note); };
+  for (const jaw of JAWS) for (const f of archOrder(jaw, true)) for (const k of ['m', 'd']) pt('landmark', `${tname(f)} ${KN[k]} contact`, C.P[f] && C.P[f][k]);
+  for (const l of LM()) pt('landmark', l.name, l.p && toWorld(l.jaw, l.p), l.auto ? 'found automatically' : '');
+  for (const jaw of JAWS) { const S = C.space[jaw]; if (S.ok) S.ctrl.forEach((p, i) => pt('landmark', `${jaw} arch line point ${i + 1}`, p)); }
+  for (const r of C.resto) { if (r.cp) r.cp.forEach((p, i) => pt('landmark', `${r.name} crest point ${i + 1}`, p)); pt('landmark', `${r.name} ridge point`, r.ridge, r.ridgeAuto ? 'under the middle of the span' : ''); }
+  C.meas.forEach((m) => { if (m.ok) m.P.forEach((p, k) => pt('landmark', `${MT[m.t]}${m.i + 1} point ${k + 1}`, p)); });
+  return rows.map((r) => r.map(q).join(',')).join('\r\n') + '\r\n';
+}
+const rrect = (g, x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+function wrap(g, text, maxW) { const out = []; let line = ''; for (const w of String(text).split(/\s+/)) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; }
+const FONT = N.FONT;
+/** render one arch from its biting side into an area of a 2D canvas, with the widths and spaces drawn on it */
+function drawArchImage(g, jaw, X, Y, W, H) {
+  const grad = g.createRadialGradient(X + W / 2, Y + H * 0.35, 20, X + W / 2, Y + H * 0.35, W * 0.75); grad.addColorStop(0, '#1c3a5c'); grad.addColorStop(1, '#0b1d31');
+  g.save(); rrect(g, X, Y, W, H, 14); g.clip(); g.fillStyle = grad; g.fillRect(X, Y, W, H);
+  const text = (t, x, y, font, col, al = 'left') => { g.font = font; g.fillStyle = col; g.textAlign = al; g.textBaseline = 'middle'; g.fillText(t, x, y); };
+  if (scans[jaw]) {
+    const R = viewer.renderer, cam = viewer.camera, keep = { pos: cam.position.clone(), quat: cam.quaternion.clone(), zoom: cam.zoom, l: cam.left, r: cam.right, t: cam.top, b: cam.bottom, n: cam.near, f: cam.far, pr: R.getPixelRatio(), vis: JAWS.map((j) => scans[j] && scans[j].object.visible) };
+    const box = boxOf([jaw]), c = box.getCenter(new V3()), d = new V3(...OCC_DIR[jaw]).normalize();
+    cam.position.copy(c).addScaledVector(d, 300); cam.up.set(0, 0, 1); cam.lookAt(c); cam.updateMatrixWorld(true);
+    const rt = new V3().setFromMatrixColumn(cam.matrixWorld, 0), up = new V3().setFromMatrixColumn(cam.matrixWorld, 1), q = new V3(); let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (let k = 0; k < 8; k++) { q.set(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z); const a = q.dot(rt), b = q.dot(up); a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
+    const s = Math.min((W - 70) / (a1 - a0), (H - 120) / (b1 - b0));                       // px per mm
+    cam.zoom = 1; cam.left = -W / 2 / s; cam.right = W / 2 / s; cam.top = H / 2 / s; cam.bottom = -H / 2 / s; cam.near = -1000; cam.far = 2000;
+    cam.position.addScaledVector(rt, (a0 + a1) / 2 - c.dot(rt)).addScaledVector(up, (b0 + b1) / 2 - c.dot(up)); cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+    JAWS.forEach((j) => { if (scans[j]) scans[j].object.visible = j === jaw; });
+    R.setPixelRatio(1); R.setSize(W, H, false); R.render(viewer.scene, cam); g.drawImage(R.domElement, 0, 0, W, H, X, Y, W, H);
+    const sc = (p) => { const v = p.clone().project(cam); return [X + (v.x * 0.5 + 0.5) * W, Y + (-v.y * 0.5 + 0.5) * H]; }, ac = archCentre(jaw), cc = sc(new V3(ac.x, ac.y, 0));
+    const pill = (txt, x, y, bg, fg = '#fff', font = `600 15px ${FONT}`) => { g.font = font; const w = g.measureText(txt).width + 12; g.fillStyle = bg; rrect(g, x - w / 2, y - 11, w, 22, 6); g.fill(); text(txt, x, y + 1, font, fg, 'center'); };
+    const out = (x, y, dpx) => { const dx = x - cc[0], dy = y - cc[1], l = Math.hypot(dx, dy) || 1; return [x + dx / l * dpx, y + dy / l * dpx]; };
+    for (const gp of C.gaps[jaw]) { if (gp.width == null) continue; const A = sc(gp.pa), B = sc(gp.pb), m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2]; g.strokeStyle = '#f59e0b'; g.lineWidth = 3; g.setLineDash(gp.kind === 'span' ? [7, 5] : []); g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke(); g.setLineDash([]); if (gp.kind === 'span') { pill(gp.width.toFixed(1), m[0], m[1], '#b45309'); const o2 = out(m[0], m[1], 40); pill(tlist(gp.missing) + ' missing', o2[0], o2[1], 'rgba(120,53,15,.9)', '#fde68a', `600 14px ${FONT}`); } else { const o2 = out(m[0], m[1], -30); g.strokeStyle = '#f59e0b'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(m[0], m[1]); g.lineTo(o2[0], o2[1]); g.stroke(); pill(gp.width.toFixed(1), o2[0], o2[1], '#b45309'); } }
+    for (const f of archOrder(jaw)) {
+      const P = C.P[f]; if (!P || !P.m || !P.d || C.w[f] == null) continue; const A = sc(P.m), B = sc(P.d), m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+      g.strokeStyle = '#2dd4bf'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke();
+      for (const e of [A, B]) { g.fillStyle = '#2dd4bf'; g.beginPath(); g.arc(e[0], e[1], 3.5, 0, 6.3); g.fill(); }
+      pill(C.w[f].toFixed(1), m[0], m[1], 'rgba(13,148,136,.95)'); const o2 = out(m[0], m[1], 50); pill(tname(f), o2[0], o2[1], 'rgba(15,42,68,.82)', '#fff', `600 14px ${FONT}`);
+    }
+    g.strokeStyle = '#dbe7f3'; g.lineWidth = 2; g.beginPath(); g.moveTo(X + W / 2 - 5 * s, Y + H - 20); g.lineTo(X + W / 2 + 5 * s, Y + H - 20); g.stroke(); text('10 mm', X + W / 2, Y + H - 34, `400 14px ${FONT}`, '#dbe7f3', 'center');
+    JAWS.forEach((j, i) => { if (scans[j]) scans[j].object.visible = keep.vis[i]; });
+    R.setPixelRatio(keep.pr); R.setSize(viewer.size.w, viewer.size.h, false);
+    cam.position.copy(keep.pos); cam.quaternion.copy(keep.quat); cam.zoom = keep.zoom; cam.left = keep.l; cam.right = keep.r; cam.top = keep.t; cam.bottom = keep.b; cam.near = keep.n; cam.far = keep.f; cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+  } else text('no scan loaded', X + W / 2, Y + H / 2, `400 16px ${FONT}`, '#9fb6cf', 'center');
+  text(`${JN[jaw]} arch`, X + 18, Y + 28, `600 22px ${FONT}`, '#fff'); text('Patient’s right', X + 18, Y + H - 22, `400 15px ${FONT}`, '#9fb6cf'); text('Patient’s left', X + W - 18, Y + H - 22, `400 15px ${FONT}`, '#9fb6cf', 'right');
+  g.restore();
+}
+/** the report sheet as a canvas: header, an annotated occlusal picture of each arch, then the tables */
+function reportCanvas() {
+  const W = 1600, PAD = 40, cv = document.createElement('canvas'); cv.width = W; cv.height = 4200; const g = cv.getContext('2d'), F = FONT;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, cv.height);
+  g.fillStyle = '#0f2a44'; g.fillRect(0, 0, W, 86); const tg = g.createLinearGradient(PAD, 26, PAD + 34, 60); tg.addColorStop(0, '#14b8a6'); tg.addColorStop(1, '#5eead4'); g.fillStyle = tg; rrect(g, PAD, 26, 34, 34, 9); g.fill();
+  g.fillStyle = '#fff'; g.font = `700 28px ${F}`; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillText('Model analysis', PAD + 48, 44); g.font = `400 18px ${F}`; g.fillStyle = '#9fb6cf'; g.textAlign = 'right'; g.fillText(`${today()}  ·  ${APPNAME}  ·  widths ${modeName()}`, W - PAD, 44);
+  const clip = JAWS.map((j) => scans[j] && scans[j].object.material.clippingPlanes); JAWS.forEach((j) => { if (scans[j]) scans[j].object.material.clippingPlanes = null; });
+  layer.clear(); const iw = (W - 2 * PAD - 24) / 2, ih = 600; drawArchImage(g, 'upper', PAD, 110, iw, ih); drawArchImage(g, 'lower', PAD + iw + 24, 110, iw, ih);
+  JAWS.forEach((j, i) => { if (scans[j]) scans[j].object.material.clippingPlanes = clip[i]; }); draw(); viewer.invalidate();
+  const colW = (W - 2 * PAD - 40) / 2, colX = [PAD, PAD + colW + 40], colY = [110 + ih + 34, 110 + ih + 34], RH = 32;
+  const table = (title, head, rows, frac, note) => {                            // tables flow into whichever column is shorter
+    const k = colY[0] <= colY[1] ? 0 : 1, x = colX[k]; let y = colY[k];
+    g.textBaseline = 'middle'; g.textAlign = 'left'; g.font = `700 17px ${F}`; g.fillStyle = '#0f2a44'; g.fillText(title.toUpperCase(), x, y + 12); y += 32;
+    const xs = [x]; frac.forEach((f, i) => xs.push(xs[i] + f * colW));
+    const cell = (t, i, font, col) => { g.font = font; g.fillStyle = col; g.textAlign = i > 0 ? 'right' : 'left'; let s = String(t); const maxW = xs[i + 1] - xs[i] - 12; while (g.measureText(s).width > maxW && s.length > 3) s = s.slice(0, -2) + '…'; g.fillText(s, i > 0 ? xs[i + 1] - 6 : xs[i] + 6, y + RH / 2); };
+    if (head) { g.fillStyle = '#f1f5f9'; g.fillRect(x, y, colW, RH); head.forEach((t, i) => cell(String(t).toUpperCase(), i, `600 14px ${F}`, '#64748b')); y += RH; }
+    for (const r of rows) { const bold = !!r.bold; (r.cells || r).forEach((t, i) => cell(t, i, `${bold ? 600 : 400} 19px ${F}`, bold ? '#0f2a44' : i === 0 ? '#334155' : '#0f172a')); g.strokeStyle = '#e2e8f0'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y + RH); g.lineTo(x + colW, y + RH); g.stroke(); y += RH; }
+    if (note) { g.font = `400 15px ${F}`; g.fillStyle = '#64748b'; g.textAlign = 'left'; y += 4; for (const ln of wrap(g, note, colW - 8)) { y += 21; g.fillText(ln, x + 4, y - 8); } }
+    colY[k] = y + 28;
+  };
+  const top = state.include7 ? 7 : 6, nums = Array.from({ length: top }, (_, i) => String(i + 1)), wr = [];
+  for (const q of [1, 2, 4, 3]) { if (!C.has[jawOf(q * 10 + 1)]) continue; const cells = [QN[q]]; for (let n = 1; n <= top; n++) { const f = q * 10 + n; cells.push(stOf(f) === 'm' ? 'miss.' : C.w[f] != null ? C.w[f].toFixed(1) : '–'); } wr.push(cells); }
+  table('Tooth widths (mm)', ['Tooth'].concat(nums), wr, [0.22].concat(nums.map(() => 0.78 / top)), `Measured ${modeName()} between the mesial and distal contact points placed by the user.`);
+  const B = C.bolton, bc = (f) => ['anterior', 'overall'].map((k) => f(B[k], BOLTON[k])), ok = (r) => r.ratio != null, bn = [];
+  for (const k of ['anterior', 'overall']) { const r = B[k]; if (r.lacking.length) bn.push(`${BOLTON[k].label} not calculated: no width for ${tlist(r.lacking)}.` + (r.rem && (k === 'anterior' || !B.anterior.rem) ? ` At Bolton’s mean ${k} ratio that would leave ${r.rem.left.toFixed(1)} mm for ${tlist(r.rem.teeth)}.` : '')); else if (r.subs.length) bn.push(`${BOLTON[k].label} is an estimate: ${r.subs.map((f) => `${tname(f)} taken as ${tname(contra(f))}`).join(', ')}.`); }
+  if (C.has.upper && C.has.lower) table('Bolton analysis', ['', 'Anterior 3–3', 'Overall 6–6'], [
+    ['Lower sum / upper sum (mm)'].concat(bc((r) => (ok(r) ? `${r.lower.toFixed(1)} / ${r.upper.toFixed(1)}` : '–'))), { bold: true, cells: ['Ratio (%)'].concat(bc((r) => (ok(r) ? r.ratio.toFixed(1) + (r.subs.length ? ' est.' : '') : '–'))) },
+    ['Bolton mean (SD)'].concat(bc((r, b) => `${b.mean} (${b.sd})`)), ['Difference (in SDs)'].concat(bc((r) => (ok(r) ? `${sgn(r.diff)} (${sgn(r.sd)})` : '–'))), { bold: true, cells: ['Excess (mm)'].concat(bc((r) => (ok(r) ? `${JN[r.arch]} ${r.excess.toFixed(1)}` : '–'))) }],
+  [0.44, 0.28, 0.28], (bn.join(' ') + ' Norms: Bolton 1958; method: Bolton 1962.').trim());
+  for (const j of JAWS) {
+    if (!C.has[j] || !C.gaps[j].length) continue; const G = C.gaps[j].filter((x) => x.kind !== 'contact'), S = C.space[j], rows = G.map((x) => [`${tname(x.a)} – ${tname(x.b)}`, gapWhat(x), x.width != null ? x.width.toFixed(1) : '–']);
+    if (!G.length) rows.push(['No spaces', '', '']); rows.push({ bold: true, cells: ['Total spacing', '', C.gaps[j].reduce((s, x) => s + (x.width || 0), 0).toFixed(1)] });
+    if (S.ok) rows.push(['Space available', `${S.e.a.label} → ${S.e.b.label}`, S.avail.toFixed(1)], ['Space required', `${S.used.length} teeth`, S.req.toFixed(1)], { bold: true, cells: [Math.abs(S.diff) < 0.05 ? 'Balanced' : S.diff < 0 ? 'Crowding' : 'Spacing', '', Math.abs(S.diff).toFixed(1)] });
+    const none = S.ok ? S.missing.concat(S.unknown) : []; table(`${JN[j]} spaces and space analysis (mm)`, ['Between', '', 'mm'], rows, [0.36, 0.44, 0.2], none.length ? `No width counted in “required” for ${tlist(none)}.` : '');
+  }
+  const A = C.arch, o = C.occ, ar = [], st = (v, a) => (v != null ? neg(v) + (a ? '*' : '') : '–'); let star = false;
+  if (JAWS.some((j) => C.has[j] && (A[j].icw != null || A[j].imw != null || A[j].depth != null))) { ar.push(['Intercanine width (cusp tips)', st(A.upper.icw, A.upper.icwAuto), st(A.lower.icw, A.lower.icwAuto)], ['Intermolar width (mesiobuccal cusps)', st(A.upper.imw, A.upper.imwAuto), st(A.lower.imw, A.lower.imwAuto)], ['Arch depth', st(A.upper.depth), st(A.lower.depth)]); star = JAWS.some((j) => (A[j].icw != null && A[j].icwAuto) || (A[j].imw != null && A[j].imwAuto)); }
+  if (o.can && (o.overjet != null || o.overbite != null || o.mid != null)) { if (o.auto && (o.overjet != null || o.overbite != null)) star = true; ar.push(['Overjet' + (o.ojTo === 'edge' ? ' (to lower incisal edge)' : ''), st(o.overjet, o.auto), ''], ['Overbite', st(o.overbite, o.auto), ''], ['Lower midline to upper', o.mid == null ? '–' : Math.abs(o.mid) < 0.05 ? '0.0' : `${Math.abs(o.mid).toFixed(1)} ${o.mid > 0 ? 'left' : 'right'}`, '']); }
+  if (ar.length) table('Arch dimensions and occlusion (mm)', ['', 'Upper', 'Lower'], ar, [0.56, 0.22, 0.22], star ? '* uses a landmark placed automatically and not adjusted by hand.' : '');
+  if (C.resto.length) {
+    const rr = [], notes = []; for (const r of C.resto) { rr.push([`${r.name} (${tname(r.g.a)}–${tname(r.g.b)})`, r.contact.toFixed(1), fmt(r.crest), r.vert != null ? r.vert.toFixed(1) + vmark(r) : '–', r.planTotal != null ? r.planTotal.toFixed(1) : '–', r.spare != null ? sgn(r.spare) : '–']); if (r.impNeed != null) notes.push(`${r.name}: implant sum ${r.impNeed.toFixed(1)} mm against ${r.impAt} level, ${r.impSpare >= 0 ? 'spare' : 'short by'} ${Math.abs(r.impSpare).toFixed(1)} mm.`); if (r.vert != null && r.beyond > 5) notes.unshift('† opposing surface more than 5 mm beyond the occlusal plane (probably gum, not a tooth).'); if (r.vert != null && r.ridgeAuto) notes.unshift('* read under the middle of the span.'); }
+    table('Restorative space (mm)', ['Space', 'Contact', 'Crest', 'Vertical', 'Planned', '±'], rr, [0.34, 0.14, 0.13, 0.14, 0.14, 0.11], [...new Set(notes)].join(' '));
+  }
+  const M = C.meas.filter((m) => m.ok && (m.t !== 's' || m.qd != null)); if (M.length) table('Other measurements', ['', 'Value', 'In plane / vertical'], M.map((m) => [`${MNAME[m.t]} ${MT[m.t]}${m.i + 1}` + (m.t === 's' ? ' (on a vertical cut)' : ''), m.t === 'a' ? m.ang.toFixed(1) + '°' : (m.t === 'd' ? m.d : m.qd).toFixed(2) + ' mm', m.t === 'd' ? `${m.plane.toFixed(2)} / ${m.vert.toFixed(2)}` : m.t === 's' ? `${m.qs.toFixed(2)} / ${m.qz.toFixed(2)}` : '']), [0.44, 0.24, 0.32]);
+  let y = Math.max(colY[0], colY[1]); g.strokeStyle = '#e2e8f0'; g.beginPath(); g.moveTo(PAD, y); g.lineTo(W - PAD, y); g.stroke(); y += 10;
+  g.font = `400 15px ${F}`; g.fillStyle = '#64748b'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  for (const ln of wrap(g, 'Planning and lab-communication aid — not a certified medical device. Every figure comes from landmarks placed by the user on a digital model and depends on them and on the orientation of the model. No patient details are held in this report.', W - 2 * PAD)) { y += 22; g.fillText(ln, PAD, y - 6); }
+  const outc = document.createElement('canvas'); outc.width = W; outc.height = Math.ceil(y + 26); outc.getContext('2d').drawImage(cv, 0, 0); return outc;
+}
+let sheetEl = null, sheetCanvas = null;
+function renderReport() {
+  $('pText').textContent = reportText();
+  if (!sheetEl) { sheetEl = N.el('div', { id: 'sheet' }); shell.view.appendChild(sheetEl); }
+  const any = scans.has('upper') || scans.has('lower');
+  if (ui.step === 'report' && any) { sheetCanvas = reportCanvas(); sheetEl.innerHTML = ''; sheetEl.appendChild(sheetCanvas); } else sheetCanvas = null;
+  sheetEl.classList.toggle('show', ui.step === 'report' && ui.sheet && any);
+  $('pSheet').textContent = ui.sheet ? 'Show the model' : 'Show the sheet'; for (const id of ['pCopy', 'pPng', 'pCsv', 'pSheet']) $(id).disabled = !any;
+}
+const stamp = () => new Date().toISOString().slice(0, 10);
+async function copyText() {
+  const t = reportText(); let ok = false;
+  try { await navigator.clipboard.writeText(t); ok = true; } catch (_) { try { const r = document.createRange(); r.selectNodeContents($('pText')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); ok = document.execCommand('copy'); } catch (__) { ok = false; } }
+  shell.status(ok ? 'Summary copied — paste it into the notes' : 'Could not copy here — the text is selected; copy it by hand', !ok);
+}
+function savePng() { const cv = sheetCanvas || reportCanvas(), bin = atob(cv.toDataURL('image/png').split(',')[1]), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); N.saveFile(`model-analysis-${stamp()}.png`, new Blob([u8], { type: 'image/png' })).then((r) => shell.status(r.message, !r.ok && r.code !== 'declined')); }
+function saveCsv() { N.saveFile(`model-analysis-${stamp()}.csv`, new Blob(['﻿' + reportCsv()], { type: 'text/csv' })).then((r) => shell.status(r.message, !r.ok && r.code !== 'declined')); }
+
+// ───────────────────────────── state in / out ─────────────────────────────
+const isPt = (a) => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite), num = (v) => (Number.isFinite(v) ? v : null);
+function loadState(src) {
+  const s = src && typeof src === 'object' ? src : {};
+  for (const k of Object.keys(state)) delete state[k];
+  Object.assign(state, fresh());
+  if (s.notation === 'palmer') state.notation = 'palmer'; if (s.widthMode === '3d') state.widthMode = '3d';
+  state.include7 = !!s.include7; state.substitute = !!s.substitute; if (Number.isFinite(s.gapTol)) state.gapTol = N.clamp(s.gapTol, 0, 3); state.prop = num(s.prop);
+  for (const k in s.teeth || {}) { const t = s.teeth[k], f = +k; if (!t || !(f >= 11 && f <= 47) || f % 10 < 1 || f % 10 > 7) continue; state.teeth[f] = { st: ['p', 'm', 's'].includes(t.st) ? t.st : 'p', m: isPt(t.m) ? t.m : null, d: isPt(t.d) ? t.d : null }; }
+  for (const j of JAWS) { const L = s.line && s.line[j]; if (L) state.line[j] = { pts: Array.isArray(L.pts) && L.pts.length >= 2 && L.pts.every(isPt) ? L.pts : null, smooth: L.smooth !== false }; }
+  for (const k in s.tips || {}) { const t = s.tips[k]; if (/^t[1-4][36]$/.test(k) && t && isPt(t.p)) state.tips[k] = { p: t.p, auto: !!t.auto }; }
+  if (s.occ) state.occ = { u: isPt(s.occ.u) ? s.occ.u : null, uAuto: s.occ.uAuto !== false, l: isPt(s.occ.l) ? s.occ.l : null, lAuto: s.occ.lAuto !== false };
+  for (const k in s.resto || {}) { const r = s.resto[k]; if (!r || !/^\d\d-\d\d$/.test(k)) continue; const plan = {}; for (const f in r.plan || {}) if (Number.isFinite(r.plan[f])) plan[f] = r.plan[f]; state.resto[k] = { crest: Array.isArray(r.crest) && isPt(r.crest[0]) ? [r.crest[0], isPt(r.crest[1]) ? r.crest[1] : null] : null, ridge: isPt(r.ridge) ? r.ridge : null, plan, impD: num(r.impD), impC: num(r.impC) }; }
+  for (const m of s.measures || []) if (m && ['d', 'a', 's'].includes(m.t) && Array.isArray(m.pts) && m.pts.length === (m.t === 'a' ? 3 : 2) && m.pts.every((q) => q && JAWS.includes(q.j) && isPt(q.p))) { const o = { t: m.t, pts: m.pts.map((q) => ({ j: q.j, p: q.p })) }; if (m.t === 's' && Array.isArray(m.q)) { const q = m.q.filter((v) => Array.isArray(v) && v.length === 2 && v.every(Number.isFinite)).slice(0, 2); if (q.length) o.q = q; } state.measures.push(o); }
+  if (s.fp) state.fp = { upper: s.fp.upper || null, lower: s.fp.lower || null };
+  ui.cur = null; ui.sel = null; ui.arm = null; ui.rarm = null; ui.pend = []; ui.msel = -1; lineSel = -1; inv.upper = inv.lower = null;
+}
+function dropJaw(jaw) {
+  for (const f of archOrder(jaw, true)) { delete state.teeth[f]; delete state.tips['t' + f]; }
+  state.line[jaw] = null; if (jaw === 'upper') { state.occ.u = null; state.occ.uAuto = true; if (state.occ.lAuto) state.occ.l = null; } else { state.occ.l = null; state.occ.lAuto = true; }
+  for (const k of Object.keys(state.resto)) if (jawOf(+k.slice(0, 2)) === jaw) delete state.resto[k];
+}
+/** after the scans change: landmarks only make sense on the scan they were picked on */
+function checkScans() {
+  inv.upper = inv.lower = null; const dropped = [];
+  for (const jaw of JAWS) {
+    const fp = fingerprint(jaw), pts = []; for (const f of archOrder(jaw, true)) for (const k of ['m', 'd']) if (state.teeth[f] && state.teeth[f][k]) pts.push(state.teeth[f][k]);
+    const had = pts.length || archOrder(jaw, true).some((f) => state.teeth[f] && state.teeth[f].st !== 'p') || state.measures.some((m) => m.pts.some((q) => q.j === jaw));
+    if (had && state.fp[jaw] && state.fp[jaw] !== fp) {
+      let keep = false;
+      if (scans[jaw] && pts.length) { let okN = 0; for (const a of pts) if (N.closestOnMesh(scans[jaw].object, toWorld(jaw, a)).distance < 0.25) okN++; keep = okN >= 0.9 * pts.length; }
+      if (!keep) { dropJaw(jaw); state.measures = state.measures.filter((m) => !m.pts.some((q) => q.j === jaw)); dropped.push(jaw); }
+    }
+    state.fp[jaw] = fp;
+  }
+  if (dropped.length) { undo.length = 0; shell.status(`The ${dropped.join(' and ')} scan changed — its landmarks were cleared`); }
+}
+let stashT = 0;
+function saveSoon() { clearTimeout(stashT); stashT = setTimeout(() => { if (scans.upper || scans.lower) N.stashCase(scans.toCase(), APPNAME); }, 2500); }
+
+// ───────────────────────────── wiring ─────────────────────────────
+const RENDER = { widths: renderWidths, bolton: renderBolton, space: renderSpace, arch: renderArch, resto: renderResto, measure: renderMeasure, report: renderReport };
+const VIEWSTEPS = ['widths', 'space', 'arch', 'resto'];
+let measBtn = null;
+function changed(save = true) {
+  recalc();
+  if (ui.step === 'widths' && !ui.cur && ui.sel == null) { ui.cur = nextOpen(ui.jaw, null); if (ui.cur) ui.sel = ui.cur.f; }
+  if (RENDER[ui.step]) RENDER[ui.step]();
+  draw();
+  const any = scans.has('upper') || scans.has('lower'), allDone = any && JAWS.every((j) => !scans.has(j) || seq(j).every((c) => hasPt(c.f, c.k))) && JAWS.some((j) => scans.has(j) && seq(j).length);
+  shell.markDone('load', any); shell.markDone('widths', allDone);
+  shell.markDone('bolton', C.bolton.anterior.ratio != null && C.bolton.overall.ratio != null);
+  shell.markDone('space', JAWS.some((j) => C.space[j].ok)); shell.markDone('arch', JAWS.some((j) => C.arch[j].icw != null || C.arch[j].imw != null));
+  shell.markDone('resto', C.resto.some((r) => r.crest != null || r.planTotal != null)); shell.markDone('measure', C.meas.length > 0);
+  if (save) saveSoon();
+}
+function onScans(what) {
+  if (what === 'visibility') { draw(); if (ui.step === 'measure') drawSection(); return; }
+  if (what === 'loaded' || what === 'cleared' || what === 'case') checkScans(); else inv.upper = inv.lower = null;
+  if (!scans.has(ui.jaw) && scans.has(other(ui.jaw))) ui.jaw = other(ui.jaw);
+  if (what === 'oriented') { changed(); if (sectionOn) setSection(true); } else { sectionOn = false; enterStep(ui.step, null, what !== 'case'); }
+}
+function enterStep(id, prev, save = false) {
+  ui.step = id; shell.hint(''); viewer.controls.enableRotate = true; ui.arm = null; ui.rarm = null; ui.pend = [];
+  setSection(false);
+  if (sheetEl) sheetEl.classList.remove('show'); if (secEl && id !== 'measure') secEl.hidden = true;
+  if (measBtn) { measBtn.classList.toggle('on', id === 'measure'); measBtn.textContent = id === 'measure' && ui.back ? 'Back to step' : 'Measure'; }
+  const st = shell.stepEl(id); if (st && prev !== id) st.parentElement.scrollTop = st.offsetTop - st.parentElement.offsetTop - 2;
+  recalc();
+  if (id === 'load' || id === 'orient') { showOnly('both'); if (id === 'load') viewer.setTool(null); if (prev === null || VIEWSTEPS.includes(prev)) isoView(); }
+  else if (id === 'widths') { setJaw(ui.jaw); viewer.controls.enableRotate = !ui.lock; viewer.setTool(widthTool); if (!ui.cur) { ui.cur = ui.sel != null ? firstOpenOf(ui.sel) : null; if (!ui.cur) advance(null); } }
+  else if (id === 'space') { setJaw(ui.jaw); viewer.controls.enableRotate = !ui.lock; viewer.setTool(lineTool); }
+  else if (id === 'arch') { autoLandmarks(); recalc(); viewer.setTool(archTool); setArchView(ui.aview); }
+  else if (id === 'resto') { viewer.setTool(restoTool); if (!C.resto.find((r) => r.key === ui.span)) ui.span = C.resto.length ? C.resto[0].key : null; if (ui.span) selectSpan(ui.span); else { showOnly('both'); isoView(); } }
+  else if (id === 'measure') viewer.setTool(measureTool);                 // the view and what is shown stay as they were, so you measure what you were looking at
+  else { showOnly('both'); viewer.setTool(null); if (prev === null || VIEWSTEPS.includes(prev)) isoView(); }
+  changed(save);
+}
+shell.onStepChange((i, prev) => enterStep(shell.steps[i].id, prev >= 0 ? shell.steps[prev].id : null));
+measBtn = shell.topButton('Measure', 'Measure a distance or an angle on the scans — from any step, and back again', () => { if (ui.step === 'measure') { const b = ui.back; ui.back = null; shell.goto(b || 'widths'); } else { ui.back = ui.step; shell.goto('measure'); } });
+
+N.segBind($('wJaw'), (v) => { setJaw(v); ui.cur = nextOpen(ui.jaw, null); ui.sel = ui.cur ? ui.cur.f : null; changed(false); });
+N.segBind($('sJaw'), (v) => { setJaw(v); changed(false); });
+N.segBind($('wNot'), (v) => { state.notation = v; changed(); });
+N.segBind($('wMode'), (v) => { snap(); state.widthMode = v; changed(); });
+N.segBind($('sSmooth'), (v) => { snap(); if (!state.line[ui.jaw]) state.line[ui.jaw] = { pts: null, smooth: true }; state.line[ui.jaw].smooth = v === '1'; changed(); });
+N.segBind($('aView'), (v) => { setArchView(v); changed(false); });
+N.segBind($('mTool'), (v) => { ui.mtool = v; ui.pend = []; draw(); renderMeasure(); });
+$('chart').addEventListener('click', (e) => { const b = e.target.closest('button[data-f]'); if (b && !b.disabled) selectTooth(+b.dataset.f); });
+for (const id of ['wUndo', 'sUndo', 'aUndo']) $(id).addEventListener('click', undoLast);
+$('wMiss').addEventListener('click', () => setStatus('m')); $('wSkip').addEventListener('click', () => setStatus('s'));
+$('wRedo').addEventListener('click', redoTooth); $('wClear').addEventListener('click', () => clearArch(ui.jaw));
+$('w7').addEventListener('change', (e) => { snap(); state.include7 = e.target.checked; ui.cur = nextOpen(ui.jaw, null); if (ui.cur) ui.sel = ui.cur.f; changed(); });
+$('wLock').addEventListener('change', (e) => { ui.lock = e.target.checked; viewer.controls.enableRotate = !ui.lock; if (ui.lock) occlusalView(ui.jaw); });
+$('bSub').addEventListener('change', (e) => { snap(); state.substitute = e.target.checked; changed(); });
+$('sTol').addEventListener('change', (e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { snap(); state.gapTol = N.clamp(v, 0, 3); changed(); } });
+$('sDel').addEventListener('click', deleteLinePoint);
+$('sReset').addEventListener('click', () => { snap(); const L = state.line[ui.jaw]; if (L) L.pts = null; lineSel = -1; changed(); });
+$('aChips').addEventListener('click', (e) => { const b = e.target.closest('button[data-lm]'); if (!b || b.disabled) return; const id = b.dataset.lm, l = LM().find((x) => x.id === id), arm = ui.arm === id ? null : id; if (arm) { const occ = id === 'u' || id === 'l'; if (occ ? !biteView() : ui.aview !== l.jaw) setArchView(occ ? 'front' : l.jaw); } ui.arm = arm; changed(false); });
+$('aFind').addEventListener('click', () => { snap(); autoLandmarks(true); changed(); shell.status('Landmarks found again from the scan — check them'); });
+$('rList').addEventListener('click', (e) => { const r = e.target.closest('tr[data-span]'); if (r) { selectSpan(r.dataset.span); changed(false); } });
+$('rSel').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-r]'); if (!b || b.disabled) return; const k = b.dataset.r, r = curSpan(); if (!r) return;
+  if (k === 'undo') { undoLast(); return; }
+  if (k === 'v-occ' || k === 'v-side') { ui.rview = k === 'v-side' ? 'side' : 'occ'; selectSpan(r.key); changed(false); return; }
+  if (k === 'useprop') { snap(); const s = restoOf(r.key), w = C.w[r.central] * state.prop / 100; for (const f of r.g.missing) s.plan[f] = Math.round(w * 10) / 10; changed(); return; }
+  ui.rarm = ui.rarm === k ? null : k; if (ui.rarm === 'crest') { const s = state.resto[r.key]; if (s && s.crest && !s.crest[1]) s.crest = null; } changed(false);
+});
+$('rSel').addEventListener('change', (e) => {
+  const t = e.target, r = curSpan(); if (!r || t.tagName !== 'INPUT') return; const v = t.value === '' ? null : parseFloat(t.value);
+  snap(); if (t.id === 'rProp') state.prop = Number.isFinite(v) ? N.clamp(v, 1, 200) : null; else if (t.dataset.plan) { const s = restoOf(r.key); if (Number.isFinite(v) && v > 0) s.plan[t.dataset.plan] = v; else delete s.plan[t.dataset.plan]; } else if (t.dataset.imp) restoOf(r.key)[t.dataset.imp] = Number.isFinite(v) && v >= 0 ? v : null;
+  changed();
+});
+$('mOut').addEventListener('click', (e) => { const b = e.target.closest('button[data-del]'); if (b) { snap(); const k = +b.dataset.del; state.measures.splice(k, 1); ui.msel = ui.msel === k ? -1 : ui.msel > k ? ui.msel - 1 : ui.msel; changed(); return; } const r = e.target.closest('tr[data-sec]'); if (r) { ui.msel = ui.msel === +r.dataset.sec ? -1 : +r.dataset.sec; draw(); renderMeasure(); } });
+$('mUndo').addEventListener('click', () => { if (ui.pend.length) { ui.pend.pop(); draw(); renderMeasure(); } else undoLast(); });
+$('mClear').addEventListener('click', () => { snap(); state.measures = []; ui.pend = []; changed(); });
+$('pCopy').addEventListener('click', copyText); $('pPng').addEventListener('click', savePng); $('pCsv').addEventListener('click', saveCsv);
+$('pSheet').addEventListener('click', () => { ui.sheet = !ui.sheet; renderReport(); });
+document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && document.activeElement !== viewer.dom) { e.preventDefault(); undoLast(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden && (scans.upper || scans.lower)) { clearTimeout(stashT); N.stashCase(scans.toCase(), APPNAME); } });
+
+recalc();
+shell.goto(0);
+window.APP = { N, THREE, shell, viewer, scans, state, ui, get calc() { return C; }, get sec() { return secMap; }, recalc, changed, bolton, BOLTON, frame, occlusalView, tname, archOrder, undoLast, loadState, reportText, reportCsv, reportCanvas, autoLandmarks, findCusp, toWorld };
+</script></body></html>

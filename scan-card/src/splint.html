@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splint Card — splint and guard designer</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+ "manifold-3d/manifold.js":"https://cdn.jsdelivr.net/npm/manifold-3d@3.5.5/manifold.js"
+}}
+</script>
+<script src="manifold-wasm.js"></script>
+<style>
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+</style>
+</head>
+<body>
+<script type="module">
+import * as N from './core.js';
+import * as S from './solid.js';
+const THREE = N.THREE;
+
+// ═══ KERNEL:BEGIN ═══  pure geometry (no DOM). The Node tests in dev/tests/splint-card load exactly this block.
+// Frames:  case frame (LPS, see core.js)  →  ARCH frame A (the appliance arch with its teeth pointing +Z; an upper arch is
+// turned 180° about Y)  →  WORK frame W = tilt · A, in which the path of insertion is the Z axis (the appliance is lifted off along +Z).
+// The margin is defined in the arch frame, so tilting the path of insertion does not move it.
+const K = {};
+K.FLIP = N.rotationAbout('y', 180);
+K.archMatrix = (jaw) => (jaw === 'upper' ? K.FLIP.clone() : new THREE.Matrix4());
+/** arch → work: the path of insertion p = (−sin ay, cos ay·sin ax, cos ay·cos ax) (arch frame) is turned onto +Z. Angles in degrees. */
+K.tiltMatrix = (ax, ay) => N.rotationAbout('y', ay || 0).multiply(N.rotationAbout('x', ax || 0));
+/** tilt angles whose path of insertion is the direction v (arch frame, pointing away from the teeth) */
+K.pathFromDir = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return { tiltX: Math.atan2(v[1] / l, v[2] / l) * 180 / Math.PI, tiltY: -Math.asin(N.clamp(v[0] / l, -1, 1)) * 180 / Math.PI }; };
+const sstep = (a, b, x) => { const t = N.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+// ───────────── the arch: a centre line through the tooth row, and the height of the cusp tips along it ─────────────
+/**
+ * meshA: scan in the arch frame.  → arch = { n, step, px, py (centre line every `step` mm, from the patient's right end to the left end),
+ *   tx, ty (unit tangent), ox, oy (unit normal pointing out of the arch = buccal), L (length), top[] (cusp-tip height at each point), zHi }
+ * The tooth row is found as the highest band of the scan, followed round a centre placed behind the arch.
+ */
+K.analyseArch = (meshA) => {
+  const cell = 0.4, hf = N.rasterHeightfield(meshA, { cell, pad: 1 }), { nx, ny, x0, y0, z } = hf;
+  const fin = []; for (let k = 0; k < z.length; k++) if (z[k] > -1e9) fin.push(z[k]);
+  const fs = Float64Array.from(fin).sort(), zHi = fs[Math.floor(fs.length * 0.97)], loc = N.morphField(hf, 5, { op: 'dilate', shape: 'flat' }).z, crown = new Float32Array(z.length);
+  // a point belongs to a crown when it is within 4.5 mm of the highest point within 5 mm of it (so a tilted biting plane or a deep
+  // curve of Spee does not lose the back teeth) and not far below the top of the arch; crown[k] = how far it stands above that limit
+  for (let k = 0; k < z.length; k++) { const lim = Math.max(loc[k] - 4.5, zHi - 8); crown[k] = z[k] > lim ? z[k] - lim : 0; }
+  const xs = []; let yMax = -Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (crown[j * nx + i] > 0) { xs.push(x0 + i * cell); const y = y0 + j * cell; if (y > yMax) yMax = y; }
+  if (xs.length < 50) throw new Error('Could not find the tooth row in this scan.');
+  const xc = Float64Array.from(xs).sort()[xs.length >> 1], yc = yMax + 2;
+  const NB = 180, ws = new Float64Array(NB), rs = new Float64Array(NB);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const cv = crown[j * nx + i]; if (!(cv > 0)) continue;
+    const dx = x0 + i * cell - xc, dy = yc - (y0 + j * cell), b = N.clamp(Math.floor((Math.atan2(dx, dy) / Math.PI + 0.5) * NB), 0, NB - 1), w = cv * cv;
+    ws[b] += w; rs[b] += w * Math.hypot(dx, dy);
+  }
+  const pos = Array.from(ws).filter((w) => w > 0).sort((a, b) => a - b), wMin = 0.12 * (pos[pos.length >> 1] || 0);
+  let b0 = -1, b1 = -1; { let run0 = -1, last = -1, best = 0; for (let b = 0; b < NB; b++) { if (ws[b] > wMin) { if (run0 < 0 || b - last > 30) run0 = b; last = b; if (last - run0 > best) { best = last - run0; b0 = run0; b1 = last; } } } }
+  if (b0 < 0 || b1 - b0 < 8) throw new Error('Could not follow the tooth row in this scan.');
+  const r = new Float64Array(NB); { let prev = -1; for (let b = b0; b <= b1; b++) { if (ws[b] > wMin) { r[b] = rs[b] / ws[b]; if (prev >= 0 && b - prev > 1) for (let q = prev + 1; q < b; q++) r[q] = r[prev] + (r[b] - r[prev]) * (q - prev) / (b - prev); prev = b; } } }
+  for (let pass = 0; pass < 2; pass++) { const c = Float64Array.from(r); for (let b = b0; b <= b1; b++) { let s = 0, n = 0; for (let q = Math.max(b0, b - 4); q <= Math.min(b1, b + 4); q++) { s += c[q]; n++; } r[b] = s / n; } }
+  const raw = []; for (let b = b0; b <= b1; b++) { const th = ((b + 0.5) / NB - 0.5) * Math.PI; raw.push([xc + r[b] * Math.sin(th), yc - r[b] * Math.cos(th)]); }
+  const cum = [0]; for (let k = 1; k < raw.length; k++) cum.push(cum[k - 1] + Math.hypot(raw[k][0] - raw[k - 1][0], raw[k][1] - raw[k - 1][1]));
+  const step = 0.5, L0 = cum[cum.length - 1], n = Math.max(8, Math.floor(L0 / step) + 1), px = new Float32Array(n), py = new Float32Array(n), tx = new Float32Array(n), ty = new Float32Array(n), ox = new Float32Array(n), oy = new Float32Array(n);
+  for (let k = 0, seg = 0; k < n; k++) { const s = Math.min(L0, k * step); while (seg < raw.length - 2 && cum[seg + 1] < s) seg++; const t = (s - cum[seg]) / (cum[seg + 1] - cum[seg] || 1); px[k] = raw[seg][0] + (raw[seg + 1][0] - raw[seg][0]) * t; py[k] = raw[seg][1] + (raw[seg + 1][1] - raw[seg][1]) * t; }
+  for (let k = 0; k < n; k++) { const a = Math.max(0, k - 2), b = Math.min(n - 1, k + 2), dx = px[b] - px[a], dy = py[b] - py[a], l = Math.hypot(dx, dy) || 1; tx[k] = dx / l; ty[k] = dy / l; let qx = ty[k], qy = -tx[k]; if (qx * (px[k] - xc) + qy * (py[k] - yc) < 0) { qx = -qx; qy = -qy; } ox[k] = qx; oy[k] = qy; }
+  const arch = { n, step, px, py, tx, ty, ox, oy, L: (n - 1) * step, xc, yc, zHi, top: new Float32Array(n) };
+  // cusp-tip height along the arch: highest point within 6.5 mm of the centre line, then a running maximum and a smooth
+  const t0 = new Float32Array(n).fill(-Infinity), c = {};
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = z[j * nx + i]; if (!(v > zHi - 11)) continue; K.archCoords(arch, x0 + i * cell, y0 + j * cell, c); if (Math.abs(c.d) > 6.5 || c.over > 0.5) continue; const k = Math.round(c.s / step); if (v > t0[k]) t0[k] = v; }
+  const t1 = new Float32Array(n); for (let k = 0; k < n; k++) { let m = -Infinity; for (let q = Math.max(0, k - 5); q <= Math.min(n - 1, k + 5); q++) if (t0[q] > m) m = t0[q]; t1[k] = Number.isFinite(m) ? m : zHi - 1; }
+  let top = t1; for (let pass = 0; pass < 2; pass++) { const o = new Float32Array(n); for (let k = 0; k < n; k++) { let s = 0, m = 0; for (let q = Math.max(0, k - 7); q <= Math.min(n - 1, k + 7); q++) { s += top[q]; m++; } o[k] = s / m; } top = o; }
+  arch.top = top;
+  let zm = -Infinity; for (let k = 0; k < n; k++) if (top[k] > zm) zm = top[k];
+  { const Pm = meshA.positions, oc = {}; for (let v = 0; v < Pm.length; v += 3) if (Pm[v + 2] > zm) { K.archCoords(arch, Pm[v], Pm[v + 1], oc); if (Math.abs(oc.d) < 7 && oc.over < 1) zm = Pm[v + 2]; } }
+  arch.zMax = zm;                                                    // the highest point of the teeth (top[] is a smoothed profile and lies a little lower)
+  return arch;
+};
+/** (x, y) in the arch frame → out.s (mm along the centre line, clamped to its ends), out.d (mm off it: + buccal, − lingual), out.over (mm beyond an end, else 0) */
+K.archCoords = (arch, x, y, out) => {
+  const { n, px, py, step } = arch; let bi = 0, bd = Infinity;
+  for (let k = 0; k < n; k += 8) { const d = (px[k] - x) * (px[k] - x) + (py[k] - y) * (py[k] - y); if (d < bd) { bd = d; bi = k; } }
+  for (let k = Math.max(0, bi - 8); k <= Math.min(n - 1, bi + 8); k++) { const d = (px[k] - x) * (px[k] - x) + (py[k] - y) * (py[k] - y); if (d < bd) { bd = d; bi = k; } }
+  const tl = (x - px[bi]) * arch.tx[bi] + (y - py[bi]) * arch.ty[bi], s = bi * step + tl;
+  out.d = (x - px[bi]) * arch.ox[bi] + (y - py[bi]) * arch.oy[bi];
+  out.over = s < 0 ? -s : s > arch.L ? s - arch.L : 0; out.s = N.clamp(s, 0, arch.L);
+  return out;
+};
+const archTop = (arch, s) => { const f = N.clamp(s / arch.step, 0, arch.n - 1), i = Math.min(arch.n - 2, Math.floor(f)), t = f - i; return arch.top[i] + (arch.top[i + 1] - arch.top[i]) * t; };
+/** smooth curve through evenly spaced control values (Catmull-Rom); u in 0…1 */
+const ctrlAt = (a, u) => { if (!a || !a.length) return 0; if (a.length === 1) return a[0]; const f = N.clamp(u, 0, 1) * (a.length - 1), i = Math.min(a.length - 2, Math.floor(f)), t = f - i, p0 = a[Math.max(0, i - 1)], p1 = a[i], p2 = a[i + 1], p3 = a[Math.min(a.length - 1, i + 2)]; return 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t); };
+/**
+ * Height of the margin (arch frame) at (x, y): the appliance ends where the tooth or gum surface drops below it.
+ *   mp = { buccal, lingual (mm below the cusp tips), adjB[], adjL[] (local adjustments at evenly spaced control points, + = shorter) }
+ * → out.z (border height; +Infinity where nothing may be covered), out.s, out.d
+ */
+K.borderAt = (arch, mp, x, y, out) => {
+  K.archCoords(arch, x, y, out);
+  if (out.over > (mp.distal ?? 4) || out.d > (mp.reach ?? 11) || -out.d > (mp.reachL ?? Math.max(mp.reach ?? 11, 7 + mp.lingual))) { out.z = Infinity; return out; }
+  const u = out.s / arch.L, top = archTop(arch, out.s), zb = top - mp.buccal + ctrlAt(mp.adjB, u), zl = top - mp.lingual + ctrlAt(mp.adjL, u);
+  out.z = zl + (zb - zl) * sstep(-1.5, 1.5, out.d);
+  return out;
+};
+
+/**
+ * The margin as lines on the scan, for display: where the scan's upper envelope (hfA, arch frame) crosses the margin height.
+ * → [ [[x,y,z], …], … ]  polylines in the arch frame
+ */
+K.marginLines = (hfA, arch, mp) => {
+  const { nx, ny, x0, y0, cell, z } = hfA, g = new Float32Array(nx * ny), B = new Float32Array(nx * ny), o = {};
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; K.borderAt(arch, mp, x0 + i * cell, y0 + j * cell, o); B[k] = o.z; g[k] = o.z === Infinity || !(z[k] > -1e9) ? -1 : z[k] - o.z; }
+  const pts = new Map(), link = new Map();
+  const vert = (a, b) => { const key = a < b ? a * 2 + (b - a === 1 ? 0 : 1) : b * 2 + (a - b === 1 ? 0 : 1); if (!pts.has(key)) { const t = N.clamp(g[a] / (g[a] - g[b]), 0, 1), xa = x0 + (a % nx) * cell, ya = y0 + ((a / nx) | 0) * cell, xb = x0 + (b % nx) * cell, yb = y0 + ((b / nx) | 0) * cell, za = B[a] === Infinity ? B[b] : B[a], zb = B[b] === Infinity ? B[a] : B[b]; pts.set(key, [xa + (xb - xa) * t, ya + (yb - ya) * t, za + (zb - za) * t]); } return key; };
+  const seg = (p, q) => { for (const [u, w] of [[p, q], [q, p]]) { if (!link.has(u)) link.set(u, []); link.get(u).push(w); } };
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    const a = j * nx + i, b = a + 1, c = a + nx + 1, d = a + nx, m = (g[a] >= 0 ? 1 : 0) | (g[b] >= 0 ? 2 : 0) | (g[c] >= 0 ? 4 : 0) | (g[d] >= 0 ? 8 : 0);
+    if (m === 0 || m === 15) continue;
+    const E = [[a, b], [b, c], [c, d], [d, a]], cr = [0, 1, 2, 3].filter((e) => (g[E[e][0]] >= 0) !== (g[E[e][1]] >= 0)).map((e) => vert(E[e][0], E[e][1]));
+    if (cr.length === 2) seg(cr[0], cr[1]); else if (cr.length === 4) { if (g[a] >= 0) { seg(cr[0], cr[1]); seg(cr[2], cr[3]); } else { seg(cr[0], cr[3]); seg(cr[1], cr[2]); } }
+  }
+  const seen = new Set(), out = [];
+  const walk = (s0) => { const line = [s0]; seen.add(s0); let cur = s0; for (;;) { const nb = link.get(cur).find((w) => !seen.has(w)); if (nb === undefined) break; seen.add(nb); line.push(nb); cur = nb; } return line; };
+  for (const k of link.keys()) if (!seen.has(k) && link.get(k).length === 1) out.push(walk(k));                    // open lines first, from an end
+  for (const k of link.keys()) if (!seen.has(k)) { const l = walk(k); l.push(l[0]); out.push(l); }
+  return out.filter((l) => l.length > 4).map((l) => { let P = l.map((k) => pts.get(k).slice()); for (let pass = 0; pass < 2; pass++) { const Q = P.map((q) => q.slice()); for (let i = 1; i < P.length - 1; i++) for (let k = 0; k < 3; k++) Q[i][k] = (P[i - 1][k] + 2 * P[i][k] + P[i + 1][k]) / 4; P = Q; } return P; });
+};
+
+// ───────────── marching cubes (tables are generated, not typed in) ─────────────
+// Corner c of a cell sits at (c&1, c>>1&1, c>>2&1). Edges 0–3 run along x, 4–7 along y, 8–11 along z.
+// A corner is "inside" when its value is < 0. On a face whose corners alternate, the inside corners are joined (never split),
+// which is the same choice for both cells sharing that face, so the surface is always closed and manifold.
+const MC = (() => {
+  const EC = []; for (let q = 0; q < 4; q++) EC.push([(q & 1) << 1 | (q >> 1) << 2, 1 | (q & 1) << 1 | (q >> 1) << 2]);
+  for (let q = 0; q < 4; q++) EC.push([(q & 1) | (q >> 1) << 2, (q & 1) | 2 | (q >> 1) << 2]);
+  for (let q = 0; q < 4; q++) EC.push([(q & 1) | (q >> 1) << 1, (q & 1) | (q >> 1) << 1 | 4]);
+  const eOf = new Map(); EC.forEach(([c0, c1], e) => { eOf.set(c0 * 8 + c1, e); eOf.set(c1 * 8 + c0, e); });
+  const FACES = [[0, 2, 6, 4], [1, 3, 7, 5], [0, 1, 5, 4], [2, 3, 7, 6], [0, 1, 3, 2], [4, 5, 7, 6]];
+  const cp = (c) => [c & 1, (c >> 1) & 1, (c >> 2) & 1], mid = (e) => { const a = cp(EC[e][0]), b = cp(EC[e][1]); return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]; };
+  const start = new Uint16Array(257), tris = [];
+  for (let m = 0; m < 256; m++) {
+    start[m] = tris.length; const ins = (c) => (m >> c) & 1, nb = new Map(), link = (e1, e2) => { for (const [x, y] of [[e1, e2], [e2, e1]]) { if (!nb.has(x)) nb.set(x, []); nb.get(x).push(y); } };
+    for (const F of FACES) {
+      const E = [0, 1, 2, 3].map((i) => eOf.get(F[i] * 8 + F[(i + 1) % 4])), cr = [0, 1, 2, 3].filter((i) => ins(F[i]) !== ins(F[(i + 1) % 4]));
+      if (cr.length === 2) link(E[cr[0]], E[cr[1]]);
+      else if (cr.length === 4) for (let i = 0; i < 4; i++) if (!ins(F[i])) link(E[(i + 3) % 4], E[i]);        // cut off each outside corner
+    }
+    const seen = new Set();
+    for (const e0 of nb.keys()) {
+      if (seen.has(e0)) continue; const loop = [e0]; seen.add(e0); let prev = -1, cur = e0;
+      for (;;) { const o = nb.get(cur), nx = o[0] !== prev && !seen.has(o[0]) ? o[0] : !seen.has(o[1]) ? o[1] : -1; if (nx < 0) break; loop.push(nx); seen.add(nx); prev = cur; cur = nx; }
+      const P = loop.map(mid), n = [0, 0, 0]; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); }
+      let dir = 0; for (const e of loop) { const ci = ins(EC[e][0]) ? EC[e][0] : EC[e][1], co = ci === EC[e][0] ? EC[e][1] : EC[e][0], a = cp(ci), b = cp(co); dir += n[0] * (b[0] - a[0]) + n[1] * (b[1] - a[1]) + n[2] * (b[2] - a[2]); }
+      if (dir < 0) loop.reverse();
+      for (let i = 1; i + 1 < loop.length; i++) tris.push(loop[0], loop[i], loop[i + 1]);
+    }
+  }
+  start[256] = tris.length;
+  return { start, tris: Int8Array.from(tris) };
+})();
+/**
+ * Surface of { value < 0 } on a regular grid. g = { nx, ny, nz, x0, y0, z0, h, v: Float32Array(nx·ny·nz) } (node (i,j,k) at x0+i·h …).
+ * Triangles face outward (towards positive values). The surface is closed provided the outermost nodes are all ≥ 0.
+ * tOf(n0, n1) may give the crossing position (0…1) along the edge from node n0 to n1 when `v` is not linear between them.
+ * → { positions: Float32Array, indices: Uint32Array }
+ */
+K.marchingCubes = (g, tOf = null) => {
+  const { nx, ny, nz, x0, y0, z0, h, v } = g, sxy = nx * ny, P = [], T = [];
+  let xa = new Int32Array(sxy).fill(-1), ya = new Int32Array(sxy).fill(-1), xb = new Int32Array(sxy).fill(-1), yb = new Int32Array(sxy).fill(-1); const zc = new Int32Array(sxy), ev = new Int32Array(12);
+  const vert = (n0, ax) => { const n1 = n0 + (ax === 0 ? 1 : ax === 1 ? nx : sxy), a = v[n0], b = v[n1], t = N.clamp(tOf ? tOf(n0, n1) : a / (a - b), 0.002, 0.998), i = n0 % nx, j = ((n0 / nx) | 0) % ny, k = (n0 / sxy) | 0; P.push(x0 + (i + (ax === 0 ? t : 0)) * h, y0 + (j + (ax === 1 ? t : 0)) * h, z0 + (k + (ax === 2 ? t : 0)) * h); return P.length / 3 - 1; };
+  for (let k = 0; k < nz - 1; k++) {
+    zc.fill(-1); xb.fill(-1); yb.fill(-1);
+    for (let j = 0; j < ny - 1; j++) {
+      let n0 = k * sxy + j * nx;
+      for (let i = 0; i < nx - 1; i++, n0++) {
+        const m = (v[n0] < 0 ? 1 : 0) | (v[n0 + 1] < 0 ? 2 : 0) | (v[n0 + nx] < 0 ? 4 : 0) | (v[n0 + nx + 1] < 0 ? 8 : 0) | (v[n0 + sxy] < 0 ? 16 : 0) | (v[n0 + sxy + 1] < 0 ? 32 : 0) | (v[n0 + sxy + nx] < 0 ? 64 : 0) | (v[n0 + sxy + nx + 1] < 0 ? 128 : 0);
+        if (m === 0 || m === 255) continue;
+        const c = j * nx + i; ev.fill(-1);
+        for (let q = MC.start[m]; q < MC.start[m + 1]; q++) {
+          const e = MC.tris[q]; let id = ev[e];
+          if (id < 0) {
+            if (e < 4) { const cc = c + (e & 1) * nx, tab = e >> 1 ? xb : xa; id = tab[cc]; if (id < 0) id = tab[cc] = vert(n0 + (e & 1) * nx + (e >> 1) * sxy, 0); }
+            else if (e < 8) { const cc = c + (e & 1), tab = (e - 4) >> 1 ? yb : ya; id = tab[cc]; if (id < 0) id = tab[cc] = vert(n0 + (e & 1) + ((e - 4) >> 1) * sxy, 1); }
+            else { const cc = c + (e & 1) + ((e - 8) >> 1) * nx; id = zc[cc]; if (id < 0) id = zc[cc] = vert(n0 + (e & 1) + ((e - 8) >> 1) * nx, 2); }
+            ev[e] = id;
+          }
+          T.push(id);
+        }
+      }
+    }
+    const tx = xa, ty = ya; xa = xb; ya = yb; xb = tx; yb = ty;
+  }
+  return { positions: Float32Array.from(P), indices: Uint32Array.from(T), colors: null };
+};
+
+// ───────────── exact distance to the scan, in a thin band round its surface ─────────────
+/**
+ * Signed distance from grid nodes to a closed, outward-facing mesh, exact (point-to-triangle, sign from angle-weighted
+ * pseudo-normals), computed only for nodes within `margin` of the triangles flagged in `use`.
+ * → { nx, ny, nz, x0, y0, z0, h, v: Float32Array (distance, + outside; 1e9 where not computed) }
+ */
+K.distanceBand = (mesh, use, h, margin) => {
+  const P = mesh.positions, I = mesh.indices, nF = I.length / 3, nV = P.length / 3, twin = N.buildTwins(I).twin;
+  const fn = new Float32Array(nF * 3), vn = new Float32Array(nV * 3), en = new Float32Array(nF * 9), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let f = 0; f < nF; f++) {
+    const ia = I[3 * f] * 3, ib = I[3 * f + 1] * 3, ic = I[3 * f + 2] * 3, ux = P[ib] - P[ia], uy = P[ib + 1] - P[ia + 1], uz = P[ib + 2] - P[ia + 2], vx = P[ic] - P[ia], vy = P[ic + 1] - P[ia + 1], vz = P[ic + 2] - P[ia + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.hypot(x, y, z) || 1; fn[3 * f] = x / l; fn[3 * f + 1] = y / l; fn[3 * f + 2] = z / l;
+    const wx = P[ic] - P[ib], wy = P[ic + 1] - P[ib + 1], wz = P[ic + 2] - P[ib + 2], lu = Math.hypot(ux, uy, uz) || 1, lv = Math.hypot(vx, vy, vz) || 1, lw = Math.hypot(wx, wy, wz) || 1;
+    const aA = Math.acos(N.clamp((ux * vx + uy * vy + uz * vz) / (lu * lv), -1, 1)), aB = Math.acos(N.clamp(-(ux * wx + uy * wy + uz * wz) / (lu * lw), -1, 1)), aC = Math.PI - aA - aB;
+    for (let k = 0; k < 3; k++) { vn[ia + k] += aA * fn[3 * f + k]; vn[ib + k] += aB * fn[3 * f + k]; vn[ic + k] += aC * fn[3 * f + k]; }
+    if (use[f]) for (const q of [ia, ib, ic]) for (let k = 0; k < 3; k++) { if (P[q + k] < lo[k]) lo[k] = P[q + k]; if (P[q + k] > hi[k]) hi[k] = P[q + k]; }
+  }
+  for (let hE = 0; hE < nF * 3; hE++) { const f = (hE / 3) | 0, g = twin[hE] >= 0 ? (twin[hE] / 3) | 0 : f; for (let k = 0; k < 3; k++) en[3 * hE + k] = fn[3 * f + k] + fn[3 * g + k]; }
+  const pad = margin + 2 * h, x0 = lo[0] - pad, y0 = lo[1] - pad, z0 = lo[2] - pad, nx = Math.ceil((hi[0] + pad - x0) / h) + 1, ny = Math.ceil((hi[1] + pad - y0) / h) + 1, nz = Math.ceil((hi[2] + pad - z0) / h) + 1, sxy = nx * ny;
+  const v = new Float32Array(sxy * nz).fill(1e9), inv = 1 / h;
+  for (let f = 0; f < nF; f++) {
+    if (!use[f]) continue;
+    const ia = I[3 * f] * 3, ib = I[3 * f + 1] * 3, ic = I[3 * f + 2] * 3, ax = P[ia], ay = P[ia + 1], az = P[ia + 2], bx = P[ib], by = P[ib + 1], bz = P[ib + 2], cx = P[ic], cy = P[ic + 1], cz = P[ic + 2];
+    const nxn = fn[3 * f], nyn = fn[3 * f + 1], nzn = fn[3 * f + 2], abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const i0 = Math.max(0, Math.ceil((Math.min(ax, bx, cx) - margin - x0) * inv)), i1 = Math.min(nx - 1, Math.floor((Math.max(ax, bx, cx) + margin - x0) * inv));
+    const j0 = Math.max(0, Math.ceil((Math.min(ay, by, cy) - margin - y0) * inv)), j1 = Math.min(ny - 1, Math.floor((Math.max(ay, by, cy) + margin - y0) * inv));
+    const k0 = Math.max(0, Math.ceil((Math.min(az, bz, cz) - margin - z0) * inv)), k1 = Math.min(nz - 1, Math.floor((Math.max(az, bz, cz) + margin - z0) * inv));
+    for (let k = k0; k <= k1; k++) { const pz = z0 + k * h; for (let j = j0; j <= j1; j++) { const py = y0 + j * h; let n = k * sxy + j * nx + i0; for (let i = i0; i <= i1; i++, n++) {
+      const px = x0 + i * h, apx = px - ax, apy = py - ay, apz = pz - az, pd = apx * nxn + apy * nyn + apz * nzn, cur = Math.abs(v[n]);
+      if (pd > margin || pd < -margin || pd >= cur || -pd >= cur) continue;
+      // closest point on the triangle (Ericson) and which feature it lies on: 0 face, 1–3 corner A/B/C, 4–6 edge AB/BC/CA
+      let qx, qy, qz, reg; const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+      if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; reg = 1; } else {
+        const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+        if (d3 >= 0 && d4 <= d3) { qx = bx; qy = by; qz = bz; reg = 2; } else {
+          const vc = d1 * d4 - d3 * d2;
+          if (vc <= 0 && d1 >= 0 && d3 <= 0) { const t = d1 / (d1 - d3); qx = ax + abx * t; qy = ay + aby * t; qz = az + abz * t; reg = 4; } else {
+            const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+            if (d6 >= 0 && d5 <= d6) { qx = cx; qy = cy; qz = cz; reg = 3; } else {
+              const vb = d5 * d2 - d1 * d6;
+              if (vb <= 0 && d2 >= 0 && d6 <= 0) { const t = d2 / (d2 - d6); qx = ax + acx * t; qy = ay + acy * t; qz = az + acz * t; reg = 6; } else {
+                const va = d3 * d6 - d5 * d4;
+                if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const t = (d4 - d3) / (d4 - d3 + d5 - d6); qx = bx + (cx - bx) * t; qy = by + (cy - by) * t; qz = bz + (cz - bz) * t; reg = 5; }
+                else { const dn = 1 / (va + vb + vc), s = vb * dn, t = vc * dn; qx = ax + abx * s + acx * t; qy = ay + aby * s + acy * t; qz = az + abz * s + acz * t; reg = 0; }
+              }
+            }
+          }
+        }
+      }
+      const rx = px - qx, ry = py - qy, rz = pz - qz, d = Math.sqrt(rx * rx + ry * ry + rz * rz);
+      if (d >= cur || d > margin) continue;
+      let sx, sy, sz; if (reg === 0) { sx = nxn; sy = nyn; sz = nzn; } else if (reg < 4) { const q = reg === 1 ? ia : reg === 2 ? ib : ic; sx = vn[q]; sy = vn[q + 1]; sz = vn[q + 2]; } else { const q = 3 * (3 * f + reg - 4); sx = en[q]; sy = en[q + 1]; sz = en[q + 2]; }
+      v[n] = rx * sx + ry * sy + rz * sz >= 0 ? d : -d;
+    } } }
+  }
+  return { nx, ny, nz, x0, y0, z0, h, v };
+};
+
+// ───────────── undercuts ─────────────
+const offsetCache = new Map();
+/** grid offsets (di, dj) within `radius` cells, nearest first */
+const sortedOffsets = (radius) => { const k = Math.ceil(radius); let o = offsetCache.get(k); if (o) return o; const a = []; for (let dj = -k; dj <= k; dj++) for (let di = -k; di <= k; di++) { const d2 = di * di + dj * dj; if (d2 <= k * k) a.push([d2, di, dj]); } a.sort((p, q) => p[0] - q[0]); o = { n: a.length, di: Int16Array.from(a, (e) => e[1]), dj: Int16Array.from(a, (e) => e[2]), d: Float32Array.from(a, (e) => Math.sqrt(e[0])) }; offsetCache.set(k, o); return o; };
+/**
+ * Undercut depth of every vertex of `mw` (work frame: the path of insertion is +Z): how far it lies, measured sideways, inside the
+ * shadow of the scan above it. 0 = not undercut. `hf` = fine upper envelope of the same mesh (rasterHeightfield, mode max).
+ */
+K.undercutDepth = (mw, hf, maxDepth = 2.5) => {
+  const P = mw.positions, nV = P.length / 3, out = new Float32Array(nV), { nx, ny, x0, y0, cell, z } = hf, off = sortedOffsets(maxDepth / cell), tol = 0.03;
+  for (let v = 0; v < nV; v++) {
+    const x = P[3 * v], y = P[3 * v + 1], zz = P[3 * v + 2] + tol, i = Math.round((x - x0) / cell), j = Math.round((y - y0) / cell);
+    if (i < 1 || j < 1 || i >= nx - 1 || j >= ny - 1) continue;
+    if (!(N.sampleField(hf, x, y) > zz + 0.06)) continue;                     // nothing above this vertex
+    let dep = maxDepth;
+    for (let q = 1; q < off.n; q++) { const ii = i + off.di[q], jj = j + off.dj[q]; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) { dep = off.d[q] * cell; break; } if (!(z[jj * nx + ii] > zz)) { dep = off.d[q] * cell; break; } }
+    out[v] = Math.max(0, dep - cell * 0.5);
+  }
+  return out;
+};
+
+// ───────────── the cavity: what the appliance must stay out of ─────────────
+/**
+ * Signed sideways distance (mm) from (x, y) at height z to the edge of the scan's shadow at that height:
+ * + inside the shadow (part of the scan is above this point), − outside. hf = fine upper envelope. Clamped to ±rmax.
+ */
+const lateral = (hf, off, x, y, z, rmax) => {
+  const { nx, ny, x0, y0, cell, z: H } = hf, i = Math.round((x - x0) / cell), j = Math.round((y - y0) / cell);
+  if (i < 0 || j < 0 || i >= nx || j >= ny) return -rmax;
+  const ins = H[j * nx + i] > z, fx = (x - x0) / cell - i, fy = (y - y0) / cell - j; let best = Infinity, stop = Infinity;
+  for (let q = 1; q < off.n; q++) {
+    const d = off.d[q]; if (d > stop || d * cell > rmax + cell) break;
+    const ii = i + off.di[q], jj = j + off.dj[q], hv = ii < 0 || jj < 0 || ii >= nx || jj >= ny ? -Infinity : H[jj * nx + ii];
+    if ((hv > z) !== ins) { const t = Math.hypot(off.di[q] - fx, off.dj[q] - fy); if (t < best) best = t; if (stop === Infinity) stop = d + 1.5; }
+  }
+  const r = Math.min(rmax, Math.max(0, best - 0.5) * cell); return ins ? r : -r;
+};
+/**
+ * The cavity as one closed solid (work frame), by marching cubes on a grid of `h` mm:
+ *   inside the scan  ∪  closer to the scan than the fit clearance (exact distance to its triangles)
+ *   ∪  fin relief: grooves and notches too narrow for more than a thin fin of the appliance (see o.fin)
+ *   ∪  blocked-out undercut: in the shadow of the scan and more than `retention` mm sideways from the edge of that shadow
+ *      (narrow gaps in the shadow, up to 2 × (retention + 0.4) mm wide, count as shadow).
+ * Only built from the cusp tips down to `zlim` (a field on the grid's columns, +Infinity = not needed there).
+ *   sol = closed scan solid (S.scanToSolid), hf = fine upper envelope of the scan, use = Uint8Array per triangle of sol
+ * → { mesh, band (the distance grid, kept to tell fit surface from blocked-out wall), stats }
+ */
+K.cavity = (sol, hf, use, zlimAt, o) => {
+  const { h, clearance: c, retention: r } = o, g = o.band || K.distanceBand(sol, use, h, h + Math.max(c + 0.12, 0.33)), { nx, ny, nz, x0, y0, z0, v: sd } = g, sxy = nx * ny, n = sxy * nz;
+  // Depth into the shadow is measured from the edge of the shadow widened by w, with the limit raised to w + r: the same thing on a
+  // straight wall, but a narrow neck of shadow (under the contact point between two teeth) then stays blocked right across, so no
+  // strand of the appliance can pass under a contact. Only points in the scan's real shadow are ever blocked out.
+  const w = r + (o.neck ?? 0.4), rB = r + w, hfW = N.morphField(hf, w, { op: 'dilate', shape: 'flat' });      // (the same at half resolution is quicker, but relieves too much above the survey line: fit error p95 0.08)
+  const phi = new Float32Array(n).fill(1), lab = new Int8Array(n), Rs = rB + 1.6 * h, RsT = r + 1.6 * h, off = sortedOffsets(Rs / hf.cell + 2), fc = hf.cell;
+  // Fin relief: the scan's upper envelope grown by the clearance, then "closed" with a ball of radius o.fin. Wherever that fills a
+  // groove or the notch between two teeth, the appliance would only be a fin thinner than about 2 × o.fin, so the cavity takes it.
+  const fin = o.fin ?? 0.25, hg = fin > 0 ? N.morphField(hf, c, { op: 'dilate' }) : null, cl = fin > 0 ? N.morphField(N.morphField(hf, c + fin, { op: 'dilate' }), fin, { op: 'erode' }) : null;
+  // per column: lower limit, the envelope there, and the lowest / highest envelope within reach (so most nodes need no search)
+  // The shadow that the block-out works in: the scan's envelope, and over it the slits that the fin relief gives up (below) with a
+  // rim of the clearance and a little around them. Without this, a strip about 0.15 mm wide along each side of such a slit (outside
+  // the tooth's shadow or within the retention depth of its edge, yet too near the tooth for the relief to claim it) was left
+  // standing as a paper-thin sheet between the slit and the block-out behind it: a perforated septum, and a handle in the appliance.
+  // Whatever lies under the raised rim is within the clearance of the scan, so nothing above the survey line is given up for it.
+  const hfT = !cl || o.slit === false ? hf : (() => {
+    const zz = Float32Array.from(hf.z), nxf = hf.nx, nyf = hf.ny, flag = new Uint8Array(zz.length), tmp = new Uint8Array(zz.length), kq = Math.ceil(c / fc) + 2;
+    for (let k = 0; k < zz.length; k++) if (cl.z[k] - hg.z[k] > 0.05) flag[k] = 1;
+    for (let j = 0; j < nyf; j++) for (let i = 0; i < nxf; i++) if (flag[j * nxf + i]) for (let a2 = Math.max(0, i - kq); a2 <= Math.min(nxf - 1, i + kq); a2++) tmp[j * nxf + a2] = 1;
+    for (let j = 0; j < nyf; j++) for (let i = 0; i < nxf; i++) if (tmp[j * nxf + i]) for (let b2 = Math.max(0, j - kq); b2 <= Math.min(nyf - 1, j + kq); b2++) flag[b2 * nxf + i] = 1;
+    for (let k = 0; k < zz.length; k++) if (flag[k] && cl.z[k] - 0.03 > zz[k]) zz[k] = cl.z[k] - 0.03;
+    return { ...hf, z: zz }; })();
+  const zl = new Float32Array(sxy), env = new Float32Array(sxy), eLo = new Float32Array(sxy), eHi = new Float32Array(sxy), rc = Math.ceil((Rs + h * 0.5) / fc);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = x0 + i * h, y = y0 + j * h, q = j * nx + i; zl[q] = zlimAt(x, y);
+    if (zl[q] === Infinity) continue;
+    const fi = Math.round((x - hf.x0) / fc), fj = Math.round((y - hf.y0) / fc); let lo = Infinity, hi = -Infinity;
+    for (let b = Math.max(0, fj - rc); b <= Math.min(hf.ny - 1, fj + rc); b++) for (let a = Math.max(0, fi - rc); a <= Math.min(hf.nx - 1, fi + rc); a++) { const hv = hfW.z[b * hf.nx + a]; if (hv < lo) lo = hv; if (hv > hi) hi = hv; }
+    if (fi < rc || fj < rc || fi >= hf.nx - rc || fj >= hf.ny - rc) lo = -Infinity;
+    eLo[q] = lo; eHi[q] = hi; env[q] = fi >= 0 && fj >= 0 && fi < hf.nx && fj < hf.ny ? hf.z[fj * hf.nx + fi] : -Infinity;
+  }
+  // 1. nodes with a known distance: inside / outside from its sign. lab: 1 inside the scan, 2 outside, 3 unknown (under the envelope, far from the surface)
+  let nBand = 0;
+  for (let k = 1; k < nz - 1; k++) { const z = z0 + k * h; for (let q = 0; q < sxy; q++) { if (!(z >= zl[q])) continue; const i = q % nx, j = (q / nx) | 0; if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) continue; const t = k * sxy + q, d = sd[t]; if (d < 1e8) { lab[t] = d < 0 ? 1 : 2; nBand++; } else lab[t] = z >= env[q] ? 2 : 3; } }
+  // 2. unknown nodes: each connected clump takes the sign most of its neighbours with a known distance have
+  { const queue = new Int32Array(n), NB = [1, -1, nx, -nx, sxy, -sxy];
+    for (let s0 = 0; s0 < n; s0++) { if (lab[s0] !== 3) continue; let head = 0, tail = 0, vin = 0, vout = 0; queue[tail++] = s0; lab[s0] = 4;
+      while (head < tail) { const t = queue[head++]; for (const dq of NB) { const u = t + dq, l = lab[u]; if (l === 3) { lab[u] = 4; queue[tail++] = u; } else if (sd[u] < 1e8) { if (sd[u] < 0) vin++; else vout++; } } }
+      const res = vin >= vout && vin > 0 ? 1 : 2; for (let q = 0; q < tail; q++) lab[queue[q]] = res; } }
+  // 3. values. Fit clearance: where o.sharp flags a node the surface is this one (set a little further out, because flat facets cut
+  //    inside a sharply curved offset); elsewhere on the visible side of the scan its own moved triangles supply the surface, and this
+  //    one is kept 0.3 mm inside the scan, out of their way (two nearly coincident surfaces make the union slow). Then block-out.
+  let nSearch = 0;
+  for (let k = 1; k < nz - 1; k++) { const z = z0 + k * h; for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const q = j * nx + i, t = k * sxy + q, l = lab[t]; if (!l) continue;
+    let f; const d = sd[t];
+    if (d < 1e8) { f = d - c; if (o.own && o.sharp && !o.sharp[t] && z > env[q] - 0.25) f = d + 0.3; else if (o.sharp && o.sharp[t] && d > -h) { f -= o.extra || 0; const a1 = sd[t + 1], a2 = sd[t - 1], a3 = sd[t + nx], a4 = sd[t - nx], a5 = sd[t + sxy], a6 = sd[t - sxy]; if (a1 < 1e8 && a2 < 1e8 && a3 < 1e8 && a4 < 1e8 && a5 < 1e8 && a6 < 1e8) f -= N.clamp((a1 + a2 + a3 + a4 + a5 + a6 - 6 * d) / 4, 0, 0.1); } }
+    else f = l === 1 ? -0.5 * h : 0.5 * h;
+    if (l === 2 && z < eHi[q]) {                                   // outside the scan but possibly in its shadow
+      const x = x0 + i * h, y = y0 + j * h, lamT = lateral(hfT, off, x, y, z, RsT);                             // how far inside the scan's own shadow
+      if (lamT > -RsT) {
+        let fb = r - 0.03 - lamT; nSearch++;                                                                 // plain rule: deeper than the retention depth
+        if (lamT > 0.06) { const lamW = z < eLo[q] ? Rs : lateral(hfW, off, x, y, z, Rs); if (rB - lamW < fb) fb = Math.max(0.06 - lamT, rB - lamW); }      // neck rule
+        if (fb < f) f = fb;
+      }
+    }
+    if (cl && l === 2) {                                           // fin relief (only where the closing rose clear of the grown envelope)
+      const fi = Math.round((x0 + i * h - hf.x0) / fc), fj = Math.round((y0 + j * h - hf.y0) / fc);      // nearest node on purpose: interpolating across the steep sides of the envelope left strands of appliance between teeth
+      if (fi >= 0 && fj >= 0 && fi < hf.nx && fj < hf.ny) { const kk = fj * hf.nx + fi, top = cl.z[kk]; if (top - hg.z[kk] > 0.05 && z - top + 0.03 < f) f = z - top + 0.03; }
+    }
+    phi[t] = f;
+  } }
+  // 4. in the scan's shadow (between teeth, under bulges) a sheet or strand of appliance one node thick with cavity on both sides of it
+  //    cannot be meshed or printed: give it to the cavity. (Open grooves seen from above are dealt with by the fin relief.)
+  let nThin = 0;
+  { const DIR = []; for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const q = dx + nx * dy + sxy * dz; if (q > 0) DIR.push(q); }
+    for (let pass = 0; pass < 2; pass++) { const flip = [];
+      for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) { let t = k * sxy + j * nx + 1; for (let i = 1; i < nx - 1; i++, t++) { if (!lab[t] || phi[t] < 0 || !(z0 + k * h < env[j * nx + i] - 0.05)) continue; for (const q of DIR) if (phi[t + q] < 0 && phi[t - q] < 0) { flip.push(t); break; } } }
+      for (const t of flip) phi[t] = -0.02; nThin += flip.length; if (!flip.length) break; } }
+  const mesh = K.marchingCubes({ ...g, v: phi });
+  return { mesh, band: g, stats: { nodes: n, band: nBand, searches: nSearch, thin: nThin, tris: mesh.indices.length / 3 } };
+};
+/** trilinear sample of a distance band (1e9 where it has no value) */
+const bandAt = (g, x, y, z) => { const fx = (x - g.x0) / g.h, fy = (y - g.y0) / g.h, fz = (z - g.z0) / g.h, i = Math.floor(fx), j = Math.floor(fy), k = Math.floor(fz); if (i < 0 || j < 0 || k < 0 || i >= g.nx - 1 || j >= g.ny - 1 || k >= g.nz - 1) return 1e9; const tx = fx - i, ty = fy - j, tz = fz - k, sxy = g.nx * g.ny, b = k * sxy + j * g.nx + i, v = g.v; let s = 0; for (let q = 0; q < 8; q++) { const val = v[b + (q & 1) + ((q >> 1) & 1) * g.nx + (q >> 2) * sxy]; if (val > 1e8) return 1e9; s += val * (q & 1 ? tx : 1 - tx) * ((q >> 1) & 1 ? ty : 1 - ty) * (q >> 2 ? tz : 1 - tz); } return s; };
+
+// ───────────── the scan's own triangles, moved out by the fit clearance ─────────────
+/** squared distance from point p to triangle abc (Ericson, Real-Time Collision Detection §5.1.5) */
+const ptTri2 = (px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) => {
+  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz; let qx, qy, qz;
+  if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; } else {
+    const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) { qx = bx; qy = by; qz = bz; } else {
+      const vc = d1 * d4 - d3 * d2;
+      if (vc <= 0 && d1 >= 0 && d3 <= 0) { const t = d1 / (d1 - d3); qx = ax + abx * t; qy = ay + aby * t; qz = az + abz * t; } else {
+        const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+        if (d6 >= 0 && d5 <= d6) { qx = cx; qy = cy; qz = cz; } else {
+          const vb = d5 * d2 - d1 * d6;
+          if (vb <= 0 && d2 >= 0 && d6 <= 0) { const t = d2 / (d2 - d6); qx = ax + acx * t; qy = ay + acy * t; qz = az + acz * t; } else {
+            const va = d3 * d6 - d5 * d4;
+            if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const t = (d4 - d3) / (d4 - d3 + d5 - d6); qx = bx + (cx - bx) * t; qy = by + (cy - by) * t; qz = bz + (cz - bz) * t; }
+            else { const dn = 1 / (va + vb + vc), u = vb * dn, w = vc * dn; qx = ax + abx * u + acx * w; qy = ay + aby * u + acy * w; qz = az + abz * u + acz * w; }
+          }
+        }
+      }
+    }
+  }
+  return (px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz);
+};
+/**
+ * Offset the closed scan solid by `c` using its own triangles: every vertex moves along a mitre normal (unit average normal
+ * divided by its smallest dot product with the incident face normals, capped at 2×), so each triangle plane moves out by c.
+ * That is exact on smooth and convex parts (cusps, incisal edges). In grooves and narrow gaps the moved surface would run
+ * into itself, so there each vertex moves by less: at most 0.45 × its distance to the part of the scan facing it, and never
+ * so far that its new position is closer than its own movement to a triangle it does not belong to. Whatever that leaves
+ * short of the clearance is supplied by the marching-cubes cavity.
+ * Only vertices flagged in `inUse` are moved. → { positions, free, limited (Uint8Array: moved by less than asked), nLimited }
+ */
+K.growScan = (mesh, inUse, c) => {
+  const P = mesh.positions, I = mesh.indices, nV = P.length / 3, nF = I.length / 3, fn = new Float32Array(nF * 3), vn = new Float32Array(nV * 3), md = new Float32Array(nV).fill(1);
+  for (let f = 0; f < nF; f++) {
+    const a = I[3 * f] * 3, b = I[3 * f + 1] * 3, d = I[3 * f + 2] * 3, ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[d] - P[a], vy = P[d + 1] - P[a + 1], vz = P[d + 2] - P[a + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.hypot(x, y, z) || 1; fn[3 * f] = x / l; fn[3 * f + 1] = y / l; fn[3 * f + 2] = z / l;
+    for (const v of [a, b, d]) { vn[v] += x; vn[v + 1] += y; vn[v + 2] += z; }
+  }
+  for (let i = 0; i < nV * 3; i += 3) { const l = Math.hypot(vn[i], vn[i + 1], vn[i + 2]) || 1; vn[i] /= l; vn[i + 1] /= l; vn[i + 2] /= l; }
+  for (let f = 0; f < nF; f++) for (let k = 0; k < 3; k++) { const v = I[3 * f + k], dt = vn[3 * v] * fn[3 * f] + vn[3 * v + 1] * fn[3 * f + 1] + vn[3 * v + 2] * fn[3 * f + 2]; if (dt < md[v]) md[v] = dt; }
+  // triangles of the used part, bucketed on a coarse grid
+  const cs = 0.5, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let v = 0; v < nV; v++) if (inUse[v]) for (let k = 0; k < 3; k++) { if (P[3 * v + k] < lo[k]) lo[k] = P[3 * v + k]; if (P[3 * v + k] > hi[k]) hi[k] = P[3 * v + k]; }
+  const gx = Math.floor((hi[0] - lo[0]) / cs) + 3, gy = Math.floor((hi[1] - lo[1]) / cs) + 3, gz = Math.floor((hi[2] - lo[2]) / cs) + 3, ox = lo[0] - cs, oy = lo[1] - cs, oz = lo[2] - cs, head = new Int32Array(gx * gy * gz).fill(-1), nxt = [], tri = [];
+  const ci = (x) => N.clamp(Math.floor((x - ox) / cs), 0, gx - 1), cj = (y) => N.clamp(Math.floor((y - oy) / cs), 0, gy - 1), ck = (z) => N.clamp(Math.floor((z - oz) / cs), 0, gz - 1);
+  for (let f = 0; f < nF; f++) {
+    const a = I[3 * f], b = I[3 * f + 1], d = I[3 * f + 2]; if (!(inUse[a] || inUse[b] || inUse[d])) continue;
+    const i0 = ci(Math.min(P[3 * a], P[3 * b], P[3 * d])), i1 = ci(Math.max(P[3 * a], P[3 * b], P[3 * d])), j0 = cj(Math.min(P[3 * a + 1], P[3 * b + 1], P[3 * d + 1])), j1 = cj(Math.max(P[3 * a + 1], P[3 * b + 1], P[3 * d + 1])), k0 = ck(Math.min(P[3 * a + 2], P[3 * b + 2], P[3 * d + 2])), k1 = ck(Math.max(P[3 * a + 2], P[3 * b + 2], P[3 * d + 2]));
+    for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = i + gx * (j + gy * k); tri.push(f); nxt.push(head[q]); head[q] = tri.length - 1; }
+  }
+  /** smallest squared distance from (x,y,z) to triangles within r that do not contain vertex v (and, with `facing`, whose normal opposes v's); stops early below `stop` */
+  const near2 = (x, y, z, r, v, facing, stop) => {
+    let best = r * r; const i0 = ci(x - r), i1 = ci(x + r), j0 = cj(y - r), j1 = cj(y + r), k0 = ck(z - r), k1 = ck(z + r);
+    for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (let e = head[i + gx * (j + gy * k)]; e >= 0; e = nxt[e]) {
+      const f = tri[e], a = I[3 * f], b = I[3 * f + 1], d = I[3 * f + 2]; if (a === v || b === v || d === v) continue;
+      if (facing && fn[3 * f] * vn[3 * v] + fn[3 * f + 1] * vn[3 * v + 1] + fn[3 * f + 2] * vn[3 * v + 2] > 0.6) continue;
+      const d2 = ptTri2(x, y, z, P[3 * a], P[3 * a + 1], P[3 * a + 2], P[3 * b], P[3 * b + 1], P[3 * b + 2], P[3 * d], P[3 * d + 1], P[3 * d + 2]);
+      if (d2 < best) { best = d2; if (best < stop) return best; }
+    }
+    return best;
+  };
+  const kv = new Float32Array(nV), k0 = new Float32Array(nV);
+  for (let v = 0; v < nV; v++) { if (!inUse[v]) continue; k0[v] = c / Math.max(0.5, md[v]); const g = Math.sqrt(near2(P[3 * v], P[3 * v + 1], P[3 * v + 2], 2.3 * k0[v], v, true, 0)); kv[v] = Math.min(k0[v], 0.45 * g); }
+  for (let pass = 0; pass < 5; pass++) {                           // no moved vertex may end up closer to another part of the scan than it was moved
+    const bad = new Uint8Array(nV); let nBad = 0;
+    for (let v = 0; v < nV; v++) { const k = kv[v]; if (k < 0.004) continue; const lim = (k - 0.003) * (k - 0.003); if (near2(P[3 * v] + vn[3 * v] * k, P[3 * v + 1] + vn[3 * v + 1] * k, P[3 * v + 2] + vn[3 * v + 2] * k, k, v, false, lim) < lim) { bad[v] = 1; nBad++; } }
+    if (!nBad) break;
+    for (let f = 0; f < nF; f++) { const a = I[3 * f], b = I[3 * f + 1], d = I[3 * f + 2]; if (bad[a] & 1 || bad[b] & 1 || bad[d] & 1) { bad[a] |= 2; bad[b] |= 2; bad[d] |= 2; } }
+    for (let v = 0; v < nV; v++) if (bad[v]) kv[v] *= bad[v] & 1 ? 0.55 : 0.8;
+  }
+  for (let pass = 0; pass < 3; pass++) for (let f = 0; f < nF; f++) for (let e = 0; e < 3; e++) {                // no abrupt steps in the movement
+    const a = I[3 * f + e], b = I[3 * f + (e + 1) % 3]; if (!inUse[a] || !inUse[b]) continue; const l = 0.5 * Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]);
+    if (kv[a] > kv[b] + l) kv[a] = kv[b] + l; else if (kv[b] > kv[a] + l) kv[b] = kv[a] + l;
+  }
+  const Q = new Float32Array(P.length), limited = new Uint8Array(nV); let free = 0, nLimited = 0;
+  for (let v = 0; v < nV; v++) { const k = kv[v]; if (inUse[v]) { if (k < 0.93 * k0[v]) { limited[v] = 1; nLimited++; } else free++; } Q[3 * v] = P[3 * v] + vn[3 * v] * k; Q[3 * v + 1] = P[3 * v + 1] + vn[3 * v + 1] * k; Q[3 * v + 2] = P[3 * v + 2] + vn[3 * v + 2] * k; }
+  return { positions: Q, free, limited, nLimited };
+};
+
+// ───────────── the opposing arch: opening the bite, and a table that meets its cusps ─────────────
+// Average-value hinge axis (an approximation, used only when the user asks for a hinge opening):
+//   Bonwill triangle — an equilateral triangle of 4 in (101.6 mm) between the two condyles and the lower incisal point;
+//   Balkwill angle — that triangle is tilted about 26° to the occlusal plane, with the condyles above it.
+// So the axis runs left–right, 101.6 × √3/2 ≈ 88 mm from the incisal point: ≈ 79 mm behind it and ≈ 39 mm above the occlusal plane.
+K.HINGE = { side: 101.6, balkwill: 26 };
+/** lower incisal point (case frame) from the lower scan: the top of the most anterior few millimetres near the midline */
+K.incisalPoint = (lowerCase) => { const P = lowerCase.positions; let yMin = Infinity; for (let i = 0; i < P.length; i += 3) if (Math.abs(P[i]) < 6 && P[i + 1] < yMin) yMin = P[i + 1]; let zMax = -Infinity; for (let i = 0; i < P.length; i += 3) if (Math.abs(P[i]) < 4 && P[i + 1] < yMin + 2.5 && P[i + 2] > zMax) zMax = P[i + 2]; return [0, yMin + 0.8, zMax]; };
+/**
+ * How the OPPOSING arch moves (case frame) when the bite is opened by `open` mm at the incisors.
+ *   mode 'straight' — straight apart along the occlusal normal;  mode 'hinge' — rotation about the average-value hinge axis.
+ *   oppJaw = which arch is the opposing one. incisal = K.incisalPoint(lower scan), needed for the hinge.
+ */
+K.openingMatrix = (mode, open, oppJaw, incisal) => {
+  if (!(open > 0)) return new THREE.Matrix4();
+  if (mode !== 'hinge' || !incisal) return new THREE.Matrix4().makeTranslation(0, 0, oppJaw === 'upper' ? open : -open);
+  const r = K.HINGE.side * Math.sqrt(3) / 2, b = THREE.MathUtils.degToRad(K.HINGE.balkwill), pivot = new THREE.Vector3(0, incisal[1] + r * Math.cos(b), incisal[2] + r * Math.sin(b));
+  const th = THREE.MathUtils.radToDeg(2 * Math.asin(Math.min(1, open / (2 * r))));              // the lower jaw opens by +θ about +X; seen from the lower jaw the upper turns by −θ
+  return N.rotationAbout('x', oppJaw === 'lower' ? th : -th, pivot);
+};
+/**
+ * The plane a flat table must lie in to touch the opposing arch on at least three well-spread cusps: the plane the opposing arch
+ * would rest on if it were set down on a flat surface. oppA = opposing mesh in the appliance's arch frame (its teeth point −Z).
+ * → { a, b, d (z = a·x + b·y + d), contacts: [[x,y,z]×3] } or null
+ */
+K.restPlane = (oppA, arch) => {
+  const hf = N.rasterHeightfield(oppA, { cell: 0.5, mode: 'min' }), { nx, ny, x0, y0, cell, z } = hf, o = {}; let zLo = Infinity;
+  for (let k = 0; k < z.length; k++) if (z[k] < zLo) zLo = z[k];
+  const pts = [], bins = new Map();                                 // lowest point of every 3 mm patch that lies over the tooth row and within 4 mm of the lowest point
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = z[j * nx + i]; if (!(v < zLo + 4)) continue; const x = x0 + i * cell, y = y0 + j * cell; if (arch) { K.archCoords(arch, x, y, o); if (Math.abs(o.d) > 9 || o.over > 3) continue; } const key = Math.floor(x / 3) * 1000 + Math.floor(y / 3), e = bins.get(key); if (!e || v < e[2]) bins.set(key, [x, y, v]); }
+  for (const q of bins.values()) pts.push(q);
+  if (pts.length < 3) return null;
+  let cx = 0, cy = 0; for (const q of pts) { cx += q[0]; cy += q[1]; } cx /= pts.length; cy /= pts.length;
+  let best = null, bestArea = -1;
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) for (let k = j + 1; k < pts.length; k++) {
+    const A = pts[i], B = pts[j], C = pts[k], ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    let nxn = uy * vz - uz * vy, nyn = uz * vx - ux * vz, nzn = ux * vy - uy * vx; if (Math.abs(nzn) < 1e-6) continue; if (nzn < 0) { nxn = -nxn; nyn = -nyn; nzn = -nzn; }
+    const area = Math.abs(ux * vy - uy * vx); if (area < bestArea) continue;
+    const s1 = (B[0] - A[0]) * (cy - A[1]) - (B[1] - A[1]) * (cx - A[0]), s2 = (C[0] - B[0]) * (cy - B[1]) - (C[1] - B[1]) * (cx - B[0]), s3 = (A[0] - C[0]) * (cy - C[1]) - (A[1] - C[1]) * (cx - C[0]);
+    if (!((s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0))) continue;          // the centre must lie inside the triangle of contacts
+    const dd = nxn * A[0] + nyn * A[1] + nzn * A[2]; let ok = true;
+    for (const q of pts) if (nxn * q[0] + nyn * q[1] + nzn * q[2] < dd - 1e-4) { ok = false; break; }                // nothing may lie below the plane
+    if (ok) { bestArea = area; best = { a: -nxn / nzn, b: -nyn / nzn, d: dd / nzn, contacts: [A, B, C] }; }
+  }
+  return best;
+};
+
+// ───────────── the body: the outside of the appliance ─────────────
+/**
+ * The body of the appliance as one closed solid (work frame), by marching cubes on a grid of o.h mm. It is deliberately too big on
+ * the inside (it contains the teeth); subtracting the cavity gives the fit surface.
+ *   shell  = every point within (thickness + clearance + 0.08: the fit side is relieved a little over sharp edges) of the covered part of the scan's upper envelope — the "blocked-out" tooth
+ *            surface: column by column from the margin height up to the envelope. Distances are exact (to those column segments),
+ *            so walls are smooth and the thickness is true in every direction.
+ *   flat   = shell ∪ everything up to the table plane within reach of the biting 3 mm of the crowns, cut off at the plane (line
+ *            angle rounded), but never thinner than the minimum thickness over a cusp.
+ *   then cut 0.05 mm under the opposing arch (o.oppLow: its lower envelope along the path), and cut at the margin surface with the
+ *   outer edge rounded by o.edge.
+ * hf = fine upper envelope of the scan; borderZ(x, y) = margin height at a work (x, y) (+Infinity where nothing may be covered);
+ * crownAt(x, y, z) = true where a point of the envelope belongs to the biting 3 mm; planeZ(x, y) = table height (flat type).
+ * → { mesh, info }
+ */
+K.body = (hf, borderZ, crownAt, planeZ, o) => {
+  const h = o.h, rho = o.thickness + o.clearance + 0.08, rhoMin = o.minThick + o.clearance + 0.08, flat = !!planeZ, fc = hf.cell, st = 2, info = {};
+  // 1. covered columns of the envelope: every 2nd fine node, plus every node on a wall edge (so walls are placed to within one fine cell)
+  const X = [], Y = [], Hc = [], Bc = [], Cr = []; let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], nEdge = 0;
+  for (let j = 1; j < hf.ny - 1; j++) for (let i = 1; i < hf.nx - 1; i++) {
+    const k = j * hf.nx + i, z = hf.z[k]; if (!(z > -1e9)) continue;
+    if ((i % st || j % st) && !(z - hf.z[k - 1] > 0.4 || z - hf.z[k + 1] > 0.4 || z - hf.z[k - hf.nx] > 0.4 || z - hf.z[k + hf.nx] > 0.4)) continue;
+    const x = hf.x0 + i * fc, y = hf.y0 + j * fc, b = borderZ(x, y); if (!(z > b + 0.02)) continue;
+    if (!(hf.z[k - 1] > -1e9 && hf.z[k + 1] > -1e9 && hf.z[k - hf.nx] > -1e9 && hf.z[k + hf.nx] > -1e9)) nEdge++;      // a covered column with nothing scanned beside it
+    X.push(x); Y.push(y); Hc.push(z); Bc.push(b); Cr.push(flat && crownAt(x, y, z) ? 1 : 0);
+    if (x < lo[0]) lo[0] = x; if (x > hi[0]) hi[0] = x; if (y < lo[1]) lo[1] = y; if (y > hi[1]) hi[1] = y; if (b < lo[2]) lo[2] = b; if (z > hi[2]) hi[2] = z;
+  }
+  const nC = X.length; if (!nC) return { mesh: null, info };
+  // buckets of columns
+  const bs = 0.6, R = Math.max(rho, flat ? rhoMin : 0) + 2 * h, gx0 = lo[0] - R - bs, gy0 = lo[1] - R - bs, gnx = Math.ceil((hi[0] + R + bs - gx0) / bs) + 1, gny = Math.ceil((hi[1] + R + bs - gy0) / bs) + 1, start = new Int32Array(gnx * gny + 1), cell = new Int32Array(nC);
+  for (let q = 0; q < nC; q++) { cell[q] = Math.floor((X[q] - gx0) / bs) + gnx * Math.floor((Y[q] - gy0) / bs); start[cell[q] + 1]++; }
+  for (let q = 0; q < gnx * gny; q++) start[q + 1] += start[q];
+  const order = new Int32Array(nC), fill = start.slice(0, gnx * gny); for (let q = 0; q < nC; q++) order[fill[cell[q]]++] = q;
+  // 2. grid
+  let pMax = -Infinity; if (flat) for (let q = 0; q < nC; q += 7) { const v = planeZ(X[q], Y[q]); if (v > pMax) pMax = v; }
+  const pad = 3 * h, x0 = lo[0] - rho - pad, y0 = lo[1] - rho - pad, z0 = lo[2] - Math.max(1, o.edge) - pad, nx = Math.ceil((hi[0] + rho + pad - x0) / h) + 1, ny = Math.ceil((hi[1] + rho + pad - y0) / h) + 1, zTopAll = Math.max(hi[2] + Math.max(rho, flat ? rhoMin : 0), flat ? pMax + 1.5 : -Infinity) + pad, nz = Math.ceil((zTopAll - z0) / h) + 1, sxy = nx * ny;
+  const phi = new Float32Array(sxy * nz).fill(1), cd = new Float32Array(4096), ch = new Float32Array(4096), cb = new Float32Array(4096), cc = new Uint8Array(4096), R2 = R * R, rE = Math.min(o.edge, 0.5 * o.thickness), rL = Math.min(1, 0.5 * o.thickness);
+  const rmax = (a, b, r) => { const u = a + r > 0 ? a + r : 0, v = b + r > 0 ? b + r : 0; return Math.min(-r, Math.max(a, b)) + Math.sqrt(u * u + v * v); };      // intersection of two regions (values < 0 inside) with the edge between them rounded to radius r
+  let nExact = 0, lift = 0;
+  for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const x = x0 + i * h, y = y0 + j * h, bi = Math.floor((x - gx0) / bs), bj = Math.floor((y - gy0) / bs), br = Math.ceil(R / bs); let n = 0, dMin = Infinity, dCr = Infinity, topS = -Infinity, topM = -Infinity, hMax = -Infinity, bMin = Infinity;
+    for (let b = Math.max(0, bj - br); b <= Math.min(gny - 1, bj + br); b++) for (let a = Math.max(0, bi - br); a <= Math.min(gnx - 1, bi + br); a++) for (let e = start[b * gnx + a]; e < start[b * gnx + a + 1]; e++) {
+      const q = order[e], dx = X[q] - x, dy = Y[q] - y, d2 = dx * dx + dy * dy; if (d2 > R2 || n >= 4096) continue;
+      const d = Math.sqrt(d2); cd[n] = d2; ch[n] = Hc[q]; cb[n] = Bc[q]; cc[n] = Cr[q]; n++;
+      if (d < dMin) dMin = d; if (Cr[q] && d < dCr) dCr = d; if (Hc[q] > hMax) hMax = Hc[q]; if (Bc[q] < bMin) bMin = Bc[q];
+      if (d < rho) { const t = Hc[q] + Math.sqrt(rho * rho - d2); if (t > topS) topS = t; } if (Cr[q] && d < rhoMin) { const t = Hc[q] + Math.sqrt(rhoMin * rhoMin - d2); if (t > topM) topM = t; }
+    }
+    if (!n) continue;
+    const bz = borderZ(x, y); if (bz === Infinity) continue;
+    const pz = flat ? planeZ(x, y) : Infinity, inFoot = flat && dCr < rho, capZ = o.oppLow ? o.oppLow(x, y) - 0.05 : Infinity;
+    // where the outer surface crosses this column (used only to decide which nodes need exact distances)
+    let zTop = topS; if (flat) { if (inFoot && pz > zTop) zTop = pz; if (zTop > pz) zTop = pz; if (inFoot && topM > zTop) { if (topM - pz > lift) lift = topM - pz; zTop = topM; } } if (zTop > capZ) zTop = capZ;
+    const wall = dMin > rho - 2.5 * h || (flat && Math.abs(dCr - rho) < 2.5 * h), kB = Math.floor((bz - z0) / h);      // beside the shell's wall or the table's: exact distances all the way up
+    const kLo = Math.max(1, wall ? Math.floor((Math.min(bz, bMin) - rE - z0) / h) - 1 : kB - 1), kHi = Math.min(nz - 2, Math.ceil(((wall ? Math.max(hMax + rho, zTop, flat ? Math.min(pz, capZ) : -Infinity) : zTop) - z0) / h) + 2), kEx = wall ? kLo : Math.floor((zTop - z0) / h) - 1;
+    for (let k = kLo; k <= kHi; k++) {
+      const z = z0 + k * h; let f;
+      if (k < kEx) f = -1;                                           // well inside (teeth and all): only the margin cut matters
+      else {
+        let m2 = Infinity, c2 = Infinity; for (let q = 0; q < n; q++) { const dz = z > ch[q] ? z - ch[q] : z < cb[q] ? cb[q] - z : 0, d2 = cd[q] + dz * dz; if (d2 < m2) m2 = d2; if (cc[q] && d2 < c2) c2 = d2; }
+        const dm = Math.sqrt(m2); f = dm - rho; nExact++;
+        if (flat) { if (dCr - rho < f) f = dCr - rho; f = rmax(f, z - pz, rL); const fm = Math.max(Math.sqrt(c2) - rhoMin, dCr - rho); if (fm < f) f = fm; }      // (shell ∪ column of the table) ∩ below the plane, ∪ the minimum thickness over the biting surface (kept even above the table, never wider than it)
+      }
+      if (z - capZ > f) f = z - capZ;
+      phi[k * sxy + j * nx + i] = rmax(f, bz - z, rE);
+    }
+  }
+  info.exact = nExact; info.edge = nEdge * fc; if (flat) info.lift = Math.max(0, lift);      // edge: roughly how many mm of the scan's own edge the appliance covers
+  const mesh = K.marchingCubes({ nx, ny, nz, x0, y0, z0, h, v: phi });
+  return { mesh, info };
+};
+
+// ───────────── building the appliance ─────────────
+const manOf = (M, mesh, id) => new M.Manifold(new M.Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts: mesh.indices, runOriginalID: new Uint32Array([id]) }));
+K.DEFAULTS = { type: 'guard', tiltX: 0, tiltY: 0, retention: 0.1, clearance: 0.1, thickness: 2, minThick: 1, occlusal: 2, meet: true, imprint: 0, edge: 0.6, buccal: 3, lingual: 4, adjB: [], adjL: [], fineCell: 0.075, bodyCell: 0.25, fitCell: 0.2 };
+/**
+ * Build the appliance.
+ *   inp = { scanA: scan mesh in the arch frame, arch: K.analyseArch(scanA), cache: {} (kept by the caller between builds),
+ *           oppA: the opposing arch in the same frame, already moved to the opened bite (optional) }
+ *   p   = see K.DEFAULTS            stage(text) is called (and awaited) before each slow step
+ *     type 'guard': the same thickness everywhere.   type 'flat': walls of `thickness`, and a flat biting table. With an opposing
+ *     arch and p.meet the table lies in K.restPlane (raised by p.imprint into the opposing cusps); otherwise it is level, p.occlusal
+ *     above the highest cusp. The table is never thinner than p.minThick over a cusp, and never passes through the opposing arch.
+ * How it is made (work frame, path of insertion = +Z):
+ *   cavity    = the scan's own triangles moved out by the fit clearance (K.growFree: exact on cusps, edges and smooth surfaces)
+ *             ∪ K.cavity (marching cubes on exact distances: grooves and narrow gaps, and undercuts deeper than the retention depth)
+ *   body      = from the margin surface up to the scan's upper envelope grown by (thickness + clearance), outer edge rounded
+ *   appliance = body − cavity, largest piece
+ * → { mesh (arch frame, watertight), triKind (Uint8Array per triangle: 0 outer surface, 1 fit surface, 2 blocked-out wall),
+ *     report: { volume, parts, crumbs, watertight, tris, times:{…} } }
+ */
+K.build = async (inp, p0, stage = async () => {}) => {
+  const M = await S.ready(), p = { ...K.DEFAULTS, ...p0 }, C = inp.cache || (inp.cache = {}), times = {}, T0 = Date.now(); let t = T0;
+  const lap = (k) => { const n = Date.now(); times[k] = n - t; t = n; };
+  const R = K.tiltMatrix(p.tiltX, p.tiltY), Ri = R.clone().invert(), e = Ri.elements, c = p.clearance, gf = p.fineCell, gb = p.bodyCell, hL = p.fitCell, o = {};
+  if (C.ids === undefined) C.ids = M.Manifold.reserveIDs(3);                      // body, marching-cubes cavity, the scan's own triangles moved out
+  /** height (work frame) of a margin-like surface given in the arch frame, at work (x, y); +Infinity where there is none */
+  const surfaceZ = (mp, x, y) => { let zw = 0; for (let it = 0; it < 3; it++) { K.borderAt(inp.arch, mp, e[0] * x + e[4] * y + e[8] * zw, e[1] * x + e[5] * y + e[9] * zw, o); if (o.z === Infinity) return Infinity; zw += (o.z - (e[2] * x + e[6] * y + e[10] * zw)) / e[10]; } return zw; };
+  // 1. the scan in the work frame, closed into a solid, and its fine upper envelope (cached per path of insertion)
+  const kM = JSON.stringify([p.tiltX, p.tiltY, gf, inp.scanA.positions.length, inp.scanA.indices.length]);
+  if (C.kM !== kM) {
+    await stage('Reading the model along the path of insertion…');
+    const mw = N.transformMesh(inp.scanA, R), b = N.meshBounds(mw), sol = S.scanToSolid(mw, { baseZ: b.min[2] - 3 }).mesh;
+    Object.assign(C, { kM, mw, sol, hf: N.rasterHeightfield(mw, { cell: gf, pad: 0.6, bounds: b }), kC: null }); lap('model');
+  }
+  const { mw, sol, hf } = C;
+  // 2. cavity (cached per clearance and retention; reaches from the cusp tips to a little past the margin)
+  const maxAdj = (a) => (a && a.length ? Math.max(0, ...a.map((v) => -v)) : 0), need = { buccal: p.buccal + maxAdj(p.adjB) + 1.0, lingual: p.lingual + maxAdj(p.adjL) + 1.0 };
+  const kC = JSON.stringify([kM, c, p.retention, hL]);
+  if (C.kC !== kC || C.cover.buccal < need.buccal || C.cover.lingual < need.lingual) {
+    await stage('Fit clearance and block-out…');
+    S.free(C.cav); C.cav = null; C.cover = { buccal: need.buccal + 1.5, lingual: need.lingual + 1.5 };
+    const P = sol.positions, I = sol.indices, nV = P.length / 3, nF = I.length / 3, above = new Uint8Array(nV), use = new Uint8Array(nF);
+    const cov = { ...C.cover, adjB: [], adjL: [], distal: 7, reach: 15 }, lim = { buccal: C.cover.buccal - 0.5, lingual: C.cover.lingual - 0.5, adjB: [], adjL: [], distal: 6, reach: 14 };
+    for (let v = 0; v < nV; v++) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2]; K.borderAt(inp.arch, cov, e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, o); above[v] = e[2] * x + e[6] * y + e[10] * z > o.z ? 1 : 0; }
+    let nUse = 0; for (let f = 0; f < nF; f++) if (above[I[3 * f]] || above[I[3 * f + 1]] || above[I[3 * f + 2]]) { use[f] = 1; nUse++; }
+    if (!nUse) throw new Error('No part of the scan lies above the margin.');
+    // marching-cubes cavity (grooves, narrow gaps, block-out) sits 0.02 mm inside the exact offset, which the scan's own triangles supply
+    const cMC = Math.max(0.02, c - 0.02), gr = K.growScan(sol, above, c), band = K.distanceBand(sol, use, hL, hL + Math.max(cMC + 0.12, 0.33));
+    // where the triangles could not move the full distance, marching cubes has to supply the clearance on its own: flag those nodes.
+    // There the surface is set 0.04 mm further out (plus a curvature allowance), because flat facets on a 0.2 mm grid cut inside a sharply curved offset surface.
+    const sharp = new Uint8Array(band.v.length), sxy = band.nx * band.ny;
+    for (let v = 0; v < nV; v++) if (gr.limited[v]) { const i = Math.round((P[3 * v] - band.x0) / hL), j = Math.round((P[3 * v + 1] - band.y0) / hL), k = Math.round((P[3 * v + 2] - band.z0) / hL); for (let dk = -2; dk <= 2; dk++) for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const a = i + di, b = j + dj, d = k + dk; if (a >= 0 && b >= 0 && d >= 0 && a < band.nx && b < band.ny && d < band.nz) sharp[d * sxy + b * band.nx + a] = 1; } }
+    const cv = K.cavity(sol, hf, use, (x, y) => surfaceZ(lim, x, y), { h: hL, clearance: cMC, retention: p.retention, band, sharp, extra: c - cMC + 0.04, neck: p.neck, fin: p.fin, own: p.own ?? true, slit: p.slit });
+    if (!cv.mesh.indices.length) throw new Error('Could not build the fit surface.');
+    const mc = manOf(M, cv.mesh, C.ids + 1), gm = manOf(M, { positions: gr.positions, indices: sol.indices }, C.ids + 2);
+    C.cav = mc.add(gm); C.cav.numTri(); S.free(mc, gm);
+    C.band = cv.band; C.cMC = cMC; C.cavStats = { ...cv.stats, free: gr.free, limited: gr.nLimited }; C.kC = kC; lap('cavity');
+  }
+  // 3. body (K.body): shell of the set thickness round the covered envelope, table and opposing arch, margin cut with a rounded edge
+  await stage('Shaping the appliance…');
+  const mp = { buccal: p.buccal, lingual: p.lingual, adjB: p.adjB, adjL: p.adjL, distal: p.distal, reach: p.reach }, info = {}; let plane = null, planeZ = null, oppLow = null;
+  if (p.type === 'flat') {                                         // flat biting table: a plane in the arch frame, so it does not tilt with the path of insertion
+    const rp = inp.oppA && p.meet ? K.restPlane(inp.oppA, inp.arch) : null; let tMax = -Infinity; for (let k = 0; k < inp.arch.n; k++) if (inp.arch.top[k] > tMax) tMax = inp.arch.top[k];
+    plane = rp ? { a: rp.a, b: rp.b, d: rp.d + (p.imprint || 0), contacts: rp.contacts } : { a: 0, b: 0, d: (inp.arch.zMax ?? tMax) + c + p.occlusal }; info.plane = plane; info.met = !!rp;
+    planeZ = (x, y) => { let zw = 0; for (let it = 0; it < 3; it++) zw += (plane.a * (e[0] * x + e[4] * y + e[8] * zw) + plane.b * (e[1] * x + e[5] * y + e[9] * zw) + plane.d - (e[2] * x + e[6] * y + e[10] * zw)) / e[10]; return zw; };
+  }
+  if (inp.oppA) {      // the opposing arch as a cap: its lowest point within one body cell sideways of (x, y), so that steep faces of the opposing teeth are cleared too
+    const O = N.rasterHeightfield(N.transformMesh(inp.oppA, R), { cell: 0.125, mode: 'min' }), kq = Math.round(gb / O.cell), onx = O.nx, ony = O.ny, tmp = new Float32Array(onx * ony), low = new Float32Array(onx * ony);
+    for (let j = 0; j < ony; j++) for (let i = 0; i < onx; i++) { let m = Infinity; for (let a = Math.max(0, i - kq); a <= Math.min(onx - 1, i + kq); a++) { const v = O.z[j * onx + a]; if (v < m) m = v; } tmp[j * onx + i] = m; }
+    for (let j = 0; j < ony; j++) for (let i = 0; i < onx; i++) { let m = Infinity; for (let b = Math.max(0, j - kq); b <= Math.min(ony - 1, j + kq); b++) { const v = tmp[b * onx + i]; if (v < m) m = v; } low[j * onx + i] = m; }
+    oppLow = (x, y) => { const i = Math.floor((x - O.x0) / O.cell), j = Math.floor((y - O.y0) / O.cell); if (i < 0 || j < 0 || i >= onx - 1 || j >= ony - 1) return Infinity; const k = j * onx + i; return Math.min(low[k], low[k + 1], low[k + onx], low[k + onx + 1]); };
+  }
+  const crownAt = (x, y, z) => { K.archCoords(inp.arch, e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, o); return Math.abs(o.d) < 7 && o.over < 1 && e[2] * x + e[6] * y + e[10] * z > archTop(inp.arch, o.s) - 3; };
+  const bd = K.body(hf, (x, y) => surfaceZ(mp, x, y), crownAt, planeZ, { h: gb, thickness: p.thickness, minThick: p.minThick, clearance: c, edge: p.edge, oppLow });
+  if (!bd.mesh || !bd.mesh.indices.length) throw new Error('Nothing to build — the margin leaves no tooth covered.');
+  Object.assign(info, bd.info); const body = manOf(M, bd.mesh, C.ids); lap('body');
+  // 4. appliance = body − cavity; keep the largest piece
+  await stage('Cutting the fit surface…');
+  const app0 = body.subtract(C.cav), parts = app0.decompose(); let big = parts[0];
+  for (const q of parts) if (q.volume() > big.volume()) big = q;
+  if (!big || big.isEmpty()) { S.free(body, app0, ...parts); throw new Error('The appliance came out empty — check the margin and thickness.'); }
+  const gm = big.getMesh(), nT = gm.triVerts.length / 3, triKind = new Uint8Array(nT), W = gm.vertProperties, J = gm.triVerts;
+  for (let q = 0; q < gm.runOriginalID.length; q++) { const id = gm.runOriginalID[q] - C.ids; if (id === 0) continue; for (let f = gm.runIndex[q] / 3; f < gm.runIndex[q + 1] / 3; f++) { if (id === 2) { triKind[f] = 1; continue; } const a = J[3 * f] * 3, b = J[3 * f + 1] * 3, d = J[3 * f + 2] * 3, dist = bandAt(C.band, (W[a] + W[b] + W[d]) / 3, (W[a + 1] + W[b + 1] + W[d + 1]) / 3, (W[a + 2] + W[b + 2] + W[d + 2]) / 3); triKind[f] = Math.abs(dist - C.cMC) < 0.09 ? 1 : 2; } }
+  const meshW = { positions: new Float32Array(W), indices: new Uint32Array(J), colors: null };
+  const crumbVol = parts.reduce((a, q) => a + (q === big ? 0 : Math.abs(q.volume())), 0);
+  const report = { volume: big.volume(), parts: parts.length, crumbs: parts.length - 1, crumbVolume: crumbVol, tris: nT, genus: big.genus(), cavity: C.cavStats, ...info };
+  S.free(body, app0, ...parts); lap('cut');
+  const mesh = N.transformMesh(meshW, Ri); report.watertight = N.isWatertight(mesh); times.total = Date.now() - T0; report.times = times;
+  return { mesh, meshW, triKind, report, R };
+};
+
+/**
+ * Local thickness of the appliance: for every vertex of the outer surface, the distance to the nearest point of the fit side
+ * (fit surface or blocked-out wall). Where that nearest point is the margin line itself the vertex belongs to the border
+ * (its end face or rounded edge) and is flagged instead of counted. `band` = how near the margin line counts as "the margin" (mm).
+ * → { t: Float32Array per vertex (NaN off the outer surface), border: Uint8Array, min, minVertex, minAt:[x,y,z] (thinnest spot away from the border) }
+ */
+K.thickness = (mesh, triKind, band = 0.3) => {
+  const P = mesh.positions, I = mesh.indices, nV = P.length / 3, nT = I.length / 3, t = new Float32Array(nV).fill(NaN), border = new Uint8Array(nV);
+  const fit = []; for (let f = 0; f < nT; f++) if (triKind[f]) fit.push(I[3 * f], I[3 * f + 1], I[3 * f + 2]);
+  if (!fit.length) return { t, border, min: NaN, minVertex: -1, minAt: null };
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setIndex(new THREE.BufferAttribute(Uint32Array.from(fit), 1));
+  const bvh = new N.MeshBVH(g), isFit = new Uint8Array(nV), isOut = new Uint8Array(nV), q = new THREE.Vector3(), hit = {};
+  for (let f = 0; f < nT; f++) for (let k = 0; k < 3; k++) { if (triKind[f]) isFit[I[3 * f + k]] = 1; else isOut[I[3 * f + k]] = 1; }
+  const cs = Math.max(0.5, band), hash = new Map(), key = (i, j, k) => (i + 512) + 1024 * ((j + 512) + 1024 * (k + 512));          // margin line = vertices shared by both sides
+  for (let v = 0; v < nV; v++) if (isFit[v] && isOut[v]) { const k = key(Math.floor(P[3 * v] / cs), Math.floor(P[3 * v + 1] / cs), Math.floor(P[3 * v + 2] / cs)); let a = hash.get(k); if (!a) hash.set(k, a = []); a.push(v); }
+  const nearMargin = (x, y, z, r) => { const ci = Math.floor(x / cs), cj = Math.floor(y / cs), ck = Math.floor(z / cs); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) { const l = hash.get(key(ci + a, cj + b, ck + c)); if (!l) continue; for (const w of l) if (Math.hypot(P[3 * w] - x, P[3 * w + 1] - y, P[3 * w + 2] - z) < r) return true; } return false; };
+  let min = Infinity, minVertex = -1;
+  for (let v = 0; v < nV; v++) {
+    if (!isOut[v]) continue;
+    if (isFit[v]) { t[v] = 0; border[v] = 1; continue; }
+    q.set(P[3 * v], P[3 * v + 1], P[3 * v + 2]); bvh.closestPointToPoint(q, hit); t[v] = hit.distance;
+    if (nearMargin(hit.point.x, hit.point.y, hit.point.z, band)) border[v] = 1; else if (t[v] < min) { min = t[v]; minVertex = v; }
+  }
+  return { t, border, min, minVertex, minAt: minVertex >= 0 ? [P[3 * minVertex], P[3 * minVertex + 1], P[3 * minVertex + 2]] : null };
+};
+/**
+ * How the outer surface of the appliance meets the opposing arch (both in the appliance's arch frame; opposing teeth point −Z).
+ * → { d: Float32Array per vertex (distance to the opposing scan, NaN when not on the outer surface or further than 2 mm),
+ *     min, through (number of outer vertices behind the opposing surface, i.e. passing through it), deepest (mm), patches: [{ x, y, z, n, d }]
+ *     (groups of vertices within `tol` mm of the opposing arch, one per 4 mm square) }
+ */
+K.contacts = (meshA, triKind, oppA, tol = 0.1) => {
+  const P = meshA.positions, I = meshA.indices, nV = P.length / 3, isOut = new Uint8Array(nV), d = new Float32Array(nV).fill(NaN);
+  for (let f = 0; f < triKind.length; f++) if (!triKind[f]) for (let k = 0; k < 3; k++) isOut[I[3 * f + k]] = 1;
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(oppA.positions, 3)); g.setIndex(new THREE.BufferAttribute(Uint32Array.from(oppA.indices), 1));
+  const OP = oppA.positions, OI = g.index.array, bvh = new N.MeshBVH(g, { indirect: true }), low = N.rasterHeightfield(oppA, { cell: 0.25, mode: 'min' }), v = new THREE.Vector3(), hit = {}, bins = new Map(); let min = Infinity, through = 0, deepest = 0;
+  // which way do the opposing scan's triangles face? (its teeth point −Z here, so outward normals mostly have negative z)
+  let sz = 0; for (let f = 0; f < OI.length; f += 3) { const a = OI[f] * 3, b = OI[f + 1] * 3, c = OI[f + 2] * 3; sz += (OP[b] - OP[a]) * (OP[c + 1] - OP[a + 1]) - (OP[b + 1] - OP[a + 1]) * (OP[c] - OP[a]); } const flip = sz > 0 ? -1 : 1;
+  for (let i = 0; i < nV; i++) {
+    if (!isOut[i]) continue; const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2], zl = N.sampleField(low, x, y);
+    if (!(zl === zl) || zl - z > 2.3) continue;
+    v.set(x, y, z); hit.distance = Infinity; bvh.closestPointToPoint(v, hit, 0, 2); if (!(hit.distance < 2)) continue;
+    { const f = hit.faceIndex * 3, a = OI[f] * 3, b = OI[f + 1] * 3, c = OI[f + 2] * 3, ux = OP[b] - OP[a], uy = OP[b + 1] - OP[a + 1], uz = OP[b + 2] - OP[a + 2], wx = OP[c] - OP[a], wy = OP[c + 1] - OP[a + 1], wz = OP[c + 2] - OP[a + 2];
+      const side = ((uy * wz - uz * wy) * (x - hit.point.x) + (uz * wx - ux * wz) * (y - hit.point.y) + (ux * wy - uy * wx) * (z - hit.point.z)) * flip;       // < 0: behind the opposing surface
+      if (side < 0 && hit.distance > 0.01) { through++; if (hit.distance > deepest) deepest = hit.distance; } }
+    d[i] = hit.distance; if (hit.distance < min) min = hit.distance;
+    if (hit.distance <= tol) { const key = Math.floor(x / 4) * 4096 + Math.floor(y / 4), e = bins.get(key) || { x: 0, y: 0, z: 0, n: 0, d: Infinity }; e.x += x; e.y += y; e.z += z; e.n++; if (hit.distance < e.d) e.d = hit.distance; bins.set(key, e); }
+  }
+  return { d, min, through, deepest, patches: [...bins.values()].map((e) => ({ x: e.x / e.n, y: e.y / e.n, z: e.z / e.n, n: e.n, d: e.d })) };
+};
+/**
+ * Room for a flat table: the smallest height of the table plane (K.restPlane of the opposing arch, raised by `imprint`) above
+ * "cusp + clearance + minimum thickness" anywhere over the biting 3 mm of the crowns. Negative = the table would be too thin there.
+ */
+K.tableRoom = (hfA, arch, oppA, c, minThick, imprint = 0) => {
+  const rp = K.restPlane(oppA, arch); if (!rp) return null; const { nx, ny, x0, y0, cell, z } = hfA, o = {}; let room = Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = z[j * nx + i]; if (!(v > -1e9)) continue; const x = x0 + i * cell, y = y0 + j * cell; K.archCoords(arch, x, y, o); if (Math.abs(o.d) > 6 || o.over > 0.5 || v < archTop(arch, o.s) - 3) continue; const r = rp.a * x + rp.b * y + rp.d + imprint - (v + c + minThick); if (r < room) room = r; }
+  return room;
+};
+// ═══ KERNEL:END ═══
+
+// ───────────── settings and state ─────────────
+const $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' };
+// A starting point only fills in the numbers of the later steps. They are plain starting values, not recommendations.
+const PRESETS = {
+  flat: { kind: 'flat', label: 'Flat-plane splint', note: 'Full coverage with a flat biting table (a stabilisation-type splint). With the opposing arch loaded, the table can be made to touch its cusps.', set: { thickness: 1.5, minThick: 2, occlusal: 2, edge: 0.6, buccal: 3, lingual: 5, useOpp: true, meet: true, imprint: 0 } },
+  guard: { kind: 'guard', label: 'Even-thickness guard', note: 'The same thickness everywhere, following the teeth.', set: { thickness: 2, minThick: 1, edge: 0.6, buccal: 3, lingual: 4, useOpp: false } },
+  thin: { kind: 'guard', label: 'Thin tray', note: 'A thin, retainer-style tray that follows the teeth closely. Thinner than some splint resins allow: check the instructions for your resin.', set: { thickness: 0.8, minThick: 0.5, edge: 0.4, buccal: 4, lingual: 4, useOpp: false } },
+};
+const P = { jaw: null, type: 'guard', tiltX: 0, tiltY: 0, retention: 0.1, clearance: 0.1, thickness: 2, minThick: 1, occlusal: 2, edge: 0.6, buccal: 3, lingual: 4, adjB: [], adjL: [],
+  useOpp: false, open: 0, openMode: 'hinge', meet: true, imprint: 0, showOpp: true, pos: 'case', map: 'thick', section: false, sectionAt: 25, sectionFlip: false };
+const NCTRL = 13;                                                 // margin control points per side
+const kindOf = () => (PRESETS[P.type] || PRESETS.guard).kind;
+const mkDesign = () => ({ jaw: null, raw: null, mtx: null, scanA: null, arch: null, hfA: null, cache: {}, res: null, meshCase: null, thick: null, contact: null, opp: null, dirty: true, error: '', object: null });
+let D = mkDesign(), scans, rev = 0;
+const KIND_COL = [0x2dd4bf, 0xbfe9e1, 0xf2c14e].map((h) => new THREE.Color(h));          // outer, fit surface, blocked-out wall (also stored in the case file)
+
+// ───────────── shell ─────────────
+const shell = N.createShell({
+  name: 'Splint Card', tagline: 'Splint and guard designer', title: 'Splint Card — splint and guard designer',
+  emptyHtml: '<div><b>No scan loaded</b>Drop an STL, PLY or OBJ scan here, or use “Load scans”.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'appliance', title: 'Appliance', html: `
+      <p class="lead">Which arch will wear the appliance, and what kind is it?</p>
+      <div class="row"><label>Arch</label><div class="seg" id="apJaw"><button data-v="upper" type="button" title="The appliance sits on the upper teeth">Upper</button><button data-v="lower" type="button" title="The appliance sits on the lower teeth">Lower</button></div></div>
+      <div class="h4">Starting point</div>
+      <div class="btns" id="apType">${Object.entries(PRESETS).map(([k, v]) => `<button class="btn" data-v="${k}" type="button" title="${N.esc(v.note)}">${N.esc(v.label)}</button>`).join('')}</div>
+      <div id="apInfo"></div>
+      <p class="tip">A starting point only fills in the numbers in the next steps. Every one of them stays editable, and none of them is a recommendation for a particular resin or diagnosis. Load the opposing arch too if you have it: it is needed to shape the biting surface.</p>` },
+    { id: 'path', title: 'Path of insertion and block-out', html: `
+      <p class="lead">The appliance goes on and comes off along one straight line. Anything that would catch on the way is blocked out.</p>
+      <div class="row"><label>Tilt forward / back</label><input type="range" id="paX" min="-20" max="20" step="0.5" value="0"><span class="val"></span></div>
+      <div class="row"><label>Tilt left / right</label><input type="range" id="paY" min="-20" max="20" step="0.5" value="0"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="paView" type="button" title="Turn the model until you look at the biting surfaces along the line you want, then press this">Use this view as the path</button><button class="btn" id="paReset" type="button" title="Straight onto the biting plane">Straight on</button></div>
+      <div class="h4">Retention</div>
+      <div class="row"><label>Undercut the appliance may grip</label><input type="range" id="paRet" min="0" max="0.5" step="0.05" value="0.1"><span class="val"></span></div>
+      <div id="paInfo"></div>
+      <p class="tip">The colours show how far each part of the scan lies under an overhang, measured sideways, for the path shown by the arrow. The appliance follows the teeth into undercuts up to the depth you allow here; anything deeper is filled in (blocked out) so the appliance can still be seated. 0 mm blocks out every undercut. The filled-in wall is accurate to about 0.08 mm.</p>` },
+    { id: 'margin', title: 'Margin', html: `
+      <p class="lead">Where the appliance ends, measured down from the cusp tips and incisal edges.</p>
+      <div class="row"><label>Cheek / lip side</label><input type="range" id="mgB" min="0.5" max="9" step="0.25" value="3"><span class="val"></span></div>
+      <div class="row"><label>Tongue / palate side</label><input type="range" id="mgL" min="0.5" max="14" step="0.25" value="4"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="mgReset" type="button" title="Undo every local change to the margin">Reset local changes</button></div>
+      <div id="mgInfo"></div>
+      <p class="tip">The pink line is the margin. It follows the height of the cusp tips round the arch, so it rises and falls with the teeth. Drag any dot up or down to move the margin just there; the line stays smooth between dots. For an upper appliance a large “tongue / palate side” value carries it onto the palate, but only as far as the scan itself reaches: the Check step warns when the margin runs past the edge of the scan. The colours show the undercuts for the path you chose, so you can see whether the margin reaches them. The outer edge of the appliance is rounded when it is built.</p>` },
+    { id: 'shell', title: 'Shell and bite', html: `
+      <div class="row"><label>Fit clearance</label><input type="range" id="shC" min="0.05" max="0.3" step="0.01" value="0.1"><span class="val"></span></div>
+      <div class="row"><label id="shTlab">Thickness</label><input type="range" id="shT" min="0.5" max="4" step="0.1" value="2"><span class="val"></span></div>
+      <div class="row"><label>Minimum thickness</label><input type="range" id="shMin" min="0.3" max="3" step="0.1" value="1"><span class="val"></span></div>
+      <div class="row"><label>Edge rounding</label><input type="range" id="shE" min="0.2" max="1.5" step="0.1" value="0.6"><span class="val"></span></div>
+      <div id="shBite">
+        <div class="h4">Bite</div>
+        <div class="row" id="shUseRow"><label><input type="checkbox" id="shUse"> Shape the biting surface to the opposing arch</label></div>
+        <div id="shOpp">
+          <div class="row"><label>Open the bite (at the incisors)</label><input type="range" id="shOpen" min="0" max="10" step="0.25" value="0"><span class="val"></span></div>
+          <div class="row"><label>Opening movement</label><div class="seg" id="shMode"><button data-v="hinge" type="button" title="The lower jaw swings open about an average-value hinge axis — an approximation, see the tips">Hinge</button><button data-v="straight" type="button" title="The arches move straight apart">Straight</button></div></div>
+          <div class="row flatOnly"><label><input type="checkbox" id="shMeet"> Table touches the opposing cusps</label></div>
+          <div class="row flatOnly"><label>Cusp imprints</label><input type="range" id="shImp" min="0" max="0.6" step="0.05" value="0"><span class="val"></span></div>
+          <div class="btns flatOnly"><button class="btn" id="shAuto" type="button" title="Find the smallest opening at which a flat table of the minimum thickness fits between the arches">Open just enough for the table</button></div>
+          <div class="row"><label><input type="checkbox" id="shShow"> Show the opposing arch</label></div>
+        </div>
+        <div class="row flatOnly" id="shOccRow"><label>Table above the highest cusp</label><input type="range" id="shOcc" min="0.5" max="5" step="0.1" value="2"><span class="val"></span></div>
+      </div>
+      <div id="shInfo"></div>
+      <p class="tip">“Fit clearance” is the gap left between the teeth and the inside of the appliance. “Minimum thickness” is the least the biting table is allowed to be over a cusp, and the level below which the Check step warns. The scans arrive in the bite they were taken in: “Open the bite” moves the opposing arch away to make room. “Hinge” turns the lower jaw about an average-value axis (see Sources); it is an approximation of a real opening movement — a bite recorded at the wanted opening is better. The appliance is never allowed to pass through the opposing arch.</p>
+      <p class="tip" id="srcTip"></p>` },
+    { id: 'check', title: 'Check', html: `
+      <div id="ckSummary"></div>
+      <div class="row"><label>Show</label><div class="seg" id="ckMap"><button data-v="thick" type="button" title="Colour the appliance by how thick it is">Thickness</button><button data-v="contact" type="button" title="Colour the biting surface by its distance to the opposing teeth">Contacts</button><button data-v="plain" type="button" title="Plain appliance on the model">Plain</button><button data-v="fit" type="button" title="The appliance alone, to look at its fit side">Alone</button></div></div>
+      <div class="row"><label><input type="checkbox" id="ckSec"> Cross-section</label><button class="btn" id="ckFace" type="button" title="Turn the view to look straight at the cut" hidden>Face the cut</button><button class="btn" id="ckFlip" type="button" title="Show the other side of the cut" hidden>Other side</button></div>
+      <div class="row" id="ckSecRow" hidden><label>Where along the arch</label><input type="range" id="ckAt" min="0" max="100" step="0.5" value="25"><span class="val"></span></div>
+      <p class="tip">Thickness is measured from each point of the outer surface to the nearest point of the fit side. The border always tapers to nothing at the margin, so it is shown separately and left out of the “thinnest spot”. The cross-section cuts everything straight across the arch: teal is the appliance, the white line is the scan.</p>` },
+    { id: 'export', title: 'Export', html: `
+      <div id="exSummary"></div>
+      <div class="row"><label>Position</label><div class="seg" id="exPos"><button data-v="case" type="button" title="As shown here: biting plane level, front teeth forward">As shown</button><button data-v="scan" type="button" title="Exactly where the scanner put the scans, so the appliance lines up with them in other software">As scanned</button></div></div>
+      <div class="btns"><button class="btn pri" id="exStl" type="button" title="Download the appliance as an STL file">Download STL</button><button class="btn" id="exCase" type="button" title="Save scans and appliance as one case file for the other apps">Save case</button></div>
+      <p class="note">A design aid, not a certified medical device. Check the printed appliance on the model and in the mouth before it is worn.</p>
+      <p class="tip">Sizes are in millimetres. “Save case” keeps the scans, your settings and the finished appliance together, so it can be reopened here or in the other apps.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const STEP = (id) => shell.steps.findIndex((s) => s.id === id), stepId = () => (shell.current >= 0 ? shell.steps[shell.current].id : 'load');
+const legend = shell.panel('', 'legend'); legend.hidden = true;
+const BUILD_STEPS = ['shell', 'check', 'export'];
+
+scans = N.createScanSet({
+  shell, viewer, appName: 'Splint Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility') return; if (what !== 'case') resetDesign(); syncUI(); refreshView(); },
+  extendCase: (c) => {
+    c.remove('splint');
+    const sc = D.jaw && scans[D.jaw];
+    if (sc && D.res && !D.dirty) c.add({ role: 'splint', name: `splint-${D.jaw}`, mesh: N.transformMesh({ ...D.meshCase, colors: kindColours(D.meshCase, D.res.triKind) }, sc.matrix.clone().invert()), matrix: sc.matrix, meta: { jaw: D.jaw, report: D.res.report } });
+    c.data.splint = { version: 1, params: { ...P, adjB: [...P.adjB], adjL: [...P.adjL] }, jaw: D.jaw };
+  },
+  readCase: (c) => {
+    const d = c.data.splint; resetDesign();
+    if (d && d.params) { Object.assign(P, d.params); P.adjB = [...(d.params.adjB || [])]; P.adjL = [...(d.params.adjL || [])]; }
+    paramsToUI();
+    const it = c.get('splint');
+    if (it && prep() && it.meta && it.meta.jaw === D.jaw) { const mesh = N.transformMesh(it.mesh, it.matrix), triKind = kindsFromColours(mesh); setResult({ mesh: null, triKind, report: it.meta.report || {} }, { positions: mesh.positions, indices: mesh.indices, colors: null }); }
+  },
+});
+
+// ───────────── the design: preparation, building, display ─────────────
+function pickJaw() { if (P.jaw && scans.has(P.jaw)) return P.jaw; return scans.has('upper') ? 'upper' : scans.has('lower') ? 'lower' : null; }
+function dropObject() { if (D.object) { viewer.remove(D.object); D.object = null; } }
+function resetDesign() { rev++; dropObject(); S.free(D.cache && D.cache.cav); D = mkDesign(); clearOverlays(); clearDots(); clearSection(); }
+/** make sure the arch analysis matches the scan now loaded; false if there is nothing to design on */
+function prep() {
+  const jaw = pickJaw(); if (!jaw) return false;
+  const sc = scans[jaw];
+  if (D.jaw === jaw && D.raw === sc.raw && D.mtx && D.mtx.equals(sc.matrix) && (D.arch || D.error)) return !!D.arch;
+  resetDesign(); D.jaw = jaw; D.raw = sc.raw; D.mtx = sc.matrix.clone();
+  try {
+    const f = scans.framed(jaw); D.scanA = N.transformMesh({ positions: f.positions, indices: f.indices }, K.archMatrix(jaw));
+    D.arch = K.analyseArch(D.scanA); D.hfA = N.rasterHeightfield(D.scanA, { cell: 0.25, pad: 1 });
+  } catch (e) { console.error(e); D.error = String((e && e.message) || e); D.arch = null; return false; }
+  return true;
+}
+const buildParams = () => ({ type: kindOf(), tiltX: P.tiltX, tiltY: P.tiltY, retention: P.retention, clearance: P.clearance, thickness: P.thickness, minThick: P.minThick, occlusal: P.occlusal, meet: P.meet, imprint: P.imprint, edge: P.edge, buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
+const otherJaw = () => (D.jaw === 'upper' ? 'lower' : 'upper');
+/** is there an opposing arch in the same bite, and does the user want it used? */
+const oppAvailable = () => !!(D.jaw && scans.has(otherJaw()) && scans.inBite), oppUsed = () => oppAvailable() && P.useOpp;
+/** how the opposing arch is moved to open the bite (case frame) */
+function oppMatrix() { return K.openingMatrix(P.openMode, P.open, otherJaw(), scans.has('lower') ? K.incisalPoint(scans.framed('lower')) : null); }
+/** the opposing arch in the opened bite, in the appliance's arch frame (cached) */
+function opposing() {
+  if (!oppAvailable()) return null; const sc = scans[otherJaw()], key = JSON.stringify([P.open, P.openMode, sc.raw.positions.length, sc.matrix.elements]);
+  if (!D.opp || D.opp.key !== key) { const f = scans.framed(otherJaw()), Om = oppMatrix(); D.opp = { key, Om, meshA: N.transformMesh({ positions: f.positions, indices: f.indices }, K.archMatrix(D.jaw).multiply(Om)) }; }
+  return D.opp;
+}
+function kindColours(mesh, triKind) {
+  const nV = mesh.positions.length / 3, I = mesh.indices, k = new Uint8Array(nV), cnt = new Uint8Array(nV * 2), col = new Float32Array(nV * 3);
+  for (let f = 0; f < triKind.length; f++) for (let e = 0; e < 3; e++) { const v = I[3 * f + e]; if (triKind[f]) { k[v] = 1; if (triKind[f] === 2 && cnt[2 * v + 1] < 255) cnt[2 * v + 1]++; else if (cnt[2 * v] < 255) cnt[2 * v]++; } }
+  for (let v = 0; v < nV; v++) { const c = KIND_COL[k[v] ? (cnt[2 * v + 1] > cnt[2 * v] ? 2 : 1) : 0]; col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  return col;
+}
+function kindsFromColours(mesh) {
+  const I = mesh.indices, C = mesh.colors, nT = I.length / 3, out = new Uint8Array(nT); if (!C) return out;
+  const kindOf = (v) => { let best = 0, bd = Infinity; for (let q = 0; q < 3; q++) { const c = KIND_COL[q], d = (C[3 * v] - c.r) ** 2 + (C[3 * v + 1] - c.g) ** 2 + (C[3 * v + 2] - c.b) ** 2; if (d < bd) { bd = d; best = q; } } return best; };
+  const vk = new Uint8Array(mesh.positions.length / 3); for (let v = 0; v < vk.length; v++) vk[v] = kindOf(v);
+  for (let f = 0; f < nT; f++) { const a = vk[I[3 * f]], b = vk[I[3 * f + 1]], c = vk[I[3 * f + 2]]; out[f] = !a || !b || !c ? 0 : (a === 2) + (b === 2) + (c === 2) >= 2 ? 2 : 1; }
+  return out;
+}
+/** take a finished appliance (work-frame result from K.build, or one restored from a case) */
+function setResult(res, meshCase = null) {
+  dropObject();
+  D.meshCase = meshCase || N.transformMesh(res.mesh, K.archMatrix(D.jaw).invert()); D.res = res; D.dirty = false; D.error = '';
+  D.thick = K.thickness(D.meshCase, res.triKind, P.edge + 0.25); gradeThickness();
+  D.contact = oppUsed() ? K.contacts(N.transformMesh(D.meshCase, K.archMatrix(D.jaw)), res.triKind, opposing().meshA) : null;
+  if (!res.report.volume) res.report.volume = Math.abs(N.meshVolume(D.meshCase));
+  res.report.watertight = N.isWatertight(D.meshCase); res.report.tris = D.meshCase.indices.length / 3;
+  makeObject();
+}
+/**
+ * Judge every point of the outer surface against what is asked of it: the biting surface (beyond the cusp tips) against the
+ * minimum thickness, the walls against the wall thickness or the minimum, whichever is less. → D.thick.need[], .occ, .wall, .worst
+ */
+function gradeThickness() {
+  const th = D.thick; if (!th || !D.arch) return; const Pm = D.meshCase.positions, Nm = N.vertexNormals(D.meshCase), up = D.jaw === 'upper' ? -1 : 1, n = th.t.length, need = new Float32Array(n), wallNeed = Math.min(P.minThick, P.thickness), mk = () => ({ min: Infinity, v: -1 }), o = {}, A = D.arch;
+  th.occ = mk(); th.wall = mk(); let worst = Infinity, wv = -1;
+  for (let v = 0; v < n; v++) {
+    const t = th.t[v]; if (!(t === t) || th.border[v]) continue;
+    K.archCoords(A, up * Pm[3 * v], Pm[3 * v + 1], o); const f = N.clamp(o.s / A.step, 0, A.n - 1), i0 = Math.min(A.n - 2, Math.floor(f)), top = A.top[i0] + (A.top[i0 + 1] - A.top[i0]) * (f - i0);
+    const occ = up * Pm[3 * v + 2] > top + 0.3 && Math.abs(o.d) < 7 && up * Nm[3 * v + 2] > 0.6, g = occ ? th.occ : th.wall;          // the biting surface = what lies beyond the cusp tips and faces the other jaw
+    need[v] = occ ? P.minThick : wallNeed; if (t < g.min) { g.min = t; g.v = v; } if (t - need[v] < worst) { worst = t - need[v]; wv = v; }
+  }
+  th.need = need; th.worst = worst; th.worstV = wv; th.worstAt = wv >= 0 ? [D.meshCase.positions[3 * wv], D.meshCase.positions[3 * wv + 1], D.meshCase.positions[3 * wv + 2]] : null;
+}
+let building = null, queued = false, stashT = 0;
+async function buildPass() {
+  if (!prep()) return; const myRev = rev, inp = { scanA: D.scanA, arch: D.arch, cache: D.cache, oppA: oppUsed() ? opposing().meshA : null };
+  try {
+    await shell.busy('Building the appliance…', async () => {
+      const res = await K.build(inp, buildParams(), async (t) => { shell.setBusyText(t); await N.sleep(16); });
+      if (myRev !== rev) return;                                   // something changed meanwhile: the next pass redoes it
+      shell.setBusyText('Measuring thickness…'); await N.sleep(16); setResult(res);
+    });
+  } catch (e) { if (myRev === rev) { D.error = String((e && e.message) || e); D.dirty = false; D.res = null; dropObject(); } }
+}
+/** Build if anything is out of date. Calls made while a build is running are folded into one more pass at the end. */
+async function ensureBuilt() {
+  if (building) { queued = true; return building; }
+  building = (async () => { let guard = 0; do { queued = false; if (pickJaw() && (D.dirty || !D.res) && !D.error) await buildPass(); } while ((queued || (pickJaw() && D.dirty && !D.error)) && ++guard < 6); })();
+  try { await building; } finally { building = null; }
+  syncUI(); refreshView();
+  clearTimeout(stashT); stashT = setTimeout(() => { if (scans.upper || scans.lower) N.stashCase(scans.toCase(), 'Splint Card'); }, 2500);
+  return !!D.res && !D.error;
+}
+const touch = (rebuildNow) => { rev++; D.dirty = true; D.error = ''; if (rebuildNow && BUILD_STEPS.includes(stepId())) return ensureBuilt(); syncUI(); };
+
+// ---- what is on screen ----
+const lerpCol = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), N.clamp(t, 0, 1));
+function thicknessColours() {
+  const t = D.thick.t, bd = D.thick.border, need = D.thick.need, n = t.length, col = new Float32Array(n * 3), fit = new THREE.Color(0xd5dde6), brd = new THREE.Color(0x9fd8cf);
+  for (let v = 0; v < n; v++) { const x = t[v] - need[v]; const c = !(t[v] === t[v]) ? fit : bd[v] ? brd : x < -0.1 ? new THREE.Color(0xef4444) : x < 0.5 ? lerpCol(0xf59e0b, 0x14b8a6, x / 0.5) : lerpCol(0x14b8a6, 0x3b82f6, (x - 0.5) / 2); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  return col;
+}
+function contactColours() {
+  const d = D.contact.d, n = d.length, col = new Float32Array(n * 3), far = new THREE.Color(0x2dd4bf), th = D.thick ? D.thick.t : null, fit = new THREE.Color(0xd5dde6);
+  for (let v = 0; v < n; v++) { const x = d[v]; const c = th && !(th[v] === th[v]) ? fit : !(x === x) ? far : x <= 0.1 ? new THREE.Color(0xdc2626) : x <= 0.5 ? lerpCol(0xf97316, 0xfacc15, (x - 0.1) / 0.4) : lerpCol(0xfacc15, 0x2dd4bf, (x - 0.5) / 1.5); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  return col;
+}
+function makeObject() {
+  dropObject(); if (!D.meshCase) return;
+  const chk = stepId() === 'check', cols = chk && P.map === 'thick' && D.thick ? thicknessColours() : chk && P.map === 'contact' && D.contact ? contactColours() : null, thick = !!cols;
+  const mesh = { positions: D.meshCase.positions, indices: D.meshCase.indices, colors: cols };
+  const mat = thick ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.02, side: THREE.DoubleSide }) : N.materials.design({ opacity: 0.93 });
+  D.object = new THREE.Mesh(N.toGeometry(mesh), mat); D.object.name = 'splint'; viewer.add(D.object);
+}
+let ucObj = null, marginLines = [], arrow = null, thinMark = null, thinLabel = null;
+function clearOverlays() {
+  if (ucObj) { viewer.scene.remove(ucObj); ucObj.geometry.dispose(); ucObj = null; }
+  for (const l of marginLines) l.dispose(); marginLines = [];
+  if (arrow) { viewer.scene.remove(arrow); arrow = null; }
+  if (thinMark) { viewer.scene.remove(thinMark); thinMark = null; } if (thinLabel) { thinLabel.remove(); thinLabel = null; }
+  viewer.invalidate();
+}
+const UC = { none: new THREE.Color(0xe9dcc6), grip: new THREE.Color(0x2dd4bf), lo: new THREE.Color(0xfacc15), hi: new THREE.Color(0xdc2626) };
+/** colour the appliance arch by undercut depth for the current path */
+function showUndercuts() {
+  if (!prep()) return; const sc = scans[D.jaw], R = K.tiltMatrix(P.tiltX, P.tiltY), mw = N.transformMesh(D.scanA, R), hf = N.rasterHeightfield(mw, { cell: 0.1, pad: 0.6 }), dep = K.undercutDepth(mw, hf, 2.2);
+  const n = dep.length, col = new Float32Array(n * 3), r = P.retention, c = new THREE.Color(); let nUc = 0, nBlock = 0, max = 0;
+  for (let v = 0; v < n; v++) { const d = dep[v]; if (d <= 0) c.copy(UC.none); else { nUc++; if (d > max) max = d; if (d <= r + 0.05) c.copy(UC.grip); else { nBlock++; c.copy(UC.lo).lerp(UC.hi, N.clamp((d - r) / 1.2, 0, 1)); } } col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  if (!ucObj || ucObj.userData.raw !== sc.raw) {
+    if (ucObj) { viewer.scene.remove(ucObj); ucObj.geometry.dispose(); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sc.raw.positions, 3)); g.setIndex(new THREE.BufferAttribute(sc.raw.indices, 1)); g.computeVertexNormals();
+    ucObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02, side: THREE.DoubleSide })); ucObj.userData.raw = sc.raw; ucObj.userData.noFit = true; ucObj.matrixAutoUpdate = false; viewer.scene.add(ucObj);
+  }
+  ucObj.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3)); ucObj.matrix.copy(sc.matrix); ucObj.updateMatrixWorld(true); ucObj.visible = true;
+  D.uc = { share: nUc / n, blocked: nBlock / n, max };
+  // arrow along the path of insertion (pointing the way the appliance comes off)
+  const Ai = K.archMatrix(D.jaw).invert(), dir = new THREE.Vector3(0, 0, 1).applyMatrix4(R.clone().invert()).applyMatrix4(Ai).normalize(), b = N.meshBounds(scans.framed(D.jaw));
+  if (arrow) viewer.scene.remove(arrow);
+  arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, b.center[1], D.jaw === 'upper' ? b.min[2] - 2 : b.max[2] + 2), 14, 0xe879f9, 4, 2.4); arrow.userData.noFit = true; viewer.scene.add(arrow);
+  viewer.invalidate();
+}
+const marginParams = () => ({ buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
+function showMargin(withDots = stepId() === 'margin') {
+  for (const l of marginLines) l.dispose(); marginLines = [];
+  if (!prep()) return; const Ai = K.archMatrix(D.jaw).invert(), v = new THREE.Vector3();
+  for (const line of K.marginLines(D.hfA, D.arch, marginParams())) marginLines.push(viewer.line(line.map((q) => v.set(q[0], q[1], q[2]).applyMatrix4(Ai).clone()), { color: 0xe879f9, width: 3, depthTest: false }));
+  if (withDots) placeDots(); else clearDots();
+}
+// ---- local margin changes: a dot every few millimetres on each side, dragged up or down ----
+let dots = [], dragDot = -1;
+function clearDots() { for (const d of dots) viewer.scene.remove(d.sprite); dots = []; viewer.invalidate(); }
+/** where control point k of a side sits on the scan: out from the centre line until the surface drops below the margin height */
+function dotPosition(side, k) {
+  const A = D.arch, u = k / (NCTRL - 1), s = u * A.L, i = Math.min(A.n - 1, Math.round(s / A.step)), sg = side === 'B' ? 1 : -1, o = {}, mp = marginParams();
+  let x = A.px[i], y = A.py[i], z = 0;
+  for (let dist = 0.6; dist <= 13; dist += 0.2) { x = A.px[i] + sg * A.ox[i] * dist; y = A.py[i] + sg * A.oy[i] * dist; K.borderAt(A, mp, x, y, o); z = o.z; const h = N.sampleField(D.hfA, x, y); if (o.z === Infinity || !(h >= o.z)) break; }
+  if (z === Infinity) { K.borderAt(A, mp, A.px[i] + sg * A.ox[i] * 3, A.py[i] + sg * A.oy[i] * 3, o); z = o.z; }
+  return new THREE.Vector3(x, y, z).applyMatrix4(K.archMatrix(D.jaw).invert());
+}
+function placeDots() {
+  if (!D.arch) return clearDots();
+  if (dots.length !== 2 * NCTRL) { clearDots(); for (const side of ['B', 'L']) for (let k = 0; k < NCTRL; k++) dots.push({ side, k, sprite: viewer.marker(new THREE.Vector3(), { color: 0xa21caf, px: 24 }) }); }
+  for (const d of dots) d.sprite.position.copy(dotPosition(d.side, d.k)); viewer.invalidate();
+}
+const hitDot = (x, y, tol) => { let best = -1, bd = tol; dots.forEach((d, i) => { const q = viewer.toScreen(d.sprite.position); if (!q.visible) return; const e = Math.hypot(q.x - x, q.y - y); if (e < bd) { bd = e; best = i; } }); return best; };
+const marginTool = {
+  cursor: '',
+  onDown: (i) => { if (i.button !== 0) return false; dragDot = hitDot(i.x, i.y, i.pointerType === 'mouse' ? 16 : 28); return dragDot >= 0; },
+  onMove: (i) => {
+    if (!i.dragging) { viewer.dom.style.cursor = hitDot(i.x, i.y, 16) >= 0 ? 'ns-resize' : ''; return; }
+    if (dragDot < 0) return; const d = dots[dragDot], p0 = d.sprite.position, r = viewer.dom.getBoundingClientRect();
+    const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(((i.clientX - r.left) / r.width) * 2 - 1, -((i.clientY - r.top) / r.height) * 2 + 1), viewer.camera);
+    const dir = ray.ray.direction, w0 = p0.clone().sub(ray.ray.origin), b = dir.z, den = 1 - b * b; let zc;
+    if (den > 0.04) zc = p0.z + (b * dir.dot(w0) - w0.z) / den;                  // nearest point of the vertical line through the dot to the pointer's ray
+    else { const h = i.pick(scans[D.jaw] ? [ucObj && ucObj.visible ? ucObj : scans[D.jaw].object] : []); if (!h) return; zc = h.point.z; }
+    const zA = D.jaw === 'upper' ? -zc : zc, key = d.side === 'B' ? 'adjB' : 'adjL', u = d.k / (NCTRL - 1), base = (() => { const mp = { ...marginParams(), [key]: [] }, o = {}, A = D.arch, ii = Math.min(A.n - 1, Math.round(u * A.L / A.step)), sg = d.side === 'B' ? 1 : -1; K.borderAt(A, mp, A.px[ii] + sg * A.ox[ii] * 3, A.py[ii] + sg * A.oy[ii] * 3, o); return o.z; })();
+    if (P[key].length !== NCTRL) P[key] = new Array(NCTRL).fill(0);
+    P[key][d.k] = N.clamp(Math.round((zA - base) * 20) / 20, -6, 6); showMargin(true);
+  },
+  onUp: () => { if (dragDot >= 0) { dragDot = -1; touch(); syncUI(); } },
+};
+function showThinnest() {
+  if (thinMark) { viewer.scene.remove(thinMark); thinMark = null; } if (thinLabel) { thinLabel.remove(); thinLabel = null; }
+  if (!D.thick || !D.thick.worstAt) return; const pos = new THREE.Vector3(...D.thick.worstAt), bad = D.thick.worst < -0.1;
+  thinMark = viewer.marker(pos, { color: bad ? 0xef4444 : 0xffffff, px: 14 }); thinLabel = viewer.label(`${D.thick.t[D.thick.worstV].toFixed(2)} mm${bad ? ' — too thin' : ''}`, pos, { dy: -16, color: bad ? 'rgba(185,28,28,.92)' : undefined });
+}
+/** show what belongs to the current step */
+let framed = null;
+function refreshView() {
+  const id = stepId(), jaw = pickJaw(), design = ['appliance', 'path', 'margin', 'shell', 'check', 'export'].includes(id);
+  if (design && jaw) prep();
+  if (design && jaw && D.arch && framed !== D && scans[jaw]) { framed = D; viewer.fit(scans[jaw].object); }      // bring the arch being worked on up to full size, once
+  const other = jaw === 'upper' ? 'lower' : 'upper';
+  if (ucObj) ucObj.visible = false; if (arrow) arrow.visible = false; for (const l of marginLines) l.visible = false;
+  if (thinMark) { viewer.scene.remove(thinMark); thinMark = null; } if (thinLabel) { thinLabel.remove(); thinLabel = null; }
+  let showScan = true, showApp = false; legend.hidden = true;
+  if (jaw && D.arch) {
+    if (id === 'path') { showUndercuts(); showScan = false; legend.hidden = false; legend.innerHTML = `<div><i style="background:#e9dcc6"></i>no undercut</div><div><i style="background:#2dd4bf"></i>gripped (up to ${P.retention.toFixed(2)} mm)</div><div><i style="background:linear-gradient(90deg,#facc15,#dc2626)"></i>blocked out: deeper → redder</div>`; }
+    if (id === 'margin') { showUndercuts(); if (arrow) arrow.visible = false; showScan = false; legend.hidden = false; legend.innerHTML = `<div><i style="background:#e879f9"></i>margin</div><div><i style="background:#2dd4bf"></i>undercut the appliance may grip</div><div><i style="background:linear-gradient(90deg,#facc15,#dc2626)"></i>undercut that is blocked out</div>`; }
+    if (id === 'margin' || id === 'shell') showMargin();
+    if (BUILD_STEPS.includes(id) && D.res && !D.dirty) {
+      showApp = true; makeObject();
+      if (id === 'check' && P.map === 'thick') { showThinnest(); legend.hidden = false; legend.innerHTML = `<div><i style="background:#ef4444"></i>thinner than asked</div><div><i style="background:linear-gradient(90deg,#f59e0b,#14b8a6)"></i>as asked … 0.5 mm more</div><div><i style="background:linear-gradient(90deg,#14b8a6,#3b82f6)"></i>thicker still</div><div><i style="background:#9fd8cf"></i>border (tapers to the margin)</div>`; }
+      if (id === 'check' && P.map === 'fit') showScan = false;
+    }
+  }
+  if (id === 'check' && P.map === 'contact' && D.contact && showApp) { legend.hidden = false; legend.innerHTML = `<div><i style="background:#dc2626"></i>touching (within 0.1 mm)</div><div><i style="background:linear-gradient(90deg,#f97316,#facc15)"></i>0.1 – 0.5 mm clear</div><div><i style="background:linear-gradient(90deg,#facc15,#2dd4bf)"></i>0.5 – 2 mm clear</div><div><i style="background:#2dd4bf"></i>further away</div>`; }
+  if (D.object) D.object.visible = showApp;
+  // the opposing arch: shown in its opened position while the bite is being shaped, otherwise out of the way
+  const showOpp = design && jaw && D.arch && BUILD_STEPS.includes(id) && oppUsed() && P.showOpp && !(id === 'check' && P.map === 'fit');
+  for (const j of JAWS) { const sc = scans[j]; if (!sc) continue; const moved = showOpp && j === other, m = sc.object.material; sc.object.matrix.copy(moved ? opposing().Om.clone().multiply(sc.matrix) : sc.matrix); sc.object.updateMatrixWorld(true); m.transparent = moved; m.opacity = moved ? 0.55 : 1; m.needsUpdate = true; }
+  if (design && jaw) { if (scans[jaw] && scans[jaw].object.visible !== showScan) scans.setVisible(jaw, showScan); if (scans[other] && scans[other].object.visible !== !!showOpp) scans.setVisible(other, !!showOpp); }
+  else for (const j of JAWS) if (scans[j] && !scans[j].object.visible) scans.setVisible(j, true);
+  if (id !== 'margin') clearDots();
+  if (id === 'margin' && jaw && D.arch) { if (viewer.tool !== marginTool) viewer.setTool(marginTool); shell.hint('Drag a dot up or down to move the margin there.'); } else if (viewer.tool === marginTool) { viewer.setTool(null); shell.hint(''); }
+  showSection();
+  viewer.invalidate();
+}
+
+// ---- cross-section through appliance and scans, straight across the arch ----
+let secObjs = [];
+function clearSection() { for (const o of secObjs) { viewer.scene.remove(o); o.geometry.dispose(); } secObjs = []; viewer.renderer.localClippingEnabled = false; for (const j of JAWS) if (scans[j]) scans[j].object.material.clippingPlanes = null; if (D.object) D.object.material.clippingPlanes = null; }
+/** segments where a mesh crosses the plane n·p = c, keyed by the mesh edges they end on (so they can be chained) */
+function cutMesh(mesh, n, c, matrix = null) {
+  const P0 = mesh.positions, I = mesh.indices, e = matrix ? matrix.elements : null, nV = P0.length / 3, d = new Float32Array(nV), seg = [], pts = new Map();
+  for (let v = 0; v < nV; v++) { let x = P0[3 * v], y = P0[3 * v + 1], z = P0[3 * v + 2]; if (e) { const X = e[0] * x + e[4] * y + e[8] * z + e[12], Y = e[1] * x + e[5] * y + e[9] * z + e[13]; z = e[2] * x + e[6] * y + e[10] * z + e[14]; x = X; y = Y; } d[v] = n.x * x + n.y * y + n.z * z - c || 1e-9; }
+  const pos = (v) => { let x = P0[3 * v], y = P0[3 * v + 1], z = P0[3 * v + 2]; if (e) return [e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]]; return [x, y, z]; };
+  const cut = (a, b) => { const key = a < b ? a * nV + b : b * nV + a; if (!pts.has(key)) { const t = d[a] / (d[a] - d[b]), A = pos(a), B = pos(b); pts.set(key, [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t]); } return key; };
+  for (let f = 0; f < I.length; f += 3) { const a = I[f], b = I[f + 1], cc = I[f + 2], sa = d[a] > 0, sb = d[b] > 0, sc = d[cc] > 0; if (sa === sb && sb === sc) continue;
+    // walk the triangle's edges in order; the segment runs from the edge leaving the positive side to the edge re-entering it
+    const out = sa && !sb ? cut(a, b) : sb && !sc ? cut(b, cc) : cut(cc, a), inn = !sa && sb ? cut(a, b) : !sb && sc ? cut(b, cc) : cut(cc, a); seg.push(out, inn); }
+  return { seg, pts };
+}
+function showSection() {
+  clearSection(); if (!P.section || !D.arch || !D.meshCase || stepId() !== 'check') return;
+  const A = D.arch, i = Math.round(N.clamp(P.sectionAt / 100, 0, 1) * (A.n - 1)), Ai = K.archMatrix(D.jaw).invert(), sgn = P.sectionFlip ? -1 : 1;
+  const Q = new THREE.Vector3(A.px[i], A.py[i], A.top[i]).applyMatrix4(Ai), n = new THREE.Vector3(A.tx[i], A.ty[i], 0).transformDirection(Ai).multiplyScalar(sgn), c = n.dot(Q);
+  const plane = new THREE.Plane(n.clone().negate(), c);              // keeps the side the normal points away from
+  viewer.renderer.localClippingEnabled = true; if (D.object) D.object.material.clippingPlanes = [plane]; for (const j of JAWS) if (scans[j]) scans[j].object.material.clippingPlanes = [plane];
+  // appliance: filled; loops are chained through the mesh edges, and triangulated by Manifold
+  const u = new THREE.Vector3(0, 0, 1), v = new THREE.Vector3().crossVectors(n, u).normalize(), ap = cutMesh(D.meshCase, n, c), next = new Map(); for (let q = 0; q < ap.seg.length; q += 2) next.set(ap.seg[q], ap.seg[q + 1]);
+  const loops = [], seen = new Set();
+  for (const k0 of next.keys()) { if (seen.has(k0)) continue; const loop = []; let k = k0; while (k !== undefined && !seen.has(k)) { seen.add(k); const q = ap.pts.get(k); loop.push([q[0] * v.x + q[1] * v.y + q[2] * v.z, q[0] * u.x + q[1] * u.y + q[2] * u.z]); k = next.get(k); } if (k === k0 && loop.length > 2) loops.push(loop); }
+  if (loops.length && S.ready) { let area = 0; for (const l of loops) for (let q = 0; q < l.length; q++) { const a = l[q], b = l[(q + 1) % l.length]; area += a[0] * b[1] - b[0] * a[1]; } if (area < 0) for (const l of loops) l.reverse();
+    S.ready().then((M) => { if (!P.section || stepId() !== 'check') return; let tri = []; try { tri = M.triangulate(loops); } catch (_) { tri = []; } const flat = loops.flat(), pos = new Float32Array(flat.length * 3), off = n.clone().multiplyScalar(-0.02);
+      flat.forEach((q, k) => { const w = Q.clone().addScaledVector(v, q[0] - Q.dot(v)).addScaledVector(u, q[1] - Q.dot(u)).add(off); pos[3 * k] = w.x; pos[3 * k + 1] = w.y; pos[3 * k + 2] = w.z; });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(tri.flat());
+      const cap = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x0d9488, side: THREE.DoubleSide })); cap.userData.noFit = true; viewer.scene.add(cap); secObjs.push(cap); viewer.invalidate(); }); }
+  // scans: outline only (a scan is an open surface)
+  const lineOf = (cutRes, color) => { const arr = []; for (const k of cutRes.seg) { const q = cutRes.pts.get(k); arr.push(q[0] - n.x * 0.03, q[1] - n.y * 0.03, q[2] - n.z * 0.03); } const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3)); const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true })); l.renderOrder = 997; l.userData.noFit = true; viewer.scene.add(l); secObjs.push(l); };
+  for (const j of JAWS) { const sc = scans[j]; if (!sc || !sc.object.visible) continue; lineOf(cutMesh(sc.raw, n, c, sc.object.matrix), j === D.jaw ? 0xffffff : 0x9db4cc); }
+  lineOf(ap, 0x99f6e4); D.sectionView = { Q, n }; viewer.invalidate();
+}
+
+// ───────────── controls ─────────────
+const mm = (v) => parseFloat(v.toFixed(2)) + ' mm', deg = (v) => parseFloat(v.toFixed(1)) + '°';
+let ucRaf = 0; const ucSoon = () => { if (ucRaf) return; ucRaf = requestAnimationFrame(() => { ucRaf = 0; if (stepId() === 'path') { showUndercuts(); syncUI(); } }); };
+const R = {
+  tiltX: N.rangeBind('paX', (v, done) => { P.tiltX = v; ucSoon(); if (done) touch(); }, { fmt: deg }), tiltY: N.rangeBind('paY', (v, done) => { P.tiltY = v; ucSoon(); if (done) touch(); }, { fmt: deg }),
+  retention: N.rangeBind('paRet', (v, done) => { P.retention = v; ucSoon(); if (done) { touch(); refreshView(); } }, { fmt: mm }),
+  buccal: N.rangeBind('mgB', (v, done) => { P.buccal = v; showMargin(); if (done) touch(); }, { fmt: mm }), lingual: N.rangeBind('mgL', (v, done) => { P.lingual = v; showMargin(); if (done) touch(); }, { fmt: mm }),
+  clearance: N.rangeBind('shC', (v, done) => { P.clearance = v; if (done) touch(true); }, { fmt: mm }), thickness: N.rangeBind('shT', (v, done) => { P.thickness = v; if (done) touch(true); }, { fmt: mm }),
+  minThick: N.rangeBind('shMin', (v, done) => { P.minThick = v; if (done) { if (kindOf() === 'flat') return touch(true); gradeThickness(); syncUI(); refreshView(); } }, { fmt: mm }), edge: N.rangeBind('shE', (v, done) => { P.edge = v; if (done) touch(true); }, { fmt: mm }),
+};
+Object.assign(R, {
+  open: N.rangeBind('shOpen', (v, done) => { P.open = v; if (done) touch(true); }, { fmt: mm }), imprint: N.rangeBind('shImp', (v, done) => { P.imprint = v; if (done) touch(true); }, { fmt: mm }),
+  occlusal: N.rangeBind('shOcc', (v, done) => { P.occlusal = v; if (done) touch(true); }, { fmt: mm }),
+});
+const SEG = {
+  jaw: N.segBind($('apJaw'), (v) => { if (!scans.has(v)) return syncUI(); P.jaw = v; resetDesign(); syncUI(); refreshView(); }),
+  map: N.segBind($('ckMap'), (v) => { P.map = v; refreshView(); }, P.map), pos: N.segBind($('exPos'), (v) => { P.pos = v; }, P.pos),
+  mode: N.segBind($('shMode'), (v) => { P.openMode = v; touch(true); }, P.openMode),
+};
+for (const [id, key, rebuild] of [['shUse', 'useOpp', true], ['shMeet', 'meet', true], ['shShow', 'showOpp', false]]) $(id).addEventListener('change', (e) => { P[key] = e.target.checked; if (rebuild) touch(true); syncUI(); refreshView(); });
+$('shAuto').addEventListener('click', async () => {
+  if (!prep() || !oppAvailable()) return shell.status('Load the opposing arch in the same bite first', true);
+  await shell.busy('Finding the opening…', async () => {
+    const room = (open) => { const f = scans.framed(otherJaw()), Om = K.openingMatrix(P.openMode, open, otherJaw(), scans.has('lower') ? K.incisalPoint(scans.framed('lower')) : null); const r = K.tableRoom(D.hfA, D.arch, N.transformMesh({ positions: f.positions, indices: f.indices }, K.archMatrix(D.jaw).multiply(Om)), P.clearance, P.minThick, P.imprint); return r === null ? -1 : r - 0.2; };      // 0.2 mm to spare: the fit side is relieved a little over sharp cusps
+    let lo = 0, hi = 12; if (room(hi) < 0) { shell.status('Even 12 mm of opening is not enough — check the scans', true); return; }
+    if (room(0) >= 0) hi = 0; else for (let it = 0; it < 9; it++) { const mid = (lo + hi) / 2; if (room(mid) >= 0) hi = mid; else lo = mid; await N.sleep(0); }
+    P.open = Math.min(10, Math.ceil(hi * 4) / 4); P.useOpp = true; P.meet = true; paramsToUI(); shell.status(`Bite opened by ${P.open} mm at the incisors`);
+  });
+  touch(true);
+});
+$('apType').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; P.type = b.dataset.v; Object.assign(P, PRESETS[P.type].set); paramsToUI(); touch(); syncUI(); shell.status(`${PRESETS[P.type].label}: starting values set`); });
+$('paReset').addEventListener('click', () => { P.tiltX = P.tiltY = 0; paramsToUI(); touch(); refreshView(); });
+$('mgReset').addEventListener('click', () => { P.adjB = []; P.adjL = []; showMargin(); touch(); shell.status('Local margin changes removed'); });
+$('ckSec').addEventListener('change', (e) => { P.section = e.target.checked; syncUI(); showSection(); if (P.section) faceSection(); });
+$('ckFlip').addEventListener('click', () => { P.sectionFlip = !P.sectionFlip; showSection(); faceSection(); });
+$('ckFace').addEventListener('click', () => faceSection());
+function faceSection() { const sv = D.sectionView; if (!sv || !P.section) return; const b = new THREE.Box3().setFromCenterAndSize(sv.Q, new THREE.Vector3(26, 26, 26)); viewer.fit(b, { dir: sv.n.clone().multiplyScalar(1).add(new THREE.Vector3(0, 0, D.jaw === 'upper' ? -0.12 : 0.12)).toArray() }); }
+R.sectionAt = N.rangeBind('ckAt', (v) => { P.sectionAt = v; showSection(); }, { fmt: (v) => v.toFixed(0) + '%' });
+$('paView').addEventListener('click', () => {
+  if (!prep()) return shell.status('Load a scan first', true);
+  const v = viewer.camera.position.clone().sub(viewer.controls.target).normalize().transformDirection(K.archMatrix(D.jaw));
+  if (v.z < Math.cos(THREE.MathUtils.degToRad(40))) return shell.status('Turn the model so you look at the biting surfaces first', true);
+  const t = K.pathFromDir([v.x, v.y, v.z]); P.tiltX = N.clamp(Math.round(t.tiltX * 2) / 2, -20, 20); P.tiltY = N.clamp(Math.round(t.tiltY * 2) / 2, -20, 20); paramsToUI(); touch(); refreshView(); shell.status('Path of insertion set from this view');
+});
+function paramsToUI() {
+  R.tiltX.set(P.tiltX); R.tiltY.set(P.tiltY); R.retention.set(P.retention); R.buccal.set(P.buccal); R.lingual.set(P.lingual); R.clearance.set(P.clearance); R.thickness.set(P.thickness); R.minThick.set(P.minThick); R.edge.set(P.edge);
+  R.sectionAt.set(P.sectionAt); $('ckSec').checked = !!P.section;
+  R.open.set(P.open); R.imprint.set(P.imprint); R.occlusal.set(P.occlusal); SEG.mode(P.openMode); $('shUse').checked = !!P.useOpp; $('shMeet').checked = !!P.meet; $('shShow').checked = !!P.showOpp;
+  SEG.map(P.map); SEG.pos(P.pos); [...$('apType').children].forEach((b) => b.classList.toggle('on', b.dataset.v === P.type));
+}
+
+// ───────────── summary + export ─────────────
+function summaryHtml() {
+  if (!pickJaw()) return '<div class="note warn">Load a scan first.</div>';
+  if (D.error) return `<div class="note bad">${N.esc(D.error)}</div>`;
+  if (!D.res || D.dirty) return '<div class="note">Not built yet.</div>';
+  const r = D.res.report, th = D.thick, warn = [], f2 = (g) => (g && g.v >= 0 ? g.min.toFixed(2) + ' mm' : '–'), wallNeed = Math.min(P.minThick, P.thickness);
+  if (!r.watertight) warn.push('The mesh is not watertight — do not print it.');
+  if (th && th.occ.v >= 0 && th.occ.min < P.minThick - 0.1) warn.push(`The biting surface is thinner than the minimum of ${P.minThick.toFixed(1)} mm (${th.occ.min.toFixed(2)} mm at its thinnest).`);
+  if (th && th.wall.v >= 0 && th.wall.min < wallNeed - 0.1) warn.push(`A wall is thinner than ${wallNeed.toFixed(1)} mm (${th.wall.min.toFixed(2)} mm at its thinnest).`);
+  if (r.crumbs && r.crumbVolume > 0.5) warn.push(`${r.crumbs} loose bit${r.crumbs > 1 ? 's' : ''} left out (${r.crumbVolume.toFixed(1)} mm³ in all).`);
+  if (r.lift > 0.15) warn.push(`Not enough room for a flat table ${P.minThick.toFixed(1)} mm thick: over some cusps the appliance stands up to ${r.lift.toFixed(1)} mm above the table. Open the bite further.`);
+  if (r.edge > 3) warn.push(`The margin runs past the edge of the scan (about ${Math.round(r.edge)} mm of it). The appliance has nothing to follow there and comes out thin or ragged: shorten the margin on that side.`);
+  let opp = ''; const ct = D.contact;
+  if (ct) {
+    const o = {}, side = { left: 0, right: 0, front: 0 }; for (const q of ct.patches) { K.archCoords(D.arch, q.x, q.y, o); const u = o.s / D.arch.L; if (u > 0.3 && u < 0.7) side.front++; else if ((D.jaw === 'upper' ? -q.x : q.x) > 0) side.left++; else side.right++; }
+    opp = `<div><span>Closest to the opposing teeth</span><b>${ct.min === Infinity ? '> 2 mm' : ct.min.toFixed(2) + ' mm'}</b></div><div><span>Contacts within 0.1 mm</span><b>${ct.patches.length}${ct.patches.length ? ` (left ${side.left} · front ${side.front} · right ${side.right})` : ''}</b></div>`;
+    if (ct.through) warn.push(`The appliance passes through the opposing arch at ${ct.through} point${ct.through > 1 ? 's' : ''}.`);
+    if (kindOf() === 'flat' && P.meet && ct.patches.length < 3) warn.push('Fewer than three contacts with the opposing teeth.');
+  }
+  return `<div class="sum"><h5>${NAME[D.jaw]} appliance<span class="okb${r.watertight ? '' : ' bad'}">${r.watertight ? 'Watertight' : 'Not watertight'}</span></h5>
+    <div><span>Thinnest biting surface</span><b>${f2(th && th.occ)}</b></div><div><span>Thinnest wall (away from the border)</span><b>${f2(th && th.wall)}</b></div>${opp}
+    <div><span>Resin volume</span><b>${(r.volume / 1000).toFixed(2)} mL</b></div>
+    <div><span>Triangles</span><b>${(r.tris || 0).toLocaleString('en-GB')}</b></div></div>
+    ${warn.map((w) => `<div class="note ${/watertight/.test(w) ? 'bad' : 'warn'}">${N.esc(w)}</div>`).join('')}`;
+}
+function syncUI() {
+  const jaw = pickJaw(), both = scans.has('upper') && scans.has('lower');
+  for (const b of $('apJaw').children) b.disabled = !scans.has(b.dataset.v); SEG.jaw(jaw || '');
+  $('apInfo').innerHTML = !jaw ? '<div class="note warn">Load a scan first.</div>' : D.error ? `<div class="note bad">${N.esc(D.error)}</div>` : `<div class="note">${N.esc(PRESETS[P.type] ? PRESETS[P.type].note : '')}${both ? '' : ' Only one arch is loaded, so the biting surface cannot be shaped to the opposing teeth.'}</div>`;
+  $('paInfo').innerHTML = D.uc && jaw ? `<div class="note">${(D.uc.share * 100).toFixed(0)}% of this scan lies in an undercut for this path; deepest ${D.uc.max.toFixed(1)} mm.</div>` : '';
+  const flat = kindOf() === 'flat', avail = oppAvailable();
+  $('shTlab').textContent = flat ? 'Wall thickness' : 'Thickness'; $('shUse').disabled = !avail; $('shUseRow').title = avail ? '' : 'Needs the opposing arch, loaded in the same bite';
+  $('shOpp').hidden = !(avail && P.useOpp); for (const e of document.querySelectorAll('.flatOnly')) e.hidden = !flat; $('shOccRow').hidden = !flat || (avail && P.useOpp && P.meet);
+  $('ckSecRow').hidden = $('ckFace').hidden = $('ckFlip').hidden = !P.section;
+  $('mgInfo').innerHTML = (P.adjB.some((v) => v) || P.adjL.some((v) => v)) ? '<div class="note">The margin has local changes.</div>' : '';
+  $('ckMap').querySelector('[data-v=contact]').disabled = !(D.contact && !D.dirty); if (P.map === 'contact' && !D.contact) { P.map = 'thick'; SEG.map('thick'); }
+  const sum = summaryHtml(); $('shInfo').innerHTML = sum; $('ckSummary').innerHTML = sum; $('exSummary').innerHTML = sum;
+  const built = !!(D.res && !D.dirty && !D.error);
+  shell.markDone('load', !!jaw); for (const id of ['shell', 'check', 'export']) shell.markDone(id, built);
+}
+function exportMesh() { const m = { positions: D.meshCase.positions, indices: D.meshCase.indices }; return P.pos === 'scan' ? N.transformMesh(m, scans[D.jaw].matrix.clone().invert()) : m; }
+$('exStl').addEventListener('click', async () => {
+  if (!(await ensureBuilt())) return shell.status(D.error || 'Load a scan first', true);
+  const r = await shell.busy('Writing STL…', async () => N.saveFile(`splint-${D.jaw}.stl`, N.stlBinary(exportMesh(), null, `Splint Card ${D.jaw} appliance, mm`)));
+  shell.status(r.message, !r.ok && r.code !== 'declined');
+});
+$('exCase').addEventListener('click', () => scans.saveCase());
+
+// ───────────── step changes ─────────────
+shell.onStepChange(async (i) => {
+  const id = shell.steps[i].id;
+  if (BUILD_STEPS.includes(id) && pickJaw()) await ensureBuilt(); else { syncUI(); refreshView(); }
+  if (id === 'path' && pickJaw() && D.arch) viewer.setView(D.jaw === 'upper' ? 'bottom' : 'top');
+});
+for (const [id, t] of [['bBack', 'Back to the previous step'], ['bNext', 'On to the next step']]) { const b = document.getElementById(id); if (b && !b.title) b.title = t; }
+for (const b of document.querySelectorAll('[data-so=which] button')) if (!b.title) b.title = b.dataset.v === 'both' ? 'Turn both arches together' : `Turn the ${b.dataset.v} arch only`;      // the shared orientation step leaves these three without a tooltip
+$('srcTip').innerHTML = '<b>Sources</b> (checked November 2026). <b>Fit clearance:</b> Formlabs’ application guide for splints gives an offset of 0.05–0.10 mm for Dental LT Clear V2 in 3Shape and exocad (0.01 to −0.03 mm for Dental LT Comfort). <b>Minimum thickness:</b> Formlabs’ manufacturing guide for Dental LT Comfort (PRNT-0106 rev 03, 2024) asks for at least 2 mm on occlusal surfaces and 1 mm on walls for splints and night guards. Other resins and printers differ, so follow the instructions for the resin you print. <b>Hinge:</b> an equilateral “Bonwill triangle” of 101.6 mm (4 in) between the two condyles and the lower incisal point, tilted 26° to the biting plane (“Balkwill angle”), puts the axis about 79 mm behind and 39 mm above the lower incisal edge. These are the classical averages as quoted by Xu &amp; Bu (2026, preprint), who themselves measured 101.0 mm and 22.7°; sides of 97–99 mm were measured on dry mandibles (J Adv Pharm Technol Res 2022;13(S1):S194–7). People differ, so the hinge opening is only an approximation.';
+paramsToUI(); syncUI(); shell.goto(0);
+S.ready();
+window.APP = { N, S, K, shell, viewer, scans, P, get D() { return D; }, dots: () => dots, faceSection, showSection, opposing, gradeThickness, state: { P, get D() { return D; } }, ensureBuilt, touch, prep, refreshView, exportMesh, paramsToUI, kindColours, kindsFromColours };
+</script>
+</body>
+</html>

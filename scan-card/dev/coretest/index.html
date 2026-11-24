@@ -1,0 +1,16 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>core test</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"}}</script>
+</head><body>
+<script type="module">
+import * as N from './core.js';
+let scans;
+const shell = N.createShell({ name: 'Core Test', tagline: 'shared core smoke page', emptyHtml: '<div><b>No scan loaded</b>Drop an STL, PLY or OBJ scan here, or use “Load scans”.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [{ id: 'load', title: 'Load scans', html: '' }, { id: 'orient', title: 'Check orientation', html: '' }, { id: 'c', title: 'Export', html: '<p>Third</p>' }] });
+const viewer = N.createViewer(shell.view); N.addViewButtons(shell, viewer);
+const log = [];
+scans = N.createScanSet({ shell, viewer, appName: 'Core Test', loadStep: 'load', orientStep: 'orient', onChange: (w) => log.push(w), extendCase: (c) => { c.data.coretest = { hello: 1 }; }, readCase: (c) => { window.lastCaseData = c.data; } });
+shell.goto(0);
+window.T = { N, shell, viewer, scans, log };
+window.READY = true;
+</script></body></html>
