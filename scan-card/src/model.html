@@ -81,6 +81,7 @@ const shell = N.createShell({
       <div id="exSummary"></div>
       <div class="row"><label>Position</label><div class="seg" id="exPos"><button data-v="print" type="button" title="Each model sits base-down at Z = 0, ready for the slicer">Flat for printing</button><button data-v="scan" type="button" title="Exactly where the scanner put the scans, so the models line up with them in other software">As scanned</button></div></div>
       <div class="btns"><button class="btn pri" id="exStl" type="button" title="Download the model(s) as STL">Download STL</button><button class="btn" id="exCase" type="button" title="Save scans and models as one case file for the other apps">Save case</button></div>
+      <div id="exUseBox" hidden><div class="h4">Design on the model</div><p class="note" id="exUseNote"></p><div class="btns"><button class="btn pri" id="exUse" type="button" title="Trays, Analysis, Splint, Compare, Prep check and Wax-up get this model with its base in place of the scan">Use the models in the other tools</button></div></div>
       <p class="note">A design aid for making study and working models. Check each printed model against the scan and the patient before relying on it.</p>
       <p class="tip">Sizes are in millimetres. “Flat for printing” gives one STL per arch with the base on Z = 0. If both arches were built you get both files together in one zip.</p>` },
   ],
@@ -302,7 +303,7 @@ function syncUI() {
   const sum = JAWS.map(summaryHtml).join('') || (present().length ? '' : '<div class="note warn">Load a scan first.</div>');
   $('bsInfo').innerHTML = sum; $('hoInfo').innerHTML = sum; $('exSummary').innerHTML = sum;
   for (const id of ['base', 'hollow', 'label', 'export']) shell.markDone(id, present().length > 0 && present().every((j) => !A[j].dirty && !A[j].error && A[j].model));
-  shell.markDone('load', present().length > 0);
+  shell.markDone('load', present().length > 0); useUI();
 }
 function exportMesh(j) {
   const a = A[j]; if (P.pos === 'scan') return N.transformMesh(a.model, scans[j].matrix.clone().invert());
@@ -314,6 +315,17 @@ $('exStl').addEventListener('click', async () => {
   shell.status(r.message, !r.ok && r.code !== 'declined');
 });
 $('exCase').addEventListener('click', () => scans.saveCase());
+// inside Scan Card: the models with their bases can be what the other tools work on (a special tray on the model and its land, not on the raw scan)
+function useUI() {
+  if (!N.EMBED || !N.HUB.useModels) return; $('exUseBox').hidden = false; const on = N.HUB.source === 'model';
+  $('exUse').textContent = on ? 'Back to the scans in the other tools' : 'Use the models in the other tools';
+  $('exUseNote').textContent = on ? 'The other tools work on these models with their bases. Changing a model here restarts any tool that was working on it.' : 'Trays, Analysis, Splint, Compare, Prep check and Wax-up can work on these models, base and all, instead of the raw scans — for example a special tray that runs onto the model’s land.';
+}
+$('exUse').addEventListener('click', async () => {
+  if (N.HUB.source === 'model') { await N.HUB.useModels(false); return useUI(); }
+  if (!(await ensureBuilt())) return; if (!present().some((j) => A[j].model)) return shell.status('Load a scan first', true);
+  await N.HUB.useModels(true); useUI();
+});
 
 // ───────────── step changes ─────────────
 shell.onStepChange(async (i) => {

@@ -51,7 +51,7 @@ const fs = require('fs');
   const b = await openHub();
   await b.page.setInputFiles('input[data-ss=file]', f1);
   await b.page.waitForFunction(() => APP.scans.has('upper') && APP.scans.has('lower') && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 120000 });
-  ok(await b.page.evaluate(() => APP.TOOLS.filter((t) => t.kind === 'case').every((t) => APP.valid(t))), 'opened in a fresh Scan Card: the work of all three tools counts as made on these scans');
+  ok(await b.page.evaluate(() => APP.TOOLS.filter((t) => ['model', 'analysis', 'splint'].includes(t.id)).every((t) => APP.valid(t))), 'opened in a fresh Scan Card: the work of all three tools counts as made on these scans');
   const an2 = await b.go('analysis');
   const got2 = await an2.evaluate(() => ({ w: APP.calc.w, bolton: APP.calc.bolton }));
   ok(JSON.stringify(got2.w) === JSON.stringify(got.w) && got2.bolton.overall.ratio === got.bolton.overall.ratio, 'Analysis: every width and the Bolton result are back, identical');

@@ -77,13 +77,13 @@ const TOOLS = [
   { id: 'wax', name: 'Wax-up', what: 'Digital wax-up', blurb: 'Wax Card: place library teeth on the scan, blend them in and check the occlusion.', url: '/wax-card/', path: '/wax-card/', kind: 'files' },
 ].filter((t) => !CFG.tools || CFG.tools.includes(t.id)).map((t) => ({ ...t, url: (CFG.urls && CFG.urls[t.id]) || t.url }));
 const TOOL = Object.fromEntries(TOOLS.map((t) => [t.id, t])), CASE_TOOLS = TOOLS.filter((t) => t.kind === 'case');
-const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second']);
+const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep', 'scanCard']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second']);
 // Inside the single-file offline copy of the Notile suite there are no URLs to load: the suite hands over each page's HTML instead.
 const SUITE = (() => { try { return (window.parent !== window && window.parent.SUITE) || null; } catch (_) { return null; } })();
 if (SUITE && !window.SUITE) window.SUITE = SUITE;                // the tools' own offline shims look for it one level up
 
 const F = {};                                                    // tool id → { tool, el (iframe), api, sig (the scans it holds), ready }
-const H = { active: 'scans', sig: '', dirty: true, basis: {}, foreign: null, unlocked: false, q: Promise.resolve(), lru: [], step: {} };
+const H = { active: 'scans', sig: '', dirty: true, basis: {}, foreign: null, unlocked: false, q: Promise.resolve(), lru: [], step: {}, src: 'scan' };   // src: what the tools other than Models work on — 'scan' or 'model' (the model with its base, from Models)
 
 // ───────────── what the tool pages can ask of the hub ─────────────
 window.SCANHUB = {
@@ -93,6 +93,10 @@ window.SCANHUB = {
   saveCase: () => saveCase(),
   saveFile: (name, data) => saveFromTool(name, data),
   goto: (id) => show(id),
+  /** Models asks for its finished models to be what the other tools work on (or for the scans again). */
+  useModels: (on = true) => setSource(on ? 'model' : 'scan', true),
+  get source() { return H.src; },
+  modelsInUse: () => JAWS.filter((j) => !!modelItem(j)),
   /** Inside a Claude artifact only the top page is given `claude` (which is how files are saved there). The two existing
    *  apps look for window.claude themselves, so their frames are handed this stand-in: the real saving is done up here. */
   get claude() {
@@ -112,6 +116,8 @@ const shell = N.createShell({
     { id: 'trim', title: 'Tidy and trim', optional: true, html: '' },
     { id: 'tools', title: 'Choose a tool', html: `
       <p class="lead">The scans are loaded once, here. Every tool works on them — switch at any time with the tabs at the top.</p>
+      <div class="row"><label>Tools work on</label><div class="seg" id="srcSeg"><button data-v="scan" type="button" title="Trays, Analysis, Splint, Compare, Prep check and Wax-up get the scans as loaded here">The scans</button><button data-v="model" type="button" title="They get the model with its base, as built on the Models tab, in place of the scan">Models with base</button></div></div>
+      <p class="note" id="srcNote"></p>
       ${TOOLS.map((t) => `<button class="tool" type="button" data-tool="${t.id}" title="Open ${N.esc(t.what.toLowerCase())}"><em hidden>in use</em><b>${N.esc(t.what)}</b><span>${N.esc(t.blurb)}</span></button>`).join('')}
       <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis, Splint, Compare and Prep check in one file. Trays and Wax-up save their own project files from inside their tab.</p>
       <p class="tip">Each tool is a design aid, not a certified medical device: check everything it makes against the scan and the patient before it is used.</p>` },
@@ -123,9 +129,9 @@ const scans = N.createScanSet({
   shell, viewer, appName: 'Scan Card', loadStep: 'load', orientStep: 'orient', autosave: false,
   onChange: (what) => { if (what === 'visibility') return; H.dirty = true; stashSoon(); syncUI(); },
   readCase: (c) => {                                             // a case file (or the resumed copy) was opened: its tools' work belongs to these scans
-    H.dirty = true; const sig = refreshSig(); H.basis = {};
-    for (const t of CASE_TOOLS) if ((c.data && c.data[t.key] !== undefined) || t.roles.some((r) => c.get(r))) H.basis[t.id] = sig;
-    H.foreign = sig;
+    H.dirty = true; const sig = refreshSig(); H.basis = {}; H.src = c.data && c.data.scanCard && c.data.scanCard.source === 'model' ? 'model' : 'scan';
+    for (const t of CASE_TOOLS) if ((c.data && c.data[t.key] !== undefined) || t.roles.some((r) => c.get(r))) H.basis[t.id] = sigFor(t);   // (Models first: the others' signatures may include its models)
+    H.foreign = sig; queueMicrotask(srcUI);
   },
 });
 const trim = N.createTrimStep({ shell, viewer, scans, step: 'trim' });
@@ -156,8 +162,16 @@ function refreshSig() {
 }
 /** The same for the two existing apps: they are given the scans in the scanner's own coordinates and line them up themselves, so turning the scans here does not concern them. */
 const rawSigNow = () => { const parts = []; for (const j of JAWS) if (scans[j]) parts.push(j, rawSig(scans[j].raw)); return parts.join('|'); };
-const sigFor = (t) => (t.kind === 'files' ? rawSigNow() : refreshSig());
-const valid = (t) => H.basis[t.id] !== undefined && H.basis[t.id] === refreshSig();
+/** The model with its base for one arch, when the tools should work on models and Models holds one made on these scans
+ *  (saved in the scanner's own coordinates, with the scan's matrix, so it sits exactly where the scan does). */
+function modelItem(j) {
+  if (H.src !== 'model' || !scans[j] || !TOOL.model || H.basis.model === undefined || H.basis.model !== refreshSig()) return null;
+  const it = scans.toCase().get(j + '-model'); return it && it.mesh ? it : null;
+}
+const srcPart = () => (H.src !== 'model' ? '' : JAWS.map((j) => { const it = modelItem(j); return it ? `|${j}-model:${rawSig(it.mesh)}` : ''; }).join(''));
+/** Models always works on the scans; every other tool on the scans or, when chosen, the models with their bases. */
+const sigFor = (t) => (t.kind === 'files' ? (rawSigNow() && rawSigNow() + srcPart()) : t.id === 'model' ? refreshSig() : (refreshSig() && refreshSig() + srcPart()));
+const valid = (t) => H.basis[t.id] !== undefined && H.basis[t.id] === sigFor(t);
 /** The case as it should leave the hub: the scans, plus the work of the tools named — and only work made on these scans. */
 function buildCase(o = {}) {
   const sig = refreshSig(), m = scans.toCase(), c = new N.DentalCase(), keep = new Set((o.tools || CASE_TOOLS.map((t) => t.id)).filter((id) => valid(TOOL[id]))), foreign = o.foreign !== false && H.foreign === sig;
@@ -165,6 +179,11 @@ function buildCase(o = {}) {
   const ownerOfRole = (r) => CASE_TOOLS.find((t) => t.roles.includes(r)), ownerOfKey = (k) => CASE_TOOLS.find((t) => t.key === k);
   c.items = m.items.filter((it) => { if (/-scan$/.test(it.role)) return true; const t = ownerOfRole(it.role); return t ? keep.has(t.id) : (OWN_ROLES.has(it.role) ? false : foreign); });
   for (const k of Object.keys(m.data || {})) { const t = ownerOfKey(k); if (t ? keep.has(t.id) : (OWN_KEYS.has(k) ? false : foreign)) c.data[k] = m.data[k]; }
+  if (H.src === 'model') c.data.scanCard = { source: 'model' };   // (only when it is not the default, so a case without it reads as before)
+  if (o.models) for (const j of JAWS) {                           // a tool that works on the models: the model takes the scan's place (same coordinates, same matrix)
+    const it = modelItem(j), k = c.items.findIndex((x) => x.role === j + '-scan'); if (!it || k < 0) continue;
+    const sc = c.items[k]; c.items.splice(k, 1); c.add({ id: sc.id, role: sc.role, name: `model-${j}`, mesh: it.mesh, matrix: it.matrix, meta: { ...sc.meta, model: true } });
+  }
   return c;
 }
 const leftOut = () => CASE_TOOLS.filter((t) => H.basis[t.id] !== undefined && !valid(t)).map((t) => t.name);
@@ -252,7 +271,7 @@ async function feed(id) {
   if (t.kind === 'case') {
     if (!sig) { if (f.api.hasScans()) f.api.clear(); f.sig = sig; return; }
     const again = !!f.sig && !valid(t), back = !f.sig && valid(t) && H.step[id];
-    await f.api.importCase(await buildCase({ tools: [id], foreign: false }).toBlob('Scan Card', { compress: false }));
+    await f.api.importCase(await buildCase({ tools: [id], foreign: false, models: id !== 'model' }).toBlob('Scan Card', { compress: false }));
     f.sig = sig; if (again) toast(`${t.name} has started again on the changed scans`);
     if (back && f.api.goto) f.api.goto(back);                    // a tool that was closed to save memory comes back where it was
     return;
@@ -271,6 +290,8 @@ async function feed(id) {
  *  exports lines up with the original scan in other software, exactly as if the file had been loaded there directly.
  *  Colour scans go as PLY, the rest as STL. */
 function scanFile(w, jaw) {
+  const it = modelItem(jaw);
+  if (it) return new w.File([N.stlBinary(it.mesh, null, 'Scan Card ' + jaw + ' model with base, mm')], `${jaw}-model.stl`, { type: 'model/stl' });   // the model with its base, in the scan's own coordinates
   const mesh = scans[jaw].raw, col = !!mesh.colors, data = col ? N.plyBinary(mesh) : N.stlBinary(mesh, null, 'Scan Card ' + jaw + ' scan, mm');
   return new w.File([data], `${jaw}.${col ? 'ply' : 'stl'}`, { type: col ? 'application/octet-stream' : 'model/stl' });
 }
@@ -356,7 +377,7 @@ function syncUI() {
   if (locked) lockEl.querySelector('span').textContent = `${listOf(u)} ${u.length > 1 ? 'hold' : 'holds'} work made on them. That work is not carried over to scans that are replaced, turned or trimmed here: ${u.length > 1 ? 'those tools start' : 'that tool starts'} again on the changed scans.`;
   for (const id of ['load', 'orient', 'trim']) shell.stepEl(id).querySelector('.body').toggleAttribute('inert', locked);
   shell.markDone('load', any); shell.markDone('tools', u.length > 0);
-  paintTabs();
+  srcUI(); paintTabs();
 }
 $('unlock').addEventListener('click', () => { H.unlocked = true; syncUI(); });
 // “Open case” in the top bar: from a tool tab, or while the scans are locked, it leads to the Scans tab first
@@ -368,6 +389,25 @@ async function takeFiles(files) {                               // files dropped
   await show('scans'); if (isLocked()) return flashLock();
   return scans.loadFiles(own);
 }
+
+// ───────────── what the tools work on: the scans, or the models with their bases ─────────────
+async function setSource(v, fromModels) {
+  if (fromModels && H.active === 'model') await pull('model');   // the models as they are now
+  H.src = v === 'model' ? 'model' : 'scan'; stashSoon(); srcUI(); paintTabs();
+  const got = JAWS.filter((j) => !!modelItem(j));
+  if (H.src === 'model') toast(got.length ? `Trays, Analysis, Splint, Compare, Prep check and Wax-up now work on the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base` : 'No finished model yet: build one on the Models tab first. Until then the tools get the scans.', !got.length);
+  else toast('The tools work on the scans again');
+  return { ok: H.src === 'scan' || got.length > 0, jaws: got, source: H.src };
+}
+function srcUI() {
+  const seg = $('srcSeg'); if (!seg) return;
+  for (const b of seg.children) b.classList.toggle('on', b.dataset.v === H.src);
+  const got = JAWS.filter((j) => !!modelItem(j)), have = JAWS.filter((j) => scans.has(j)), raw = have.filter((j) => !got.includes(j));
+  $('srcNote').textContent = H.src === 'scan' ? 'Build a model with a base on the Models tab, then choose “Models with base” to design trays and the rest on the model instead of the raw scan.'
+    : !got.length ? 'No finished model on these scans yet: build one on the Models tab. Until then the tools get the scans.'
+    : `The tools get the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base${raw.length ? `, and the ${listOf(raw)} scan (no model built for it)` : ''}. Models itself always starts from the scans. Changing a model restarts the tools that were working on it.`;
+}
+$('srcSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setSource(b.dataset.v); });
 
 // ───────────── saving ─────────────
 let stashT = 0;
@@ -394,7 +434,7 @@ async function ownData(data) {
 async function saveFromTool(name, data) { return N.saveFile(name, await ownData(data)); }
 
 syncUI(); shell.goto(0);
-window.APP = { N, shell, viewer, scans, trim, H, F, TOOLS, show, pull, feed, buildCase, saveCase, refreshSig, valid, users, isLocked, toast };
+window.APP = { N, shell, viewer, scans, trim, H, F, TOOLS, show, pull, feed, buildCase, saveCase, refreshSig, valid, users, isLocked, toast, setSource, modelItem, sigFor };
 </script>
 </body>
 </html>

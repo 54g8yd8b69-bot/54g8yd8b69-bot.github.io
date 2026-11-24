@@ -16,6 +16,14 @@ are tabs that all work on those scans.
 
 Each tool page is still a complete app when opened on its own address (with its own Load and Orient steps).
 
+**Designing on the model.** Build a model with its base on the Models tab, then press "Use the models in the other tools"
+(Models, Export step), or choose "Tools work on: Models with base" in the Scans tab's last step. Trays, Analysis, Splint,
+Compare, Prep check and Wax-up are then given the model, base and all, in place of the raw scan. The model is kept in
+the scan's own coordinates with the scan's matrix, so it sits exactly where the scan does, and the arches stay in their
+bite. Tray Card and Wax Card get it as `upper-model.stl` / `lower-model.stl`. Models itself always starts from the scans.
+An arch with no finished model goes on as the scan. Changing a model, or switching back to the scans, restarts the tools
+that were working on it (Tray Card and Wax Card ask first). The choice is saved in the case file (`data.scanCard.source`).
+
 **Lining up with a bite scan.** Once both arches are loaded, the Load step offers "Line up with a bite scan…": load the
 buccal bite registration (STL, PLY or OBJ) that the scanner exported with the arches. If the bite scan shares an arch's
 file coordinates (most scanners export it that way), that arch is placed at once and the other arch is fitted to the
