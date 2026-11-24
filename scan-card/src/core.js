@@ -1289,6 +1289,9 @@ export function createScanSet(o) {
     <input type="file" data-ss="file" accept=".stl,.ply,.obj,.zip" multiple hidden>
     <div class="btns"><button class="btn" data-ss="swap" type="button" title="The scans are in the wrong slots">Swap upper ↔ lower</button>${demos.map((d, i) => `<button class="btn" data-ss="demo" data-i="${i}" type="button" title="${esc(d.title || 'Load made-up demo scans to try the app')}">${esc(d.label)}</button>`).join('')}</div>
     <div class="btns"><button class="btn" data-ss="open" type="button" title="Open a case file (.zip) saved by any app of the suite">Open case…</button><button class="btn" data-ss="resume" type="button" hidden title="Carry on with the case kept in this browser">Resume last case</button><button class="btn" data-ss="forget" type="button" hidden title="Delete the copy of the last case kept in this browser">Forget it</button></div>
+    <div class="btns" data-ss="biterow" hidden><button class="btn" data-ss="bite" type="button" title="Put the upper and lower scans in their bite using a bite scan (a buccal registration showing teeth of both arches)">Line up with a bite scan…</button></div>
+    <input type="file" data-ss="bitefile" accept=".stl,.ply,.obj" hidden>
+    <div data-ss="bitebox"></div>
     <div data-ss="info"></div>
     <p class="tip">Export both arches from the scanner in one go and they keep their bite. Scans stay on this device — nothing is uploaded. A “case” is one .zip holding the scans and whatever you design, and opens in the other apps of the suite. The last case is also kept in this browser so you can resume it; “Forget it” deletes that copy.</p>`);
   const q = (sel) => loadEl.querySelector(sel), fileInp = q('[data-ss=file]'); let pickFor = null;
@@ -1322,7 +1325,8 @@ export function createScanSet(o) {
     }
     S.panel.hidden = !(S.upper || S.lower); shell.setEmpty(!(S.upper || S.lower)); if (S.upper || S.lower) { q('[data-ss=resume]').hidden = true; q('[data-ss=forget]').hidden = true; }
     const info = []; for (const j of JAWS) { const sc = S[j]; if (!sc) continue; const r = sc.report || {}, bits = [`${(sc.raw.indices.length / 3).toLocaleString('en-GB')} triangles`]; if (r.islandsRemoved) bits.push(`${r.islandsRemoved} floating bit${r.islandsRemoved > 1 ? 's' : ''} removed`); if (r.flipped) bits.push(`${r.flipped} flipped triangles fixed`); if (r.nonManifold) bits.push(`${r.nonManifold} bad triangles removed`); if (sc.scaled) bits.push(`scaled ×${sc.scaled} to mm`); info.push(`<div><b>${j === 'upper' ? 'Upper' : 'Lower'}:</b> ${bits.join(' · ')}</div>`); }
-    if (S.upper && S.lower && !S.inBite) info.push('<div class="note warn">These two scans do not look like they were exported in the same bite, so each is positioned on its own. Anything that depends on the bite will not be meaningful.</div>');
+    if (S.upper && S.lower && !S.inBite) info.push('<div class="note warn">These two scans do not look like they were exported in the same bite, so each is positioned on its own. Anything that depends on the bite will not be meaningful until they are lined up with a bite scan.</div>');
+    q('[data-ss=biterow]').hidden = !(S.upper && S.lower);
     q('[data-ss=info]').innerHTML = info.length ? `<div class="note">${info.join('')}</div>` : '';
     if (orientEl) orientEl.querySelector('[data-so=which]').hidden = S.inBite || !(S.upper && S.lower);
     viewer.invalidate();
@@ -1350,6 +1354,56 @@ export function createScanSet(o) {
     }
     if (!r.ok) shell.status(r.note, true);
   }
+  // ---- lining the arches up with a bite scan ----
+  const bite = { key: null, name: '', obj: null, taps: {}, stage: null, pts: [], marks: [], prevTool: null };
+  const biteBox = q('[data-ss=bitebox]');
+  q('[data-ss=bite]').addEventListener('click', () => q('[data-ss=bitefile]').click());
+  q('[data-ss=bitefile]').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { const m = await shell.busy('Reading the bite scan…', async () => cleanMesh(await readMeshFile(f)).mesh); bite.key = m; bite.name = f.name; bite.taps = {}; await runBite(); }
+    catch (err) { shell.status(String((err && err.message) || err), true); }
+  });
+  function biteShow(which) {                                     // which: 'key' | 'upper' | 'lower' | null (back to normal)
+    if (bite.obj) { viewer.remove(bite.obj); bite.obj = null; }
+    for (const j of JAWS) if (S[j]) S[j].object.visible = which === null || which === j;
+    if (which === 'key') { bite.obj = new THREE.Mesh(toGeometry(bite.key, { bvh: true }), materials.scan({ color: 0xf472b6 })); bite.obj.matrixAutoUpdate = false; const ref = S.lower || S.upper; bite.obj.matrix.copy(ref.matrix); bite.obj.updateMatrixWorld(true); viewer.add(bite.obj); }
+    viewer.fit(which === 'key' ? bite.obj : which ? S[which].object : null, { dir: [0.45, -0.85, 0.45] }); viewer.invalidate();
+  }
+  function biteMarks() { for (const m of bite.marks) { viewer.scene.remove(m.m); m.l.remove(); } bite.marks = []; bite.pts.forEach((p, i) => bite.marks.push({ m: viewer.marker(p.world, { color: 0xa21caf, px: 14 }), l: viewer.label(String(i + 1), p.world, { dy: -14 }) })); viewer.invalidate(); }
+  function biteStopTaps() { bite.pts = []; biteMarks(); if (viewer.tool === biteTool) viewer.setTool(bite.prevTool); bite.stage = null; shell.hint(''); biteShow(null); }
+  const biteTool = {
+    cursor: 'crosshair', onDown: () => false, onMove: () => {}, onUp: () => {},
+    onClick: (i) => {
+      const st = bite.stage; if (!st) return; const target = st.on === 'key' ? bite.obj : S[st.arch].object, h = i.pick([target]); if (!h) return;
+      const inv = (st.on === 'key' ? bite.obj.matrix : S[st.arch].matrix).clone().invert(); bite.pts.push({ world: h.point.clone(), file: h.point.clone().applyMatrix4(inv).toArray() }); biteMarks();
+      if (bite.pts.length < 3) return biteAsk();
+      if (st.on === 'key') { bite.keyPts = bite.pts.map((p) => p.file); bite.pts = []; biteMarks(); bite.stage = { on: 'arch', arch: st.arch }; biteShow(st.arch); return biteAsk(); }
+      bite.taps[st.arch] = { key: bite.keyPts, arch: bite.pts.map((p) => p.file) }; const arch = st.arch; biteStopTaps(); runBite(arch);
+    },
+  };
+  function biteAsk() {
+    const st = bite.stage, n = bite.pts.length, A = st.arch === 'upper' ? 'upper' : 'lower';
+    const msg = st.on === 'key' ? `Tap three spots on the bite scan (pink) that you can also find on the ${A} scan — cusp tips or incisal edges, as far apart as you can. ${n} of 3.` : `Now tap the same three spots on the ${A} scan, in the same order. ${n} of 3.`;
+    biteBox.innerHTML = `<div class="note warn">${msg}</div><div class="btns"><button class="btn" type="button" data-bt="undo" title="Take back the last spot">Undo spot</button><button class="btn" type="button" data-bt="cancel" title="Stop lining up">Cancel</button></div>`;
+    shell.hint(st.on === 'key' ? 'Tap the bite scan' : `Tap the ${A} scan`);
+  }
+  biteBox.addEventListener('click', (e) => { const b = e.target.closest('[data-bt]'); if (!b) return; if (b.dataset.bt === 'cancel') { biteStopTaps(); biteBox.innerHTML = ''; } else if (b.dataset.bt === 'undo') { if (bite.pts.length) bite.pts.pop(); else if (bite.stage && bite.stage.on === 'arch') { bite.stage = { on: 'key', arch: bite.stage.arch }; bite.pts = (bite.keyPts || []).map((f) => ({ world: new THREE.Vector3(...f).applyMatrix4((S.lower || S.upper).matrix), file: f })); bite.pts.pop(); biteShow('key'); } biteMarks(); biteAsk(); } });
+  async function runBite() {
+    if (!bite.key || !S.upper || !S.lower) return;
+    let r; await shell.busy('Lining the scans up with the bite scan…', async () => { await sleep(30); r = articulateWithBite(S.upper.raw, S.lower.raw, bite.key, { place: { upper: autoOrient(S.upper.raw, 'upper').matrix, lower: autoOrient(S.lower.raw, 'lower').matrix }, taps: bite.taps }); });   // place: each arch oriented on its own — roughly in the bite, whatever its file coordinates
+    if (!r.ok) {
+      if (r.message) shell.status(r.message, true);
+      bite.taps[r.need] = undefined; bite.stage = { on: 'key', arch: r.need }; bite.pts = []; bite.prevTool = viewer.tool; viewer.setTool(biteTool); biteShow('key'); biteAsk(); return;
+    }
+    const wasShared = r.how.upper === 'same file coordinates' && r.how.lower === 'same file coordinates', already = wasShared && S.inBite && S.upper.matrix.equals(S.lower.matrix);
+    if (!already) {                                               // the upper's points go into the lower's file coordinates: from now on they are one articulated pair
+      const up = S.upper; put('upper', transformMesh(up.raw, r.T), up.name, S.lower.matrix, { report: up.report, scaled: up.scaled, id: up.id }); S.inBite = true;
+    }
+    const how = (j) => ({ 'same file coordinates': 'already in the same coordinates', fitted: 'fitted', taps: 'fitted from your three spots' })[r.how[j]];
+    biteBox.innerHTML = `<div class="note${r.closest > 0.6 ? ' warn' : ''}"><b>${already ? 'Already in the bite' : 'Lined up with the bite scan'}</b><br>${esc(bite.name)}: lower ${how('lower')}, upper ${how('upper')}.<br>Bite scan on the upper: ${r.keyOnUpper.toFixed(2)} mm · on the lower: ${r.keyOnLower.toFixed(2)} mm (median gaps).<br>Closest the arches come: ${r.closest.toFixed(2)} mm.${r.closest > 0.6 ? ' The teeth do not meet anywhere — check that the bite scan was taken with the teeth together.' : ''}</div>`;
+    refreshUI(); viewer.fit(null, { dir: [0.45, -0.85, 0.45] }); if (!already) fire('loaded', { jaw: 'upper', reason: 'bite' });
+  }
+  S.biteScan = { run: (mesh, name = 'bite scan') => { bite.key = mesh; bite.name = name; bite.taps = {}; return runBite(); }, get stage() { return bite.stage; }, tool: biteTool, state: bite };
   S.touch = stashSoon;                                           // call after your own state changes so “Resume last case” keeps it
   S.on = (fn) => { subs.push(fn); };                             // further listeners: fn(what, detail), called after onChange
   S.has = (j) => !!S[j];
@@ -1521,6 +1575,70 @@ export function alignScans(moving, reference, o = {}) {
   }
   const fine = run(best.M, sample(o.points || 8000), 60, keep);
   return { matrix: fine.M, rms: fine.rms, kept: keep, iterations: fine.it };
+}
+
+// ───────────────────────────── articulating two arches with a bite scan ─────────────────────────────
+const bvhOf = (m) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3)); g.setIndex(new THREE.BufferAttribute(Uint32Array.from(m.indices), 1)); return new MeshBVH(g); };
+/** distances from every k-th point of `pts` (flat array), moved by M, to the surface in bvh */
+function gapsTo(bvh, pts, M, step = 1) { const e = M ? M.elements : null, q = new THREE.Vector3(), h = {}, d = []; for (let i = 0; i < pts.length; i += 3 * step) { const x = pts[i], y = pts[i + 1], z = pts[i + 2]; if (e) q.set(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]); else q.set(x, y, z); bvh.closestPointToPoint(q, h); d.push(h.distance); } return d; }
+const median = (d) => { const s2 = Float64Array.from(d).sort(); return s2.length ? s2[s2.length >> 1] : Infinity; };
+/**
+ * Where the upper scan goes relative to the lower, from a bite scan (a buccal registration that shows teeth of both arches).
+ *   upper, lower, key: meshes, each in the coordinates of its own file.
+ *   o.place = { upper, lower } (Matrix4, file → case frame, as each arch is shown now): a starting guess when the key has to be fitted.
+ *   o.taps = { lower: { key:[3 points], arch:[3 points] }, upper: … }: three matching spots, in file coordinates, for an arch the key
+ *     could not be fitted to by itself.
+ * → { ok, need ('lower' | 'upper' when three taps are needed for that arch), how ({ upper, lower }: 'same file coordinates' | 'fitted' | 'taps'),
+ *     T (Matrix4: upper file coordinates → lower file coordinates), keyOnUpper, keyOnLower (median gap, mm), closest (between the arches, mm), message }
+ * Steps: a key exported in the same coordinates as an arch is recognised as such; otherwise its part that does not belong to the arch already
+ * placed is fitted to the other arch by trimmed closest points, starting from how the two arches are shown; if neither works, three taps.
+ */
+export function articulateWithBite(upper, lower, key, o = {}) {
+  const B = { upper: bvhOf(upper), lower: bvhOf(lower) }, K = key.positions, nK = K.length / 3, step = Math.max(1, Math.floor(nK / 6000));
+  const share = (bvh, M) => { const d = gapsTo(bvh, K, M, step); return d.filter((v) => v < 0.25).length / d.length; };
+  const how = {}, Km = {};                                         // Km[j]: key file coordinates → arch j file coordinates
+  for (const j of ['lower', 'upper']) if (share(B[j], null) >= 0.15) { Km[j] = new THREE.Matrix4(); how[j] = 'same file coordinates'; }
+  /** the key's points that do not lie on arch `a` (placed by Km[a]) — the part that shows the other arch */
+  const partAwayFrom = (a) => { const e = Km[a].elements, q = new THREE.Vector3(), h = {}, out = []; for (let i = 0; i < K.length; i += 3) { q.set(K[i], K[i + 1], K[i + 2]).applyMatrix4(Km[a]); B[a].closestPointToPoint(q, h); if (h.distance > 0.3) out.push(K[i], K[i + 1], K[i + 2]); } return { positions: Float32Array.from(out), indices: new Uint32Array(0) }; };
+  const fitPart = (j, part, start, turns, keep = 0.55) => {      // keep: the share of the part expected to lie on that arch
+    const arch = j === 'upper' ? upper : lower, r = alignScans(part, arch, { start, keep, turns, points: 8000, bvh: B[j] });
+    const d = gapsTo(B[j], part.positions, r.matrix, Math.max(1, Math.floor(part.positions.length / 3 / 6000))); const inl = d.filter((v) => v < 0.25).length / d.length;
+    return { M: r.matrix, rms: r.rms, inl };
+  };
+  for (const j of ['lower', 'upper']) {
+    if (Km[j]) continue; const other = j === 'upper' ? 'lower' : 'upper', tp = o.taps && o.taps[j];
+    if (tp) {                                                      // three matching spots, then the fine fit
+      const start = rigidFit(tp.key.flat(), tp.arch.flat()); let f;
+      const onArch = (M) => gapsTo(B[j], K, M, step).filter((v) => v < 0.25).length * step / nK;   // share of the whole key lying on this arch
+      if (Km[other]) f = fitPart(j, partAwayFrom(other), start, [0, -6, 6]);
+      else {                                                       // tapped spots are only good to a mm or two: the key's points near this arch where the taps put it are fitted,
+        // then the selection is tightened and fitted again, from a few slightly turned starts; the start that leaves most of the key on the arch wins
+        const near = (M, lim) => { const q = new THREE.Vector3(), h = {}, out = []; for (let i = 0; i < K.length; i += 3 * Math.max(1, step >> 1)) { q.set(K[i], K[i + 1], K[i + 2]).applyMatrix4(M); B[j].closestPointToPoint(q, h); if (h.distance < lim) out.push(K[i], K[i + 1], K[i + 2]); } return { positions: Float32Array.from(out), indices: new Uint32Array(0) }; };
+        const kc = new THREE.Vector3(); { let n = 0; for (let i = 0; i < K.length; i += 3 * step) { kc.x += K[i]; kc.y += K[i + 1]; kc.z += K[i + 2]; n++; } kc.multiplyScalar(1 / n); }
+        const turned = (ax, deg) => { const c = kc.clone().applyMatrix4(start); return new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeRotationAxis(ax, THREE.MathUtils.degToRad(deg))).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z)).multiply(start); };
+        const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1), starts = [start, turned(Z, 6), turned(Z, -6), turned(X, 6), turned(X, -6), turned(Y, 6), turned(Y, -6)];
+        let best = null;
+        for (const s0 of starts) {
+          let M = s0, g = null;
+          for (const [lim, kp] of [[3, 0.55], [1.5, 0.7], [0.8, 0.8], [0.5, 0.85]]) { const part = near(M, lim); if (part.positions.length < 300) break; g = fitPart(j, part, M, [0], kp); M = g.M; }
+          if (!g) continue; const sc = onArch(M); if (!best || sc > best.sc) best = { ...g, sc };
+          if (best.sc > 0.35 && best.rms < 0.08) break;            // clearly settled: no need for the other starts
+        }
+        f = best || { inl: 0, rms: Infinity, sc: 0 };
+      }
+      if (f.inl < (Km[other] ? 0.4 : 0.2) || f.rms > 0.2 || (f.sc !== undefined && f.sc < 0.15)) return { ok: false, need: j, message: `The bite scan did not settle on the ${j} scan from those three spots. Try three spots further apart, tapped in the same order.` };
+      Km[j] = f.M; how[j] = 'taps'; continue;
+    }
+    if (Km[other] && o.place && o.place[j] && o.place[other]) {    // start from how the arches are shown (each oriented on its own: roughly in the bite)
+      const guess = o.place[j].clone().invert().multiply(o.place[other]).multiply(Km[other]), part = partAwayFrom(other);
+      if (part.positions.length >= 300) { const f = fitPart(j, part, guess, [0, -8, 8, -16, 16]); if (f.inl >= 0.45 && f.rms < 0.15) { Km[j] = f.M; how[j] = 'fitted'; continue; } }
+    }
+    return { ok: false, need: j, how, message: null };
+  }
+  const T = Km.lower.clone().multiply(Km.upper.clone().invert());   // upper file → key file → lower file
+  const keyOnLower = median(gapsTo(B.lower, K, Km.lower, step).filter((v) => v < 0.5)), keyOnUpper = median(gapsTo(B.upper, K, Km.upper, step).filter((v) => v < 0.5));
+  const closest = Math.min(...gapsTo(B.lower, upper.positions, T, Math.max(1, Math.floor(upper.positions.length / 3 / 40000))));
+  return { ok: true, how, T, keyOnUpper, keyOnLower, closest };
 }
 
 // ───────────────────────────── tidy and trim (shared step) ─────────────────────────────

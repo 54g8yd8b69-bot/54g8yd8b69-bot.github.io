@@ -46,6 +46,7 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `tests/splint-card/t19-guide.mjs`, `f6-guide.cjs` | guidance ramps: opposing canine tips found against the designed teeth (within 0.25 mm), files watertight, fit unchanged, nothing through the opposing arch, back teeth clear in all three excursions with ramps and touching without — the excursions checked again independently by sliding the opposing mesh |
 | `tests/compare-card/c1.cjs` | made-up wear and a real second STL file (other triangles, turned 125°, moved 40 mm) lined up to < 0.003 mm; 0.5 / 0.3 mm wear measured within 0.02 mm; loss only where it was made |
 | `tests/prep-card/mkprep.mjs`, `p1.cjs` | a demo arch with 46 as an exact preparation (`makeDemoArch({ prep })`: walls 6°, lingual −6°, 2 mm reduction, shoulder); marked by real taps; wall angles within 0.1°, convergence, wall height, the lingual undercut, “Fewest undercuts” clearing it, clearance checked the other way round |
+| `tests/bite/mkbite.mjs`, `b1.cjs` | lining up with a bite scan: a made-up buccal registration of the demo pair, arches and key moved; already in the bite, upper fitted automatically, and the three-tap path with real taps (upper teeth mean 0.35 mm, worst 0.9 mm — the made-up teeth are smooth and alike, so allow 1 mm here) |
 | `tests/hub/` | Scan Card itself, below |
 
 | hub test | what it proves |

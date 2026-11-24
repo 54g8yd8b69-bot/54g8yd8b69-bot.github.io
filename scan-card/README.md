@@ -16,6 +16,15 @@ are tabs that all work on those scans.
 
 Each tool page is still a complete app when opened on its own address (with its own Load and Orient steps).
 
+**Lining up with a bite scan.** Once both arches are loaded, the Load step offers "Line up with a bite scan…": load the
+buccal bite registration (STL, PLY or OBJ) that the scanner exported with the arches. If the bite scan shares an arch's
+file coordinates (most scanners export it that way), that arch is placed at once and the other arch is fitted to the
+rest of the bite scan by trimmed closest points. If the bite scan matches neither arch, it asks for three spots on the
+bite scan and the same three on the lower (cusp tips, far apart), then fits the upper. The result is baked into the
+upper scan so that both arches share the lower's file coordinates, and it counts as "in the bite" from then on (case
+file, every tool). The box reports how each arch was placed, the median gap of the bite scan on each arch, and how close
+the arches come.
+
 ## Layout
 
 ```
@@ -103,5 +112,9 @@ results; scans reach every tool byte for byte; work survives tab switches, the c
 tool being closed for memory; the lock and the "start again" path; Tray Card and Wax Card hand-off; the site pages
 under the site CSP; the offline single file; the artifact layout under an artifact-like policy; phone and iPad sizes.
 
-Not checked: any real patient scan (all tests use synthetic arches), a real iPad or Apple Pencil, and the artifact copy
+Bite-scan lining up was also checked against one patient's scanner export, privately (never in this repository): with the
+upper moved 25° or 90° the upper teeth came back within 0.17–0.19 mm on average (worst 0.30 mm) of the scanner's own bite; with all three
+files moved and three taps up to 2 mm out, mean 0.35 mm (worst 0.54 mm). That fit takes 8–14 s on a desktop.
+
+Not checked: any other real patient scan (all repository tests use synthetic arches), bite scans from scanners other than that one, a real iPad or Apple Pencil, and the artifact copy
 running inside Claude itself.
