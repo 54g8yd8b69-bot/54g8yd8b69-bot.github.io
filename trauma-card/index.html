@@ -132,6 +132,11 @@ textarea{min-height:64px;resize:vertical}
 .tld{font-weight:700}
 .tld small{font-weight:400;color:var(--muted)}
 .tlt{font-size:.9rem;color:var(--muted)}
+.mvbtn{font-size:.8rem;padding:2px 4px;vertical-align:baseline}
+.mvnote{display:block;font-size:.8rem;color:var(--teal);font-weight:700}
+.mvrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}
+.tl li.cur::after,.tl li.next::after{pointer-events:none}
+.tl li.cur .tld{padding-right:104px}.tl li.next .tld{padding-right:44px}
 .tlt b{color:var(--fg);font-weight:700}
 /* note */
 .note{border:1px solid var(--line);position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--surface);border-radius:10px;box-shadow:var(--shadow);display:flex;flex-direction:column;height:calc(100vh - 24px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
@@ -247,6 +252,7 @@ const lc1=s=>s&&/^[A-Z][a-z]/.test(s)?s.charAt(0).toLowerCase()+s.slice(1):s;
 const sent=a=>a.map((x,i)=>i?lc1(x):x).join('; ');
 const uc1=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
 const uniq=a=>[...new Set(a)];
+const wkd=n=>{const w=Math.floor(n/7),d=n%7;return (w?`${w} week${w>1?'s':''}`:'')+(w&&d?' ':'')+(d||!w?`${d} day${d===1?'':'s'}`:'')};
 const listJoin=a=>a.length<2?(a[0]||''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
 const onSite=(()=>{try{const h=location.hostname;return !!window.__SUITE_APP||/(^|\.)notile\.co\.uk$/.test(h)||h==='localhost'||h==='127.0.0.1'}catch(e){return false}})();
 if(!onSite)document.querySelectorAll('a.homelink').forEach(a=>{a.removeAttribute('href');a.removeAttribute('title')});
@@ -388,7 +394,7 @@ const blankTooth=()=>({hard:'',lux:'',apex:'mature',opts:{dir:[],bone:false,leve
 let S=null;
 function fresh(keepMode){
   S={mode:keepMode&&S?S.mode:'initial',dent:'perm',date:todayISO(),since:'',mech:[],head:[],safe:'',tet:'',soft:[],teeth:[],t:{},
-    spl:{placed:'',mat:'',span:''},rx:[],adv:DEF_ADV.slice(),extra:'',visit:'',reviewRx:[]};
+    spl:{placed:'',mat:'',span:''},rx:[],adv:DEF_ADV.slice(),extra:'',visit:'',reviewRx:[],moved:{},mvEdit:null};
 }
 fresh();
 const getP=p=>p.split('.').reduce((o,k)=>o==null?o:o[k],S);
@@ -477,8 +483,19 @@ function groupVisits(plans){
     tgt=Math.min(Math.max(tgt,g.A),g.B);
     g.t=tgt;g.date=addDays(base,tgt);
     g.lab=uniq(g.items.map(i=>i.lab)).join(' / ');
-    g.key=iso(g.date);
+    g.key=iso(g.date);            // stable id: the date IADT gives, before any move
+    g.orig=g.date;
     g.span=g.B-g.A>7&&g.items.every(i=>i.lo!=null)?[addDays(base,g.A),addDays(base,g.B)]:null;
+  });
+  // a review moved to another date takes every later review with it (same gaps); deadlines (milestones) don't move
+  let shift=0;
+  groups.forEach(g=>{
+    const mv=parseISO(S.moved[g.key]||'');
+    if(mv&&dayDiff(base,mv)>=0){shift=dayDiff(g.orig,mv);g.moved=true}else if(S.moved[g.key])delete S.moved[g.key];
+    g.shift=shift;
+    if(shift){g.date=addDays(g.orig,shift);if(g.span)g.span=g.span.map(d=>addDays(d,shift))}
+    if(g.moved)g.span=null;
+    g.t=dayDiff(base,g.date);
   });
   return groups;
 }
@@ -630,7 +647,9 @@ function timelineHTML(plans,groups){
     let cls=(g.items.some(i=>i.sr)?'sr ':'')+(past&&!cur?'past ':'')+(cur?'cur ':'');
     if(!past&&!cur&&!nextDone&&S.mode==='initial'){cls+='next';nextDone=true}
     const when=g.span?`${fmtL(g.span[0])} – ${fmtL(g.span[1])}`:fmtL(g.date);
-    return `<li class="${cls.trim()}"><div class="tld">${when} <small>· ${esc(g.lab)}</small></div><div class="tlt">${g.items.map(i=>esc(taskText(i)).replace(/^(\w+)/,'<b>$1</b>')).join('<br>')}</div></li>`;
+    const note=g.moved?`<span class="mvnote">Moved from ${fmtL(g.orig)}</span>`:g.shift?`<span class="mvnote">${g.shift>0?'+':''}${g.shift} day${Math.abs(g.shift)===1?'':'s'} with the earlier move</span>`:'';
+    const ed=S.mvEdit===g.key?`<div class="mvrow"><input type="date" class="short" data-mv="${g.key}" value="${iso(g.date)}" aria-label="New date for the ${esc(g.lab)} review"><button type="button" class="btn ghost small" data-act="mvtoday" data-o="${g.key}">Today</button>${g.moved?`<button type="button" class="btn link" data-act="mvreset" data-o="${g.key}">Back to ${fmtS(g.orig)}</button>`:''}<button type="button" class="btn link" data-act="mvedit" data-o="">Done</button></div>`:'';
+    return `<li class="${cls.trim()}"><div class="tld">${when} <small>· ${esc(g.lab)}</small> <button type="button" class="btn link mvbtn" data-act="mvedit" data-o="${g.key}" aria-label="Change the date of the ${esc(g.lab)} review">Change date</button></div>${note}${ed}<div class="tlt">${g.items.map(i=>esc(taskText(i)).replace(/^(\w+)/,'<b>$1</b>')).join('<br>')}</div></li>`;
   }).join('');
   const succ=plans.filter(p=>p.age6).map(p=>p.code);
   const conc=plans.filter(p=>p.concern).map(p=>p.code);
@@ -673,7 +692,12 @@ function render(){
     if(groups.length){
       h+=field('Which review is this?',chips('visit',groups.map(g=>[g.key,`${g.lab} · ${fmtS(g.date)}`])));
       const g=groups.find(x=>x.key===S.visit);
-      if(g)h+=`<div class="box"><b>Due at this visit</b><ul>${g.items.map(i=>`<li>${esc(taskText(i))}</li>`).join('')}</ul></div>`;
+      if(g){
+        const tday=todayISO(),off=dayDiff(g.orig,g.date);
+        h+=`<div class="row2">${field('Date of this review',`<div class="mvrow" style="margin:0"><input type="date" class="short" data-mv="${g.key}" value="${iso(g.date)}" aria-label="Date of this review">${iso(g.date)!==tday?`<button type="button" class="btn ghost small" data-act="mvtoday" data-o="${g.key}">Seen today</button>`:''}${g.moved?`<button type="button" class="btn link" data-act="mvreset" data-o="${g.key}">Back to ${fmtS(g.orig)}</button>`:''}</div>`)}</div>`;
+        if(off)h+=`<p class="hint">IADT date was ${fmtL(g.orig)}. This review is ${Math.abs(off)} day${Math.abs(off)===1?'':'s'} ${off>0?'late':'early'}, so later reviews move by the same amount; treatment deadlines stay as they were.</p>`;
+        h+=`<div class="box"><b>Due at this visit</b><ul>${g.items.map(i=>`<li>${esc(taskText(i))}</li>`).join('')}</ul></div>`;
+      }
       h+=field('Radiographs taken today',chips('reviewRx',['Periapical','2 angled periapicals','Upper standard occlusal','None'],{multi:true}));
     }else h+='<p class="hint">Add the injured teeth and injuries (as at presentation) to see the review schedule.</p>';
     h+='</section>';
@@ -753,6 +777,7 @@ function buildNote(plans,groups){
     const g=groups.find(x=>x.key===S.visit);
     L.push(`DENTAL TRAUMA REVIEW${g?' – '+g.lab+' post-injury':''}${perm?'':' (PRIMARY DENTITION)'}`);
     L.push(dateLine);
+    if(g&&g.moved)L.push(`Review date: ${fmtS(g.date)} (${wkd(dayDiff(base,g.date))} after injury; scheduled ${fmtS(g.orig)}).`);
   }
   if(!plans.length){L.push('','(Select injured teeth and injuries.)');if(S.extra)L.push('',S.extra);return L.join('\n')}
   L.push('');
@@ -814,12 +839,13 @@ function buildNote(plans,groups){
     if(S.adv.length)L.push('','ADVICE',sent(S.adv)+'.');
   }
   // plan
-  const future=S.mode==='review'?groups.filter(g=>g.key>S.visit):groups;
-  const ms=plans.flatMap(p=>p.ms).filter(m=>m.date&&(S.mode==='initial'||iso(m.date)>S.visit));
+  const selI=groups.findIndex(g=>g.key===S.visit),sel=groups[selI];
+  const future=S.mode==='review'?groups.slice(selI+1):groups;
+  const ms=plans.flatMap(p=>p.ms).filter(m=>m.date&&(S.mode==='initial'||!sel||m.date>sel.date));
   if(future.length||ms.length||plans.some(p=>p.age6)){
     L.push('',S.mode==='initial'?'REVIEW PLAN (IADT 2020)':'PLAN');
     if(S.mode==='review'&&future.length)L.push('Next review: '+future[0].lab+' – '+fmtL(future[0].date)+'.');
-    const rows=[...future.map(g=>({t:g.t,s:`${fmtS(g.date)}${g.span?'–'+fmtS(g.span[1]):''} – ${g.lab}: ${g.items.map(taskText).join('; ')}`})),
+    const rows=[...future.map(g=>({t:g.t,s:`${fmtS(g.date)}${g.span?'–'+fmtS(g.span[1]):''} – ${g.lab}${g.moved?' (rescheduled)':g.shift?' (moved)':''}: ${g.items.map(taskText).join('; ')}`})),
       ...ms.map(m=>({t:m.t+0.1,s:`${fmtS(m.date)} – ${m.code}: ${lc1(m.txt)}`}))].sort((a,b)=>a.t-b.t);
     (S.mode==='initial'?rows:rows.slice(0,4)).forEach(r=>L.push('  '+r.s));
     if(S.mode==='review'&&rows.length>4)L.push(`  …then as scheduled (${rows.length-4} further).`);
@@ -906,6 +932,9 @@ document.addEventListener('click',async e=>{
     edited=false;render();return}
   if(act==='splint'){const c=b.dataset.c;const p=toothPlan(c);S.t[c].splint=!p.on;edited=false;render();return}
   if(act==='mode'){S.mode=b.dataset.mode;edited=false;render();return}
+  if(act==='mvedit'){S.mvEdit=b.dataset.o||null;render();if(S.mvEdit){const i=document.querySelector(`.tl input[data-mv="${S.mvEdit}"]`);if(i)i.focus()}return}
+  if(act==='mvtoday'){const o=b.dataset.o,t=todayISO();if(t===o)delete S.moved[o];else S.moved[o]=t;S.mvEdit=null;edited=false;render();toast('Review moved to today; later reviews follow');return}
+  if(act==='mvreset'){delete S.moved[b.dataset.o];S.mvEdit=null;edited=false;render();toast('Back to the IADT date');return}
   if(act==='reset'){if(S.teeth.length&&!confirmReset())return;fresh(true);edited=false;render();toast('Cleared');return}
   if(act==='example'){loadExample();toast(S.mode==='review'?'Example 4-week review loaded':'Example injury loaded');return}
   if(act==='theme'){const cur=store('notile:theme')||'auto';const nx=THEMES[(THEMES.indexOf(cur)+1)%3];store('notile:theme',nx);applyTheme(nx);return}
@@ -931,8 +960,12 @@ document.addEventListener('input',e=>{
   setP(el.dataset.k,el.value);edited=false;updateNote();
 });
 document.addEventListener('change',e=>{
-  const el=e.target;if(el.type!=='date'||!el.dataset.k)return;
-  if(el.value){setP(el.dataset.k,el.value);if(el.dataset.k==='date')S.visit='';edited=false;render()}
+  const el=e.target;if(el.type!=='date')return;
+  if(el.dataset.mv){const o=el.dataset.mv,d=parseISO(el.value),b0=parseISO(S.date);
+    if(!d)return;if(b0&&d<b0){toast('A review can’t be before the injury');render();return}
+    if(el.value===o)delete S.moved[o];else S.moved[o]=el.value;edited=false;render();return}
+  if(!el.dataset.k)return;
+  if(el.value){setP(el.dataset.k,el.value);if(el.dataset.k==='date'){S.visit='';S.moved={};S.mvEdit=null}edited=false;render()}
 });
 
 render();

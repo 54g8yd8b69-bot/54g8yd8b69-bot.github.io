@@ -208,6 +208,16 @@ run({name:'Landing page',fn:async()=>{
     expect(/REVIEW – 4 weeks post-injury/.test(r)&&/not diagnostic/.test(r),'review note incomplete');
     await pg.click('[data-k=dent][data-v=prim]');await pg.click('[aria-label=ULA]');await pg.click('[data-k="t.ULA.lux"][data-v=avul]');
     expect(/Around age 6/.test(await pg.inputValue('#out')),'primary successor review missing');await noErrors(pg)});
+  await test('Trauma Card: moving a review takes the later reviews with it, but not treatment deadlines',async()=>{const pg=await page('/trauma-card/');
+    await pg.click('[aria-label=UL1]');await pg.click('[data-k="t.UL1.lux"][data-v=avul]');await pg.click('[data-k="t.UL1.opts.scen"][data-v="Physiological medium, dry under 60 min"]');
+    const rows=async()=>(await pg.inputValue('#out')).split('\n').filter(l=>/^  \d\d\//.test(l));
+    const before=await rows();await pg.click('.tl li:not(.ms) .mvbtn');
+    const d=new Date();d.setDate(d.getDate()+19);const v=d.toISOString().slice(0,10);
+    await pg.fill('.tl input[data-mv]',v);await pg.dispatchEvent('.tl input[data-mv]','change');await pg.waitForTimeout(150);
+    const after=await rows();
+    expect(after.some(l=>/2 weeks \(rescheduled\)/.test(l))&&after.some(l=>/4 weeks \(moved\)/.test(l)),'later reviews did not follow: '+after.slice(0,3).join(' | '));
+    expect(after.find(l=>/start RCT/.test(l))===before.find(l=>/start RCT/.test(l)),'RCT deadline moved');
+    await pg.click('.tl [data-act=mvreset]');await pg.waitForTimeout(100);expect((await rows()).join()===before.join(),'reset did not restore the IADT dates');await noErrors(pg)});
   await test('Letter Card opens under the site CSP, parses a note and builds every letter type with placeholders only',async()=>{const pg=await page('/letter-card/');
     expect((await pg.request.get(BASE+'/letter-card/manifest.webmanifest')).ok(),'Letter Card manifest missing');
     await pg.click('#exampleBtn');await pg.waitForTimeout(300);expect(await pg.locator('.sec').count()>=8,'note not parsed into sections');
