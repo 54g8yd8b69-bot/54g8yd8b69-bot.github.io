@@ -1119,7 +1119,7 @@ function surfaceNets(F, nx, ny, nz) {                           // F < 0 inside;
 /**
  * makeDemoArch({ jaw:'lower'|'upper', res:0.3, missing:{12:5.5, 22:true}, spacing:0, prep })
  *   missing: FDI → width of the gap left (true = the tooth's own width).   spacing: extra mm between each of the six front teeth.
- *   prep: { fdi, zTop, zMargin, R0, shoulder, taper, taperLingual } — that tooth is a preparation of exactly known shape instead of a
+ *   prep: { fdi, zTop, zMargin, R0, shoulder, taper, taperLingual, lean } — that tooth is a preparation of exactly known shape instead of a
  *     crown: walls round its long axis (radius R0 at the margin) converging at `taper`° each (buccal, mesial, distal) and at
  *     `taperLingual`° on the lingual / palatal (negative = an undercut; blended over ±8° at the corners), flat occlusal surface at
  *     zTop, a shoulder `shoulder` mm wide at zMargin. Heights in the case frame. For testing preparation measurements.
@@ -1157,8 +1157,9 @@ export function makeDemoArch(o = {}) {
   const zw = (z) => (upper ? D.ref - z : z + D.ref);                 // case-frame height → this generator's height
   const toothF = (t, u, v, w) => {
     if (!pr || t.fdi !== pr.fdi) return demoToothF(t, u, v, w);
-    const r = Math.hypot(u, v), lingual = r > 1e-6 ? -v / r : 0, ang = Math.acos(clamp(lingual, -1, 1)) * 180 / Math.PI, f = clamp((ang - 37) / 16, 0, 1);
-    const tau = (pr.taperLingual + (pr.taper - pr.taperLingual) * f) * Math.PI / 180, wMg = zw(pr.zMargin), wTop = zw(pr.zTop), R = pr.R0 - (w - wMg) * Math.tan(tau);
+    const wMg = zw(pr.zMargin), vl = pr.lean ? v - Math.max(0, w - wMg) * Math.tan(pr.lean * Math.PI / 180) : v;   // lean: the stump tipped this many degrees towards the buccal (its axis, not the margin)
+    const r = Math.hypot(u, vl), lingual = r > 1e-6 ? -vl / r : 0, ang = Math.acos(clamp(lingual, -1, 1)) * 180 / Math.PI, f = clamp((ang - 37) / 16, 0, 1);
+    const tau = (pr.taperLingual + (pr.taper - pr.taperLingual) * f) * Math.PI / 180, wTop = zw(pr.zTop), R = pr.R0 - (w - wMg) * Math.tan(tau);
     return Math.min(Math.max(r - R, w - wTop, wMg - w), Math.max(r - (pr.R0 + (pr.shoulder ?? 0.8)), w - wMg));
   };
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {

@@ -53,9 +53,9 @@ const shell = N.createShell({
       <div class="btns"><button class="btn" id="ptUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="ptClear" type="button" title="Start marking again">Start again</button></div>
       <p class="tip">Tap the prepared tooth once, then tap round the margin — six to twelve points, in order, all the way round. The prepared surface is everything on that tooth inside the margin. Dragging turns the model as usual; only a tap marks a point. Zoom in for the margin.</p>` },
     { id: 'path', title: 'Path of insertion', html: `
-      <div class="btns"><button class="btn pri" id="pbBest" type="button" title="Find the direction with the least undercut, near the tooth's own axis">Fewest undercuts</button><button class="btn" id="pbView" type="button" title="Turn the model until you look straight down the path you want, then press this">Use this view</button><button class="btn" id="pbReset" type="button" title="Straight along the occlusal axis">Occlusal axis</button></div>
+      <div class="btns"><button class="btn pri" id="pbBest" type="button" title="Find the direction with the least undercut, near the tooth's own axis">Fewest undercuts</button><button class="btn" id="pbView" type="button" title="Turn the model until you look straight down the path you want, then press this">Use this view</button><button class="btn" id="pbReset" type="button" title="Along the tooth’s own axis, worked out from the margin and the stump">Tooth’s axis</button></div>
       <div id="pbInfo"></div>
-      <p class="tip">The arrow is the direction the restoration goes on. Red: the preparation hides part of its own surface from that direction (an undercut). Orange: another tooth is in the way. Overhangs shallower than about 0.05 mm are within the noise of a scan and are not shown. “Fewest undercuts” looks within 25° of the occlusal axis.</p>` },
+      <p class="tip">The arrow is the direction the restoration goes on. Red: the preparation hides part of its own surface from that direction (an undercut). Orange: another tooth is in the way. Overhangs shallower than about 0.05 mm are within the noise of a scan and are not shown. The path starts along the tooth’s own axis (from the margin to the top of the stump), so a proclined incisor is measured along its own length. “Fewest undercuts” looks within 25° of that axis.</p>` },
     { id: 'check', title: 'Results', html: `
       <div class="row"><label>Show</label><div class="seg" id="ckMap"><button data-v="undercut" type="button" title="Undercuts and anything in the way">Undercuts</button><button data-v="taper" type="button" title="The angle of each wall to the path of insertion">Taper</button><button data-v="clear" type="button" title="Room to the opposing teeth">Clearance</button></div></div>
       <div class="row" id="ckTgtRow"><label>Your clearance target</label><input type="range" id="ckTgt" min="0.5" max="3" step="0.1" value="1.5"><span class="val"></span></div>
@@ -110,13 +110,28 @@ function oppBvh() {
 }
 
 // ───────────── the prepared surface: from the tooth tap, every triangle inside the margin ─────────────
-function region() {
-  const g = geo(); if (!g || !P.seed || P.loop.length < 3) return null;
-  const poly = P.loop.map((p) => [p[0], p[1]]), inside = (x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
-  // …and on the biting side of the margin: the margin's height there (from the nearest margin points, in plan), less a quarter
-  // of a millimetre. Without this, on a model with a base (a closed surface) the flood runs down the base's walls and onto its back.
-  const u = up(), lp = P.loop, near = (x, y) => { let w = 0, h = 0; for (const q of lp) { const d2 = (q[0] - x) ** 2 + (q[1] - y) ** 2 + 0.01, wi = 1 / (d2 * d2); w += wi; h += wi * q[2]; } return h / w; };
-  const ok = (f) => { const x = g.cen[3 * f], y = g.cen[3 * f + 1]; return inside(x, y) && u * g.cen[3 * f + 2] >= u * near(x, y) - 0.25; };
+// "Inside" is judged along the tooth's own axis, not straight down the occlusal axis: an upper incisor leans forward, so seen
+// from straight above its incisal part lies outside its own margin. The axis starts square to the margin, then runs from the
+// direction its side walls run along (most nearly at right angles to their faces).
+let AX = null;                                                   // { key, A (Vector3, out of the tooth), reg }
+const clampTo = (v, ref, deg) => { const a = v.angleTo(ref), m = deg * Math.PI / 180; if (a <= m) return v.clone().normalize(); const w = v.clone().addScaledVector(ref, -v.dot(ref)).normalize(); return ref.clone().multiplyScalar(Math.cos(m)).addScaledVector(w, Math.sin(m)).normalize(); };
+function marginNormal() {
+  const L = P.loop, n = L.length, c = [0, 0, 0]; for (const q of L) for (let k = 0; k < 3; k++) c[k] += q[k] / n;
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]; for (const q of L) for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += (q[i] - c[i]) * (q[j] - c[j]);
+  // smallest eigenvector by inverse iteration on (C + εI)
+  const M = new THREE.Matrix3().set(C[0][0] + 1e-6, C[0][1], C[0][2], C[1][0], C[1][1] + 1e-6, C[1][2], C[2][0], C[2][1], C[2][2] + 1e-6), Mi = M.clone().invert();
+  let v = d0(); for (let it = 0; it < 30; it++) v = v.applyMatrix3(Mi).normalize(); if (v.dot(d0()) < 0) v.negate();
+  return { v, c: new THREE.Vector3(...c) };
+}
+function regionAlong(g, A) {
+  const e1 = new THREE.Vector3(1, 0, 0).addScaledVector(A, -A.x); if (e1.lengthSq() < 0.1) e1.set(0, 1, 0).addScaledVector(A, -A.y); e1.normalize(); const e2 = A.clone().cross(e1);
+  const pr = (x, y, z) => [x * e1.x + y * e1.y + z * e1.z, x * e2.x + y * e2.y + z * e2.z, x * A.x + y * A.y + z * A.z];
+  const lp = P.loop.map((q) => pr(q[0], q[1], q[2])), poly = lp;
+  const inside = (x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  // …and on the biting side of the margin: the margin's height there (from the nearest margin points), less a quarter of a millimetre.
+  // Without this, on a model with a base (a closed surface) the flood runs down the base's walls and onto its back.
+  const near = (x, y) => { let w = 0, h = 0; for (const q of lp) { const d2 = (q[0] - x) ** 2 + (q[1] - y) ** 2 + 0.01, wi = 1 / (d2 * d2); w += wi; h += wi * q[2]; } return h / w; };
+  const ok = (f) => { const q = pr(g.cen[3 * f], g.cen[3 * f + 1], g.cen[3 * f + 2]); return inside(q[0], q[1]) && q[2] >= near(q[0], q[1]) - 0.25; };
   const grow = (f0, reg) => { const stack = [f0]; reg[f0] = 1; let n = 1; while (stack.length) { const f = stack.pop(); for (let k = 0; k < 3; k++) { const o = g.adj[3 * f + k]; if (o < 0 || reg[o] || !ok(o)) continue; reg[o] = 1; n++; stack.push(o); } } return n; };
   const hit = {}; g.bvh.closestPointToPoint(new THREE.Vector3(...P.seed), hit); const f0 = hit.faceIndex;
   if (ok(f0)) { const reg = new Uint8Array(g.nF), n = grow(f0, reg); if (n > 20) return reg; }
@@ -125,6 +140,36 @@ function region() {
   for (let f = 0; f < g.nF; f++) { if (seen[f] || !ok(f)) continue; const reg = new Uint8Array(g.nF), n = grow(f, reg); for (let k = 0; k < g.nF; k++) if (reg[k]) seen[k] = 1; if (n > bestN) { bestN = n; best = reg; } }
   return bestN > 20 ? best : null;
 }
+function prep() {
+  const g = geo(); if (!g || !P.seed || P.loop.length < 3) return null;
+  const key = g.key + '|' + JSON.stringify(P.seed) + '|' + JSON.stringify(P.loop); if (AX && AX.key === key) return AX;
+  const z = d0(), areaOf = (reg) => { let t = 0; if (reg) for (let f = 0; f < g.nF; f++) if (reg[f]) t += g.area[f]; return t; };
+  const tilt = (deg, az) => { const e1 = new THREE.Vector3(1, 0, 0), e2 = new THREE.Vector3(0, 1, 0), r = deg * Math.PI / 180; return z.clone().multiplyScalar(Math.cos(r)).addScaledVector(e1, Math.sin(r) * Math.cos(az)).addScaledVector(e2, Math.sin(r) * Math.sin(az)).normalize(); };
+  // a wrong axis leaves part of the stump outside its own margin: the axis is the direction along which the margin takes in the most surface
+  // (the occlusal axis, then rings out to 40°, then finer steps round the best; ties go to the smaller tilt)
+  // (scored as area × cos² of the tilt, so a lean has to more than pay for itself: an upper incisor's margin takes in about three times
+  // the surface along its own axis, while tilting a molar only adds a little gum at one side)
+  const score = (A, ar) => ar * Math.cos(A.angleTo(z)) ** 2;
+  let best = { A: z, reg: regionAlong(g, z) }; best.area = areaOf(best.reg); best.sc = best.area;
+  const tryA = (A) => { if (A.angleTo(z) > 40.01 * Math.PI / 180) return; const reg = regionAlong(g, A), ar = areaOf(reg), sc = score(A, ar); if (sc > best.sc * 1.01) best = { A, reg, area: ar, sc }; };
+  for (let deg = 8; deg <= 40; deg += 8) for (let k = 0; k < 12; k++) tryA(tilt(deg, k / 12 * 2 * Math.PI));
+  for (const st of [4, 2]) { const c = best.A.clone(), u = new THREE.Vector3(1, 0, 0).addScaledVector(c, -c.x).normalize(), v = c.clone().cross(u); for (let k = 0; k < 8; k++) { const t = k / 8 * 2 * Math.PI, r = st * Math.PI / 180; tryA(c.clone().multiplyScalar(Math.cos(r)).addScaledVector(u, Math.sin(r) * Math.cos(t)).addScaledVector(v, Math.sin(r) * Math.sin(t)).normalize()); } }
+  let A = best.A, reg = best.reg;
+  // then the direction the side walls run along (most nearly at right angles to their faces), kept if the margin still takes in as much
+  if (reg) {
+    const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]; let w = 0;
+    for (let f = 0; f < g.nF; f++) { if (!reg[f]) continue; const n = [g.nrm[3 * f], g.nrm[3 * f + 1], g.nrm[3 * f + 2]], t = n[0] * A.x + n[1] * A.y + n[2] * A.z; if (Math.abs(t) > 0.6) continue; const ar = g.area[f]; w += ar; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) S[i][j] += ar * n[i] * n[j]; }
+    if (w > 5) {
+      const M = new THREE.Matrix3().set(S[0][0] + 1e-4, S[0][1], S[0][2], S[1][0], S[1][1] + 1e-4, S[1][2], S[2][0], S[2][1], S[2][2] + 1e-4), Mi = M.clone().invert();
+      let v = A.clone(); for (let k = 0; k < 40; k++) v = v.applyMatrix3(Mi).normalize(); if (v.dot(z) < 0) v.negate();
+      if (v.angleTo(A) < 15 * Math.PI / 180) { const An = clampTo(v, z, 40), r2 = regionAlong(g, An); if (r2 && areaOf(r2) >= 0.97 * best.area) { A = An; reg = r2; } }
+    }
+  }
+  AX = { key, A, reg }; return AX;
+}
+function region() { const x = prep(); return x ? x.reg : null; }
+/** The tooth's own axis (out of the tooth), once it is marked; the occlusal axis until then. */
+const axis = () => { const x = prep(); return x ? x.A.clone() : d0(); };
 
 // ───────────── the measurements ─────────────
 /** Buccal and mesial at the prepared tooth. The line of the arch there is the long axis (principal direction, in plan) of the
@@ -145,7 +190,7 @@ function sideOf(nx, ny, nz, S) { const u = nx * S.b.x + ny * S.b.y + nz * S.b.z,
 /** local undercut area of the axial walls for a direction (fast, used to search for the best path) */
 function localUndercut(g, d) { let a = 0; for (let f = 0; f < g.nF; f++) if (g.reg[f]) { const t = g.nrm[3 * f] * d.x + g.nrm[3 * f + 1] * d.y + g.nrm[3 * f + 2] * d.z; if (t < -0.02) a += g.area[f]; } return a; }
 function bestPath(g) {
-  const z = d0(), ex = new THREE.Vector3(1, 0, 0), ey = new THREE.Vector3(0, 1, 0); let best = null, total = 0; for (let f = 0; f < g.nF; f++) if (g.reg[f]) total += g.area[f];
+  const z = axis(), ex0 = new THREE.Vector3(1, 0, 0).addScaledVector(z, -z.x).normalize(), ex = ex0, ey = z.clone().cross(ex0).normalize(); let best = null, total = 0; for (let f = 0; f < g.nF; f++) if (g.reg[f]) total += g.area[f];
   for (let a = -25; a <= 25; a += 1) for (let b = -25; b <= 25; b += 1) {
     const t = Math.hypot(a, b); if (t > 25) continue; const d = z.clone().applyAxisAngle(ex, a * Math.PI / 180).applyAxisAngle(ey, b * Math.PI / 180).normalize();
     const sc = localUndercut(g, d) + total * 0.0004 * t; if (!best || sc < best.sc) best = { sc, d };
@@ -154,7 +199,7 @@ function bestPath(g) {
 }
 function measure() {
   const g = geo(); if (!g) return null; const reg = region(); if (!reg) return null; g.reg = reg;
-  const d = P.dir ? new THREE.Vector3(...P.dir).normalize() : d0(), S = sideDirs(g, d), Pm = g.mesh.positions, I = g.mesh.indices;
+  const d = P.dir ? new THREE.Vector3(...P.dir).normalize() : axis(), S = sideDirs(g, d), Pm = g.mesh.positions, I = g.mesh.indices;
   const sides = {}; for (const s of SIDES) sides[s] = { a: 0, aw: 0, hMin: Infinity, hMax: -Infinity, list: [] };
   const kind = new Uint8Array(g.nF), angle = new Float32Array(g.nF).fill(NaN), ray = new THREE.Ray(), dir = d.clone(); let total = 0, uSelf = 0, uBlock = 0, axialA = 0;
   for (let f = 0; f < g.nF; f++) {
@@ -176,8 +221,8 @@ function measure() {
     clear = { dist, min, at, below: facing ? below / facing : 0, facing };
   }
   let len = 0; for (let i = 0; i < P.loop.length; i++) { const a = P.loop[i], b = P.loop[(i + 1) % P.loop.length]; len += Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
-  const tilt = Math.acos(N.clamp(d.dot(d0()), -1, 1)) * 180 / Math.PI;
-  return { reg, kind, angle, sides, total, axialA, uSelf, uBlock, clear, margin: len, d: d.toArray(), tilt, S, tocMD: sides.mesial.angle + sides.distal.angle, tocBL: sides.buccal.angle + sides.lingual.angle };
+  const tilt = Math.acos(N.clamp(d.dot(d0()), -1, 1)) * 180 / Math.PI, ax = axis(), axTilt = Math.acos(N.clamp(ax.dot(d0()), -1, 1)) * 180 / Math.PI, fromAxis = Math.acos(N.clamp(d.dot(ax), -1, 1)) * 180 / Math.PI;
+  return { reg, kind, angle, sides, total, axialA, uSelf, uBlock, clear, margin: len, d: d.toArray(), tilt, axTilt, fromAxis, S, tocMD: sides.mesial.angle + sides.distal.angle, tocBL: sides.buccal.angle + sides.lingual.angle };
 }
 function analyse() { R = measure(); paint(); syncUI(); }
 function summaryOf(r) { const o = { area: r.total, undercut: r.uSelf, blocked: r.uBlock, tocMD: r.tocMD, tocBL: r.tocBL, tilt: r.tilt, margin: r.margin, sides: {} }; for (const s of SIDES) o.sides[s] = { angle: r.sides[s].angle, height: r.sides[s].height }; if (r.clear) o.clearance = { min: r.clear.min, belowTarget: r.clear.below, target: P.target }; return o; }
@@ -237,16 +282,16 @@ const SEG = {
 };
 $('ptUndo').addEventListener('click', () => { if (P.loop.length) P.loop.pop(); else P.seed = null; analyse(); refreshView(); });
 $('ptClear').addEventListener('click', () => { P.seed = null; P.loop = []; P.dir = null; analyse(); refreshView(); });
-$('pbBest').addEventListener('click', () => { const g = geo(); if (!R || !g) return shell.status('Mark the prepared tooth first', true); g.reg = R.reg; P.dir = bestPath(g).toArray(); analyse(); scans.touch(); shell.status(`Path set ${R.tilt.toFixed(1)}° from the occlusal axis`); });
+$('pbBest').addEventListener('click', () => { const g = geo(); if (!R || !g) return shell.status('Mark the prepared tooth first', true); g.reg = R.reg; P.dir = bestPath(g).toArray(); analyse(); scans.touch(); shell.status(`Path set ${R.fromAxis.toFixed(1)}° from the tooth’s axis`); });
 $('pbView').addEventListener('click', () => {
   if (!R) return shell.status('Mark the prepared tooth first', true); const v = viewer.camera.position.clone().sub(viewer.controls.target).normalize();
-  if (v.dot(d0()) < Math.cos(40 * Math.PI / 180)) return shell.status('Look at the preparation from its occlusal side first', true); P.dir = v.toArray(); analyse(); scans.touch(); shell.status('Path set from this view');
+  if (v.dot(axis()) < Math.cos(40 * Math.PI / 180)) return shell.status('Look at the preparation from its occlusal side first', true); P.dir = v.toArray(); analyse(); scans.touch(); shell.status('Path set from this view');
 });
 $('pbReset').addEventListener('click', () => { P.dir = null; analyse(); scans.touch(); });
 $('ckShot').addEventListener('click', async () => { const url = viewer.snapshot(), bin = atob(url.split(',')[1]), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const r = await N.saveFile('preparation.png', new Blob([u8], { type: 'image/png' })); shell.status(r.message, !r.ok && r.code !== 'declined'); });
 $('ckCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(figuresText()); shell.status('Figures copied'); } catch (_) { shell.status('Copying was not allowed here', true); } });
 function figuresText() {
-  if (!R) return ''; const s = R.sides, L = [`Preparation check (${NAME[P.jaw].toLowerCase()} arch), path ${R.tilt.toFixed(1)}° from the occlusal axis`];
+  if (!R) return ''; const s = R.sides, L = [`Preparation check (${NAME[P.jaw].toLowerCase()} arch), path ${R.fromAxis.toFixed(1)}° from the tooth’s axis (${R.tilt.toFixed(1)}° from the occlusal axis)`];
   for (const k of SIDES) L.push(`${SIDE_NAME[k]}: wall angle ${isFinite(s[k].angle) ? deg(s[k].angle) : '–'}, wall height ${isFinite(s[k].height) ? mm(s[k].height) : '–'}`);
   L.push(`Total occlusal convergence: mesiodistal ${deg(R.tocMD)}, buccolingual ${deg(R.tocBL)}`, `Undercut: ${R.uSelf.toFixed(1)} mm² of ${R.total.toFixed(1)} mm²; another tooth in the way: ${R.uBlock.toFixed(1)} mm²`);
   if (R.clear) L.push(`Occlusal clearance (in the bite as scanned): closest ${mm(R.clear.min)}; ${(R.clear.below * 100).toFixed(0)}% of the occlusal surface under ${P.target.toFixed(1)} mm`);
@@ -257,7 +302,7 @@ function syncUI() {
   $('ptJawRow').hidden = !both; for (const b of $('ptJaw').children) b.disabled = !scans.has(b.dataset.v); SEG.jaw(jaw || '');
   $('ptLead').textContent = !jaw ? 'Load a scan first.' : !P.seed ? 'Tap the prepared tooth.' : P.loop.length < 3 ? 'Now tap round the margin, in order, all the way round.' : 'Keep tapping round the margin if it is not yet all the way round, or go on to the path of insertion.';
   $('ptCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}${R ? ` · prepared surface ${R.total.toFixed(1)} mm²` : P.loop.length >= 3 ? ' · no surface found inside the margin — check the points go all the way round the tooth' : ''}` : '';
-  $('pbInfo').innerHTML = !R ? '<div class="note warn">Mark the prepared tooth first.</div>' : `<div class="sum"><h5>Path of insertion<span class="okb${R.uSelf + R.uBlock > 0.5 ? ' bad' : ''}">${R.uSelf + R.uBlock > 0.5 ? 'Not clear' : 'Clear'}</span></h5><div><span>From the occlusal axis</span><b>${R.tilt.toFixed(1)}°</b></div><div><span>Undercut</span><b>${R.uSelf.toFixed(1)} mm²</b></div><div><span>Another tooth in the way</span><b>${R.uBlock.toFixed(1)} mm²</b></div></div>`;
+  $('pbInfo').innerHTML = !R ? '<div class="note warn">Mark the prepared tooth first.</div>' : `<div class="sum"><h5>Path of insertion<span class="okb${R.uSelf + R.uBlock > 0.5 ? ' bad' : ''}">${R.uSelf + R.uBlock > 0.5 ? 'Not clear' : 'Clear'}</span></h5><div><span>From the tooth’s axis</span><b>${R.fromAxis.toFixed(1)}°</b></div><div><span>From the occlusal axis</span><b>${R.tilt.toFixed(1)}°</b></div><div><span>Undercut</span><b>${R.uSelf.toFixed(1)} mm²</b></div><div><span>Another tooth in the way</span><b>${R.uBlock.toFixed(1)} mm²</b></div></div>`;
   $('ckTgtRow').hidden = P.map !== 'clear'; $('ckMap').querySelector('[data-v=clear]').disabled = !(R && R.clear);
   if (!R) $('ckOut').innerHTML = '<div class="note warn">Mark the prepared tooth first.</div>';
   else {

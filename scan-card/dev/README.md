@@ -49,6 +49,7 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `tests/bite/mkbite.mjs`, `b1.cjs` | lining up with a bite scan: a made-up buccal registration of the demo pair, arches and key moved; already in the bite, upper fitted automatically, and the three-tap path with real taps (upper teeth mean 0.35 mm, worst 0.9 mm — the made-up teeth are smooth and alike, so allow 1 mm here) |
 | `tests/hub/h11-models.cjs` | designing on the model: models built, “Use the models in the other tools”, Analysis and Tray Card given the models (same vertices, same place, 5 mm of base past the scans), a tray generated on the model, back to the scans, the choice saved and reopened |
 | `tests/hub/h12-prep-on-model.cjs` | Prep check on a model with a base: the same figures as on the scan, and a margin drawn 4× too wide does not run down the base (it did before: 2,405 mm², a −90° wall) |
+| `tests/prep-card/p2-lean.cjs` | a preparation that leans (the 46 stump tipped 25°, `LEAN=25 node tests/prep-card/mkprep.mjs`): the tooth's own axis found as on the upright one, the whole stump counted, convergence as built (MD 12°, BL 0°). The old straight-down rule gives an axis 25° out and MD 21° |
 | `tests/hub/` | Scan Card itself, below |
 
 | hub test | what it proves |

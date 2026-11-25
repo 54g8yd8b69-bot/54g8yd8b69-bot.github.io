@@ -17,5 +17,6 @@ cd "$W"
 node -e "const fs=require('fs');fs.writeFileSync('shared/manifold-wasm.js','window.MANIFOLD_WASM_B64=\"'+fs.readFileSync('node_modules/manifold-3d/manifold.wasm').toString('base64')+'\";\n')"
 [ -f dev/data/demo-lower.stl ] || { node dev/tests/mkdata.mjs && node dev/tests/mkdata2.mjs; }
 [ -f dev/data/prep-lower.stl ] || node dev/tests/prep-card/mkprep.mjs
+[ -f dev/data/prep-lean-lower.stl ] || LEAN=25 node dev/tests/prep-card/mkprep.mjs
 [ -f dev/data/bite-key.stl ] || node dev/tests/bite/mkbite.mjs
 echo "working folder ready: $W"

@@ -24,6 +24,11 @@ bite. Tray Card and Wax Card get it as `upper-model.stl` / `lower-model.stl`. Mo
 An arch with no finished model goes on as the scan. Changing a model, or switching back to the scans, restarts the tools
 that were working on it (Tray Card and Wax Card ask first). The choice is saved in the case file (`data.scanCard.source`).
 
+**Prep check and the tooth's axis.** The prepared surface is everything on the tooth inside the margin and on the biting side
+of it, judged along the tooth's own axis: an upper incisor leans forward, so from straight above its incisal part lies
+outside its own margin. The axis is the direction (within 40° of the occlusal axis) along which the margin takes in the most
+surface, scored against its tilt, then set along the side walls. The path of insertion starts there.
+
 **Lining up with a bite scan.** Once both arches are loaded, the Load step offers "Line up with a bite scan…": load the
 buccal bite registration (STL, PLY or OBJ) that the scanner exported with the arches. If the bite scan shares an arch's
 file coordinates (most scanners export it that way), that arch is placed at once and the other arch is fitted to the
