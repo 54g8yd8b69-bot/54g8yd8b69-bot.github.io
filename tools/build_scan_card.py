@@ -75,8 +75,8 @@ PAGES = [
      'Prep Card, part of Scan Card: undercuts, wall angles, convergence and clearance of a tooth preparation on a scan. Runs on your own device.'),
     ('survey.html', 'survey/index.html', True, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
      'Survey Card, part of Scan Card: survey lines, undercut depths and a blocked-out model for a path of insertion on a scan. Runs on your own device.'),
-    ('shell.html', 'shell/index.html', False, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
-     'Shell Card, part of Scan Card: a provisional crown or shell to reline from a scan before the preparation, or a clear matrix over a wax-up. Runs on your own device.'),
+    ('shell.html', 'shell/index.html', True, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
+     'Shell Card, part of Scan Card: a provisional crown or shell to reline from a scan before the preparation, a clear matrix over a wax-up, or a spaced wax-up model for a VFR and clear-silicone injection stent. Runs on your own device.'),
 ]
 wasm_js = 'window.MANIFOLD_WASM_B64="' + base64.b64encode((deps / 'node_modules/manifold-3d/manifold.wasm').read_bytes()).decode() + '";\n'
 

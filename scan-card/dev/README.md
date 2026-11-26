@@ -56,6 +56,8 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `tests/survey-card/t1-shapes.cjs`, `t2-demo.cjs` | Survey on an ellipsoid with exact answers (survey line, gauge depths, tilt, block-out walls, clasp tip kept) and on the demo arches (taps, tooth numbers, block-out closed, relief, STL positions, case round trip, phone layout) |
 | `tests/hub/h13-survey.cjs` | the Survey tab inside Scan Card: the hub's scans, abutment taps, block-out with a clasp tip, STL, case saved and reopened |
 | `tests/shell-card/mkshell.mjs`, `t1-shell.cjs` | Shells with exact data: the scan before preparation (moved) lined up; the crown's outside on it (95% within 0.01 mm), its inside the cement space off the preparation, nothing below the margin, occlusal thickness right to 0.01 mm; the same on a preparation leaning 25°; a shell to reline no thicker than set; a matrix over a wax-up of 31–42 following the wax-up plus its space, with a hole through at each tap; all closed; case round trip |
+| `tests/shell-card/t2-spacer.cjs` | the spaced model (VFR) on the based wax-up model from `mkshell.mjs`: a scan without a base refused with directions, closed solid, 1.500 mm over the waxed incisors, the other teeth (and the canines beside them) and the base unchanged, both STLs |
+| `tests/hub/h16-spacer.cjs` | the VFR route in Scan Card: wax-up scan → Models' base → “Use the models” → Shells' spaced model → both STLs |
 | `tests/hub/h15-shells.cjs` | Shells inside Scan Card: Prep check's margin offered and used, the crown made, downloaded, kept in the case and reopened |
 | `tests/hub/` | Scan Card itself, below |
 

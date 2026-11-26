@@ -6,9 +6,11 @@
 {"imports":{
  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
- "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+ "manifold-3d/manifold.js":"https://cdn.jsdelivr.net/npm/manifold-3d@3.5.5/manifold.js"
 }}
 </script>
+<script src="manifold-wasm.js"></script>
 <style>
 button{touch-action:manipulation}
 .sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
@@ -32,12 +34,17 @@ button{touch-action:manipulation}
 //  • Shell to reline: the same outside shape, only a set thickness deep — an eggshell temporary relined in the mouth.
 //  • Matrix: a clear shell over the wax-up for an injected or pressed mock-up or a chairside provisional, with optional
 //    injection holes. It is made as seen from the biting side, so it has no undercuts and can be printed rigid.
+//  • Spaced model (VFR): the wax-up model (a solid with its base, from Models) with a spacer of a set thickness over the
+//    waxed-up teeth, tapering off at its edges. Print both; the lab makes a vacuum-formed retainer on the spaced model, fills
+//    the spaced part with clear silicone (e.g. Exaclear) and seats it on the wax-up model: a clear matrix for injection moulding.
 // The crown and shell are worked out on a 0.1 mm grid as signed distances to the two scans; the margin is followed along
 // the tooth's surface (shortest paths between the tapped points), so a proclined incisor needs no axis.
 import * as N from './core.js';
+import * as SOL from './solid.js';
 const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' }, mm = (v) => v.toFixed(2) + ' mm';
-const MODES = { crown: 'Provisional crown', shell: 'Shell to reline', matrix: 'Matrix' };
-const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
+const MODES = { crown: 'Provisional crown', shell: 'Shell to reline', matrix: 'Matrix', spacer: 'Spaced model (VFR)' };
+const TAPS = (m) => m === 'matrix' || m === 'spacer';           // modes that work from teeth taps
+const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, space: 1.5, sreach: 8, send: 3.5, sheight: 10.5, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
 let S = mkS(), B = null, PREP = null;                            // S: the second scan; B: the result; PREP: Prep check's marking, if the case has one
 function mkS() { return { shape: null, rel: null, fit: null, self: false }; }   // rel: the second scan's file → the main scan's file coordinates
 
@@ -49,13 +56,14 @@ const shell = N.createShell({
     { id: 'load', title: 'Load scans', html: '' },
     { id: 'orient', title: 'Check orientation', html: '' },
     { id: 'make', title: 'What to make', html: `
-      <div class="seg" id="mkMode"><button data-v="crown" type="button" title="A fitted provisional crown: the shape before the preparation, hollowed to fit it">Provisional crown</button><button data-v="shell" type="button" title="A thin shell of the same shape, relined in the mouth">Shell to reline</button><button data-v="matrix" type="button" title="A clear shell over a wax-up for a mock-up or a chairside provisional">Matrix</button></div>
+      <div class="seg" id="mkMode"><button data-v="crown" type="button" title="A fitted provisional crown: the shape before the preparation, hollowed to fit it">Provisional crown</button><button data-v="shell" type="button" title="A thin shell of the same shape, relined in the mouth">Shell to reline</button><button data-v="matrix" type="button" title="A clear shell over a wax-up for a mock-up or a chairside provisional">Matrix</button><button data-v="spacer" type="button" title="The wax-up model with a spacer over the waxed teeth, to make a vacuum-formed retainer filled with clear silicone">Spaced model (VFR)</button></div>
       <p class="lead" id="mkLead"></p>
       <div class="row" id="mkJawRow"><label>Arch</label><div class="seg" id="mkJaw"><button data-v="upper" type="button">Upper</button><button data-v="lower" type="button">Lower</button></div></div>
       <p class="tip">A design aid. Check the result on the model and in the mouth before relying on it.</p>` },
     { id: 'shape', title: 'Shape to copy', html: `
       <p class="lead" id="shLead"></p>
-      <div class="btns"><button class="btn pri" id="shFile" type="button" title="Choose the scan whose shape you want (STL, PLY or OBJ)">Load the scan</button><button class="btn" id="shSelf" type="button" title="The scan already loaded is the wax-up: make the matrix over it">This scan is the wax-up</button></div>
+      <div id="shModel"></div>
+      <div class="btns" id="shBtns"><button class="btn pri" id="shFile" type="button" title="Choose the scan whose shape you want (STL, PLY or OBJ)">Load the scan</button><button class="btn" id="shSelf" type="button" title="The scan already loaded is the wax-up: make the matrix over it">This scan is the wax-up</button></div>
       <input type="file" id="shIn" accept=".stl,.ply,.obj" hidden>
       <div id="shFit"></div>
       <div class="btns"><button class="btn" id="shAgain" type="button" title="Line the two scans up again">Line up again</button></div>
@@ -73,13 +81,17 @@ const shell = N.createShell({
       <div class="row" id="dMGapRow"><label>Space over the teeth</label><input type="range" id="dMGap" min="0" max="0.3" step="0.01" value="0.05"><span class="val"></span></div>
       <div class="row" id="dReachRow"><label>Reach from each tap</label><input type="range" id="dReach" min="5" max="16" step="0.5" value="9"><span class="val"></span></div>
       <div class="row" id="dHeightRow"><label>Down from the tips</label><input type="range" id="dHeight" min="5" max="16" step="0.5" value="11"><span class="val"></span></div>
+      <div class="row" id="dSpaceRow"><label>Spacer thickness</label><input type="range" id="dSpace" min="0.5" max="3" step="0.1" value="1.5"><span class="val"></span></div>
+      <div class="row" id="dSReachRow"><label>Across the teeth</label><input type="range" id="dSReach" min="4" max="14" step="0.5" value="8"><span class="val"></span></div>
+      <div class="row" id="dSEndRow"><label>Past the end teeth</label><input type="range" id="dSEnd" min="0" max="8" step="0.5" value="3.5"><span class="val"></span></div>
+      <div class="row" id="dSHeightRow"><label>Down from the tips</label><input type="range" id="dSHeight" min="5" max="16" step="0.5" value="10.5"><span class="val"></span></div>
       <label class="check" id="dHolesRow"><input type="checkbox" id="dHoles" checked> Injection hole over each tapped tooth</label>
       <div class="row" id="dHoleDRow"><label>Hole diameter</label><input type="range" id="dHoleD" min="1" max="3" step="0.1" value="1.6"><span class="val"></span></div>
       <div class="btns"><button class="btn pri" id="dBuild" type="button" title="Work out the shape">Make it</button></div>
       <div id="dOut"></div>` },
     { id: 'export', title: 'Download', html: `
       <p class="lead">Download the result as an STL for printing, in the same position as the scan, or keep it in the case file.</p>
-      <div class="btns"><button class="btn pri" id="xStl" type="button" title="Download the shape as an STL file">Download STL</button><button class="btn" id="xCase" type="button" title="Save the scans, the second scan and the result as one case file">Save case</button></div>
+      <div class="btns"><button class="btn pri" id="xStl" type="button" title="Download the shape as an STL file">Download STL</button><button class="btn" id="xWax" type="button" title="Download the wax-up model itself (the model with its base), to print alongside the spaced model">Download the wax-up model</button><button class="btn" id="xCase" type="button" title="Save the scans, the second scan and the result as one case file">Save case</button></div>
       <p class="tip" id="xTip"></p>` },
   ],
 });
@@ -94,12 +106,12 @@ const scans = N.createScanSet({
     const jaw = pickJaw(), M = jaw && scans[jaw].matrix;
     if (S.shape && S.rel && M) c.add({ role: 'shell-shape', name: S.shape.name || 'shape', mesh: S.shape, matrix: M.clone().multiply(S.rel), meta: { jaw, fit: S.fit } });
     if (B && B.mesh && M) c.add({ role: 'shell-part', name: `${P.mode}-${jaw}`, mesh: N.transformMesh(B.mesh, M.clone().invert()), matrix: M.clone(), meta: { jaw, mode: P.mode } });
-    c.data.shell = { version: 1, jaw, mode: P.mode, self: S.self, gap: P.gap, wall: P.wall, thick: P.thick, mgap: P.mgap, reach: P.reach, height: P.height, holes: P.holes, holeD: P.holeD, seed: P.seed, loop: P.loop, taps: P.taps, info: B ? B.info : null };
+    c.data.shell = { version: 1, jaw, mode: P.mode, self: S.self, gap: P.gap, wall: P.wall, thick: P.thick, mgap: P.mgap, reach: P.reach, height: P.height, holes: P.holes, holeD: P.holeD, space: P.space, sreach: P.sreach, send: P.send, sheight: P.sheight, seed: P.seed, loop: P.loop, taps: P.taps, info: B ? B.info : null };
   },
   readCase: (c) => {
     S = mkS(); B = null; const d = c.data.shell;
     PREP = c.data.prep && c.data.prep.seed && c.data.prep.loop && c.data.prep.loop.length >= 3 ? c.data.prep : null;
-    if (d) Object.assign(P, { jaw: d.jaw ?? P.jaw, mode: MODES[d.mode] ? d.mode : 'crown', gap: d.gap ?? P.gap, wall: d.wall ?? P.wall, thick: d.thick ?? P.thick, mgap: d.mgap ?? P.mgap, reach: d.reach ?? P.reach, height: d.height ?? P.height, holes: d.holes ?? P.holes, holeD: d.holeD ?? P.holeD, seed: d.seed || null, loop: d.loop || [], taps: d.taps || [] });
+    if (d) Object.assign(P, { jaw: d.jaw ?? P.jaw, mode: MODES[d.mode] ? d.mode : 'crown', gap: d.gap ?? P.gap, wall: d.wall ?? P.wall, thick: d.thick ?? P.thick, mgap: d.mgap ?? P.mgap, reach: d.reach ?? P.reach, height: d.height ?? P.height, holes: d.holes ?? P.holes, holeD: d.holeD ?? P.holeD, space: d.space ?? P.space, sreach: d.sreach ?? P.sreach, send: d.send ?? P.send, sheight: d.sheight ?? P.sheight, seed: d.seed || null, loop: d.loop || [], taps: d.taps || [] });
     S.self = !!(d && d.self);
     const jaw = pickJaw(), sh = c.get('shell-shape'); if (sh && jaw) { S.shape = sh.mesh; S.rel = scans[jaw].matrix.clone().invert().multiply(sh.matrix); S.fit = (sh.meta && sh.meta.fit) || null; }
     const part = c.get('shell-part'); if (part && jaw) { B = { mesh: N.transformMesh(part.mesh, part.matrix), info: d && d.info, key: mainKey() }; thicknessOf(B); }
@@ -181,7 +193,7 @@ function interpAt(o, hit, val) {                                   // a per-vert
 
 // ───────────── making it ─────────────
 /** a field sampled on a fine grid, worked out exactly only near its surface (a coarse grid says where that is) */
-async function sampleBand(lo, hi, h, f) {
+async function sampleBand(lo, hi, h, f, band = 0.45) {
   const hc = 0.4, cn = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / hc) + 1), C = new Float32Array(cn[0] * cn[1] * cn[2]), q = new THREE.Vector3();
   for (let k = 0; k < cn[2]; k++) { for (let j = 0; j < cn[1]; j++) for (let i = 0; i < cn[0]; i++) C[i + cn[0] * (j + cn[1] * k)] = f(q.set(lo[0] + i * hc, lo[1] + j * hc, lo[2] + k * hc)); if (k % 8 === 0) await N.sleep(0); }
   const n = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / h) + 1), F = new Float32Array(n[0] * n[1] * n[2]); let exact = 0;
@@ -192,7 +204,7 @@ async function sampleBand(lo, hi, h, f) {
       for (let i = 0; i < n[0]; i++) {
         const x = lo[0] + i * h, fx = Math.min(cn[0] - 1.001, (x - lo[0]) / hc), ix = Math.floor(fx), tx = fx - ix, b = ix + cn[0] * (jy + cn[1] * kz), X = 1, Y = cn[0], Z = cn[0] * cn[1];
         const c = (C[b] * (1 - tx) + C[b + X] * tx) * (1 - ty) * (1 - tz) + (C[b + Y] * (1 - tx) + C[b + Y + X] * tx) * ty * (1 - tz) + (C[b + Z] * (1 - tx) + C[b + Z + X] * tx) * (1 - ty) * tz + (C[b + Z + Y] * (1 - tx) + C[b + Z + Y + X] * tx) * ty * tz;
-        F[i + n[0] * (j + n[1] * k)] = Math.abs(c) > 0.45 ? c : (exact++, f(q.set(x, y, z)));
+        F[i + n[0] * (j + n[1] * k)] = Math.abs(c) > band ? c : (exact++, f(q.set(x, y, z)));
       }
     }
     if (k % 6 === 0) { shell.setBusyText(`Working out the shape… ${Math.round(100 * k / n[2])}%`); await N.sleep(0); }
@@ -235,9 +247,52 @@ async function buildMatrix() {
   if (!mesh.indices.length) throw new Error('Nothing to make: check the taps are on the teeth.');
   const out = { mesh, key: mainKey(), h }; out.info = infoOf(out); return out;
 }
+/** is the loaded model a closed solid (a model with its base), so a spacer can be joined to it? */
+const isSolid = () => { const j = pickJaw(); return !!(j && N.isWatertight(scans[j].raw)); };
+async function buildSpacer() {
+  const jaw = pickJaw(), up = jaw === 'upper' ? -1 : 1, taps = P.taps.map(toCase); if (!taps.length) throw new Error('Tap the waxed-up teeth first (Teeth step).');
+  if (!isSolid()) throw new Error('This needs the wax-up as a solid model with its base: build it on the Models tab (and choose “Use the models in the other tools”), or load that model here.');
+  const om = mainSurf(), model = scans.framed(jaw), t = P.space, R = P.sreach, E = P.send, H = P.sheight, tA = 1.5, tE = 1.5, tH = 2.5, taper = Math.min(tA, tE, tH), hm = {};   // tapers across, past the ends and towards the gum: the retainer forms over a slope, not a step
+  // the spacer follows the arch through the taps: within R across it (labial and lingual surfaces, a little gum), and only E past the
+  // first and last tapped teeth (so the next tooth stays unspaced for the retainer to seat on); down to H below the tips
+  const Pm = model.positions; let cx = 0, cy = 0, nc = 0; for (let i = 0; i < Pm.length; i += 30) { cx += Pm[i]; cy += Pm[i + 1]; nc++; } cx /= nc; cy /= nc;
+  const ord = taps.slice().sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)), groups = [];
+  for (const p of ord) { const g = groups[groups.length - 1]; if (g && Math.hypot(p.x - g[g.length - 1].x, p.y - g[g.length - 1].y) < 14) g.push(p); else groups.push([p]); }   // taps more than a tooth or two apart: separate stretches
+  const tang = (p) => new THREE.Vector2(-(p.y - cy), p.x - cx).normalize();
+  const weight = (q) => {
+    let best = -0.12;
+    for (const g of groups) {
+      const cand = [];                                             // [across, past the end, tip height]
+      for (let k = 0; k + 1 < g.length; k++) { const A = g[k], Bp = g[k + 1], ex = Bp.x - A.x, ey = Bp.y - A.y, L2 = ex * ex + ey * ey, sr = ((q.x - A.x) * ex + (q.y - A.y) * ey) / L2, s0 = N.clamp(sr, 0, 1); if ((k === 0 && sr < 0) || (k === g.length - 2 && sr > 1)) continue; cand.push([Math.hypot(q.x - A.x - s0 * ex, q.y - A.y - s0 * ey), 0, A.z + s0 * (Bp.z - A.z)]); }   // beyond the first and last taps only the end reach counts
+      const first = g[0], last = g[g.length - 1];
+      const d0 = g.length > 1 ? new THREE.Vector2(first.x - g[1].x, first.y - g[1].y).normalize() : tang(first), d1 = g.length > 1 ? new THREE.Vector2(last.x - g[g.length - 2].x, last.y - g[g.length - 2].y).normalize() : tang(first).negate();
+      for (const [p, d] of [[first, d0], [last, d1]]) { const u = (q.x - p.x) * d.x + (q.y - p.y) * d.y, c = Math.abs(-(q.x - p.x) * d.y + (q.y - p.y) * d.x); if (u > 0) cand.push([c, u, p.z]); else if (g.length === 1) cand.push([c, 0, p.z]); }
+      for (const [c, a, z] of cand) { const w = N.clamp((R - c) / tA, 0, 1) * N.clamp((E - a) / tE, 0, 1) * N.clamp(up * (q.z - (z - up * H)) / tH, 0, 1); if (-0.12 + 1.12 * w > best) best = -0.12 + 1.12 * w; }
+    }
+    return best;
+  };
+  const f = (q) => sd(om, q, hm) - t * weight(q);
+  const xs = taps.map((p) => p.x), ys = taps.map((p) => p.y), zs = taps.map((p) => p.z), pad = Math.max(R, E) + t + 1.5;
+  const lo = [Math.min(...xs) - pad, Math.min(...ys) - pad, up > 0 ? Math.min(...zs) - H - 2 : Math.min(...zs) - t - 2], hi = [Math.max(...xs) + pad, Math.max(...ys) + pad, up > 0 ? Math.max(...zs) + t + 2 : Math.max(...zs) + H + 2];
+  const vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), h = Math.max(0.12, Math.cbrt(vol / 5e6));
+  const { F, n } = await sampleBand(lo, hi, h, f, 0.45 * (1 + 1.12 * t / taper));
+  shell.setBusyText('Building the spacer…'); await N.sleep(0);
+  const piece = N.isoMesh(F, n[0], n[1], n[2], lo, h, { minVolume: 1 });
+  if (!piece.indices.length) throw new Error('Nothing to add: check the taps are on the teeth.');
+  shell.setBusyText('Joining the spacer to the model…'); await N.sleep(0);
+  await SOL.ready(); let A, Bm, U;
+  try { A = SOL.toManifold(model); Bm = SOL.toManifold(piece); U = A.add(Bm); var mesh = SOL.fromManifold(U); } finally { SOL.free(A, Bm, U); }
+  const out = { mesh, key: mainKey(), h, box: [lo, hi] };
+  // which vertices are spacer (stand off the model) — for the picture and for the check of its thickness
+  const Pr = mesh.positions, nV = Pr.length / 3, off = new Float32Array(nV), q = new THREE.Vector3();
+  for (let v = 0; v < nV; v++) { const x = Pr[3 * v], y = Pr[3 * v + 1], z = Pr[3 * v + 2]; if (x < lo[0] || y < lo[1] || z < lo[2] || x > hi[0] || y > hi[1] || z > hi[2]) continue; off[v] = sd(om, q.set(x, y, z), hm); }
+  out.off = off; out.info = infoOf(out); out.info.added = N.meshVolume(mesh) - N.meshVolume(model);
+  let full = 0; for (let v = 0; v < nV; v++) if (off[v] > 0.5 * t) full++; out.info.spacer = t; out.info.full = full;
+  return out;
+}
 /** thickness at each vertex of a crown or shell: on the outside, how far in the preparation (plus space) is; on the inside, how far out the outer surface is */
 function thicknessOf(R) {
-  if (P.mode === 'matrix' || !S.shape && !S.self) { R.thick = null; return; }
+  if (TAPS(P.mode) || !S.shape && !S.self) { R.thick = null; return; }
   const om = mainSurf(), os = S.shape || S.self ? shapeSurf() : null; if (!os) { R.thick = null; return; }
   const Pm = R.mesh.positions, nV = Pm.length / 3, t = new Float32Array(nV), edge = new Uint8Array(nV), q = new THREE.Vector3(), hm = {}, hs = {}, mf = R.mf || (P.seed && P.loop.length >= 3 ? marginField() : null);
   for (let v = 0; v < nV; v++) {
@@ -264,12 +319,14 @@ function infoOf(R) {
 }
 $('dBuild').addEventListener('click', async () => {
   const jaw = pickJaw(); if (!jaw) return shell.status('Load a scan first', true);
-  if (P.mode !== 'matrix' && !S.shape) return shell.status('Load the scan from before the preparation first (Shape step)', true);
-  if (P.mode !== 'matrix' && (!P.seed || P.loop.length < 3)) return shell.status('Mark the prepared tooth and its margin first (Teeth step)', true);
+  if (!TAPS(P.mode) && !S.shape) return shell.status('Load the scan from before the preparation first (Shape step)', true);
+  if (!TAPS(P.mode) && (!P.seed || P.loop.length < 3)) return shell.status('Mark the prepared tooth and its margin first (Teeth step)', true);
   if (P.mode === 'matrix' && !S.shape && !S.self) return shell.status('Load the wax-up, or say this scan is the wax-up (Shape step)', true);
+  if (P.mode === 'spacer' && !isSolid()) return shell.status('This needs the wax-up as a solid model with its base (see the Shape step)', true);
+  if (TAPS(P.mode) && !P.taps.length) return shell.status('Tap the teeth first (Teeth step)', true);
   try {
-    const t0 = performance.now(); B = await shell.busy('Working out the shape…', () => (P.mode === 'matrix' ? buildMatrix() : buildCrown()));
-    B.info.seconds = (performance.now() - t0) / 1000; B.focus = P.mode !== 'matrix'; scans.touch(); shell.status(`${MODES[P.mode]} made: ${B.info.volume.toFixed(0)} mm³, ${B.info.closed ? 'closed' : 'not closed'}`);
+    const t0 = performance.now(); B = await shell.busy('Working out the shape…', () => (P.mode === 'matrix' ? buildMatrix() : P.mode === 'spacer' ? buildSpacer() : buildCrown()));
+    B.info.seconds = (performance.now() - t0) / 1000; B.focus = P.mode === 'crown' || P.mode === 'shell'; scans.touch(); shell.status(`${MODES[P.mode]} made: ${B.info.volume.toFixed(0)} mm³, ${B.info.closed ? 'closed' : 'not closed'}`);
   } catch (err) { B = null; shell.status(String((err && err.message) || err), true); }
   syncUI(); refreshView();
 });
@@ -279,13 +336,13 @@ const tapTool = {
   cursor: 'crosshair', onDown: () => false,
   onClick: (i) => {
     if (i.button !== 0 || !pickJaw()) return; const h = i.pick([scans[P.jaw].object]); if (!h) return; const p = toFile(h.point);
-    if (P.mode === 'matrix') P.taps.push(p); else if (!P.seed) P.seed = p; else P.loop.push(p);
+    if (TAPS(P.mode)) P.taps.push(p); else if (!P.seed) P.seed = p; else P.loop.push(p);
     B = null; scans.touch(); syncUI(); refreshView();
   },
   onMove: () => {}, onUp: () => {},
 };
-$('tUndo').addEventListener('click', () => { if (P.mode === 'matrix') P.taps.pop(); else if (P.loop.length) P.loop.pop(); else P.seed = null; B = null; syncUI(); refreshView(); });
-$('tClear').addEventListener('click', () => { if (P.mode === 'matrix') P.taps = []; else { P.seed = null; P.loop = []; } B = null; syncUI(); refreshView(); });
+$('tUndo').addEventListener('click', () => { if (TAPS(P.mode)) P.taps.pop(); else if (P.loop.length) P.loop.pop(); else P.seed = null; B = null; syncUI(); refreshView(); });
+$('tClear').addEventListener('click', () => { if (TAPS(P.mode)) P.taps = []; else { P.seed = null; P.loop = []; } B = null; syncUI(); refreshView(); });
 $('tPrep').addEventListener('click', () => {
   if (!PREP) return; if (PREP.jaw && scans.has(PREP.jaw)) P.jaw = PREP.jaw; const inv = scans[pickJaw()].matrix.clone().invert(), F = (p) => new THREE.Vector3(...p).applyMatrix4(inv).toArray();
   P.seed = F(PREP.seed); P.loop = PREP.loop.map(F); B = null; scans.touch(); syncUI(); refreshView(); shell.status(`Prep check’s tooth and ${P.loop.length} margin points used`);
@@ -308,36 +365,43 @@ const RB = {
   thick: N.rangeBind('dThick', ch('thick'), { fmt: (v) => v.toFixed(2) + ' mm' }), mgap: N.rangeBind('dMGap', ch('mgap'), { fmt: (v) => v.toFixed(2) + ' mm' }),
   reach: N.rangeBind('dReach', ch('reach'), { fmt: (v) => v.toFixed(1) + ' mm' }), height: N.rangeBind('dHeight', ch('height'), { fmt: (v) => v.toFixed(1) + ' mm' }),
   holeD: N.rangeBind('dHoleD', ch('holeD'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+  space: N.rangeBind('dSpace', ch('space'), { fmt: (v) => v.toFixed(1) + ' mm' }), sreach: N.rangeBind('dSReach', ch('sreach'), { fmt: (v) => v.toFixed(1) + ' mm' }), send: N.rangeBind('dSEnd', ch('send'), { fmt: (v) => v.toFixed(1) + ' mm' }), sheight: N.rangeBind('dSHeight', ch('sheight'), { fmt: (v) => v.toFixed(1) + ' mm' }),
 };
 $('dHoles').addEventListener('change', (e) => { P.holes = e.target.checked; B = null; scans.touch(); syncUI(); refreshView(); });
 const SEG = {
-  mode: N.segBind($('mkMode'), (v) => { const was = P.mode; P.mode = v; if ((was === 'matrix') !== (v === 'matrix')) B = null; else if (was !== v) B = null; scans.touch(); syncUI(); refreshView(); }, P.mode),
+  mode: N.segBind($('mkMode'), (v) => { const was = P.mode; P.mode = v; if (was !== v) B = null; scans.touch(); syncUI(); refreshView(); }, P.mode),
   jaw: N.segBind($('mkJaw'), (v) => { if (!scans.has(v)) return syncUI(); if (v !== P.jaw) { P.jaw = v; P.seed = null; P.loop = []; P.taps = []; S = mkS(); B = null; } syncUI(); refreshView(); }),
 };
 $('xStl').addEventListener('click', async () => {
   if (!B) return shell.status('Make it first (Design step)', true);
   const jaw = pickJaw(), m = N.transformMesh(B.mesh, scans[jaw].matrix.clone().invert());
-  await N.saveFile(`${P.mode === 'crown' ? 'provisional' : P.mode === 'shell' ? 'shell' : 'matrix'}-${jaw}.stl`, N.stlBinary(m, null, `Shell Card ${MODES[P.mode].toLowerCase()}, mm`));
+  await N.saveFile(`${{ crown: 'provisional', shell: 'shell', matrix: 'matrix', spacer: 'spaced-model' }[P.mode]}-${jaw}.stl`, N.stlBinary(m, null, `Shell Card ${MODES[P.mode].toLowerCase()}, mm`));
 });
 $('xCase').addEventListener('click', () => scans.saveCase());
+$('xWax').addEventListener('click', async () => { const jaw = pickJaw(); if (!jaw) return; await N.saveFile(`waxup-model-${jaw}.stl`, N.stlBinary(scans[jaw].raw, null, 'Shell Card wax-up model, mm')); });
 
 // ───────────── what is shown ─────────────
 function syncUI() {
-  const jaw = pickJaw(), mx = P.mode === 'matrix', shown = (id, on) => { const e = $(id); if (e) e.hidden = !on; };
+  const jaw = pickJaw(), mx = P.mode === 'matrix', sp = P.mode === 'spacer', tp = TAPS(P.mode), solid = isSolid(), shown = (id, on) => { const e = $(id); if (e) e.hidden = !on; };
   SEG.mode(P.mode); SEG.jaw(jaw); for (const b of $('mkJaw').children) b.disabled = !scans.has(b.dataset.v);
   shown('mkJawRow', scans.has('upper') && scans.has('lower'));
   $('mkLead').textContent = P.mode === 'crown' ? 'A provisional crown that fits the preparation: its outside is the tooth as it was before (or as waxed up), its inside the preparation plus a cement space. You need a scan of the arch before the preparation, or a wax-up.'
     : P.mode === 'shell' ? 'A thin shell of the tooth’s shape before the preparation (or as waxed up), to reline in the mouth with a provisional material. You need a scan of the arch before the preparation, or a wax-up.'
-    : 'A clear matrix over a wax-up, for an injected or pressed mock-up or a chairside provisional. It covers the teeth you tap and reaches onto their neighbours to seat; it has no undercuts, so it can be printed in a rigid clear resin.';
-  $('shLead').textContent = mx ? 'Load the wax-up of this arch (it is lined up on the teeth that were not changed), or use the scan already loaded if that is the wax-up.' : 'Load a scan of this arch taken before the preparation, or a wax-up of it. It is lined up on the other teeth.';
-  shown('shSelf', mx); shown('shAgain', !!S.shape);
+    : mx ? 'A clear matrix over a wax-up, for an injected or pressed mock-up or a chairside provisional. It covers the teeth you tap and reaches onto their neighbours to seat; it has no undercuts, so it can be printed in a rigid clear resin.'
+    : 'For an injection-moulding stent made in the lab: the wax-up model with a spacer over the waxed-up teeth. Print both models; make a vacuum-formed retainer on the spaced model, fill its spaced part with clear silicone (e.g. Exaclear) and seat it on the wax-up model. The other teeth are left unspaced so the retainer seats on them.';
+  $('shLead').textContent = sp ? 'The spaced model is made from the wax-up model itself: the arch scan here must be the wax-up, as a solid model with its base (so both printed models share the same base).' : mx ? 'Load the wax-up of this arch (it is lined up on the teeth that were not changed), or use the scan already loaded if that is the wax-up.' : 'Load a scan of this arch taken before the preparation, or a wax-up of it. It is lined up on the other teeth.';
+  shown('shSelf', mx); shown('shAgain', !!S.shape && !sp); shown('shBtns', !sp); shown('shFit', !sp);
+  $('shModel').innerHTML = !sp ? '' : solid ? '<div class="sum"><h5>The wax-up model is a closed solid<span class="okb">ready</span></h5><div><span>The spacer is added to it</span><b>' + NAME[jaw] + '</b></div></div>'
+    : `<div class="sum"><h5>The loaded scan is not a solid model<span class="okb bad">needs a base</span></h5></div><p class="note">Load the wax-up as the arch scan and build its model with a base on the <b>Models</b> tab, then choose “Use the models in the other tools”. ${N.EMBED ? '' : 'Or load here the wax-up model with its base, as an STL.'}</p>${N.EMBED && N.HUB && N.HUB.goto ? '<div class="btns"><button class="btn" type="button" id="shGoModels">Go to Models</button></div>' : ''}`;
+  if ($('shGoModels')) $('shGoModels').onclick = () => N.HUB.goto('model');
   const fit = S.fit;
   $('shFit').innerHTML = S.self ? '<div class="sum"><h5>The scan already loaded is the wax-up</h5></div>' : S.shape ? `<div class="sum"><h5>${N.esc(S.shape.name || 'second scan')}<span class="okb${fit && fit.rms > 0.12 ? ' warn' : ''}">${fit && fit.rms > 0.12 ? 'check the fit' : 'lined up'}</span></h5>${fit ? `<div><span>Fit on the unchanged parts (rms)</span><b>${mm(fit.rms)}</b></div>` : ''}</div>` : '';
-  if (mx) { $('tLead').textContent = P.taps.length ? 'Tap the next tooth, or go on to Design.' : 'Tap each tooth the matrix should cover, on its incisal edge or the middle of its biting surface. An injection hole goes there if you want one.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The matrix reaches the distance set on the Design step from each tap, so a tooth either side is covered too, which helps it seat.'; }
+  if (sp) { $('tLead').textContent = P.taps.length ? 'Tap the next waxed-up tooth, or go on to Design.' : 'Tap each waxed-up tooth, in the middle of its incisal edge or biting surface.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The spacer runs along the arch through your taps: across the teeth, and a set distance past the first and last tapped teeth (Design step), tapering off at its edges. Leave at least one unspaced tooth either side for the retainer to seat on.'; }
+  else if (mx) { $('tLead').textContent = P.taps.length ? 'Tap the next tooth, or go on to Design.' : 'Tap each tooth the matrix should cover, on its incisal edge or the middle of its biting surface. An injection hole goes there if you want one.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The matrix reaches the distance set on the Design step from each tap, so a tooth either side is covered too, which helps it seat.'; }
   else { $('tLead').textContent = !P.seed ? 'Tap the middle of the prepared tooth.' : P.loop.length < 3 ? 'Now tap round the margin, in order, all the way round (8 or more points; more where it curves).' : 'Add points where the line leaves the margin, or go on to Design.'; $('tCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}` : ''; $('tTip').textContent = 'The margin is followed along the tooth’s surface between your points, so the provisional ends exactly there.'; }
   shown('tPrep', !mx && !!PREP && (!PREP.jaw || PREP.jaw === jaw));
-  $('dLead').textContent = P.mode === 'crown' ? 'Set the cement space, then make it. Thin areas show in red (under 0.5 mm).' : P.mode === 'shell' ? 'Set the shell’s thickness and the space it keeps from the preparation, then make it.' : 'Set the matrix’s thickness and how far it reaches, then make it.';
-  for (const [id, on] of [['dGapRow', !mx], ['dWallRow', P.mode === 'shell'], ['dThickRow', mx], ['dMGapRow', mx], ['dReachRow', mx], ['dHeightRow', mx], ['dHolesRow', mx], ['dHoleDRow', mx && P.holes]]) shown(id, on);
+  $('dLead').textContent = sp ? 'Set the spacer’s thickness (the thickness of clear silicone in the stent) and how far it reaches from each tap, then make it.' : P.mode === 'crown' ? 'Set the cement space, then make it. Thin areas show in red (under 0.5 mm).' : P.mode === 'shell' ? 'Set the shell’s thickness and the space it keeps from the preparation, then make it.' : 'Set the matrix’s thickness and how far it reaches, then make it.';
+  for (const [id, on] of [['dGapRow', P.mode === 'crown' || P.mode === 'shell'], ['dWallRow', P.mode === 'shell'], ['dThickRow', mx], ['dMGapRow', mx], ['dReachRow', mx], ['dHeightRow', mx], ['dHolesRow', mx], ['dHoleDRow', mx && P.holes], ['dSpaceRow', sp], ['dSReachRow', sp], ['dSEndRow', sp], ['dSHeightRow', sp]]) shown(id, on);
   const i = B && B.info; let out = '';
   if (i) {
     const thinBad = i.thinnest != null && i.thinnest < 0.5;
@@ -347,12 +411,14 @@ function syncUI() {
       + (i.occlusal != null ? `<div><span>Typical occlusal / incisal thickness</span><b>${mm(i.occlusal)}</b></div>` : '')
       + (i.thinArea != null ? `<div><span>Area under 0.5 mm</span><b>${i.thinArea.toFixed(1)} mm²</b></div>` : '')
       + (i.holes != null ? `<div><span>Injection holes</span><b>${i.holes}</b></div>` : '')
+      + (i.spacer != null ? `<div><span>Spacer over the tapped teeth</span><b>${i.spacer.toFixed(1)} mm</b></div><div><span>Added to the model</span><b>${i.added.toFixed(0)} mm³</b></div>` : '')
       + `<div><span>Triangles</span><b>${i.tris.toLocaleString('en-GB')}</b></div>` + (i.seconds ? `<div><span>Made in</span><b>${i.seconds.toFixed(1)} s</b></div>` : '') + '</div>';
     if (thinBad) out += '<p class="note">Some of it is under 0.5 mm thick: printed provisional resins usually need more there. Check your resin’s minimum, or reduce the preparation further.</p>';
   }
   $('dOut').innerHTML = out;
-  $('xTip').textContent = P.mode === 'matrix' ? 'Print in a clear resin. Check it seats on the model before injecting.' : P.mode === 'crown' ? 'Print in a provisional crown resin following its maker’s instructions; the margin is left exactly at the line you marked, so check it on the model.' : 'Print in a provisional resin, then reline in the mouth.';
-  shell.markDone('make', !!jaw); shell.markDone('shape', !!(S.shape || S.self)); shell.markDone('teeth', mx ? P.taps.length > 0 : !!(P.seed && P.loop.length >= 3)); shell.markDone('design', !!B);
+  shown('xWax', sp);
+  $('xTip').textContent = sp ? 'Print the spaced model and the wax-up model at the same settings. Lab side: vacuum-form a retainer on the spaced model, fill the spaced part with clear silicone, seat it on the wax-up model and let it set. The result is a clear stent for injection moulding.' : P.mode === 'matrix' ? 'Print in a clear resin. Check it seats on the model before injecting.' : P.mode === 'crown' ? 'Print in a provisional crown resin following its maker’s instructions; the margin is left exactly at the line you marked, so check it on the model.' : 'Print in a provisional resin, then reline in the mouth.';
+  shell.markDone('make', !!jaw); shell.markDone('shape', sp ? solid : !!(S.shape || S.self)); shell.markDone('teeth', tp ? P.taps.length > 0 : !!(P.seed && P.loop.length >= 3)); shell.markDone('design', !!B);
 }
 let extra = [], marks = [];
 const thickColour = (t) => (t < 0.5 ? new THREE.Color(0xdc2626) : t < 1.0 ? new THREE.Color(0xf59e0b) : new THREE.Color(0x14b8a6));
@@ -361,11 +427,11 @@ function refreshView() {
   const id = shell.current >= 0 ? shell.steps[shell.current].id : 'load', jaw = pickJaw();
   if (jaw && ['shape', 'teeth', 'design', 'export'].includes(id)) { for (const j of JAWS) if (scans[j] && scans[j].object.visible !== (j === jaw)) scans.setVisible(j, j === jaw); }
   else for (const j of JAWS) if (scans[j] && !scans[j].object.visible) scans.setVisible(j, true);
-  if (jaw && id === 'shape' && S.shape && S.rel) {                 // the second scan, in pink
+  if (jaw && id === 'shape' && S.shape && S.rel && P.mode !== 'spacer') {                 // the second scan, in pink
     const o = new THREE.Mesh(N.toGeometry(shapeMesh()), new THREE.MeshStandardMaterial({ color: 0xe879f9, transparent: true, opacity: 0.45, roughness: 0.6, side: THREE.DoubleSide, depthWrite: false })); o.userData.noFit = true; viewer.add(o); extra.push(o);
   }
   if (jaw && ['teeth', 'design', 'export'].includes(id)) {
-    if (P.mode === 'matrix') for (const p of P.taps) marks.push({ m: viewer.marker(toCase(p), { color: 0xa21caf, px: 13 }) });
+    if (TAPS(P.mode)) for (const p of P.taps) marks.push({ m: viewer.marker(toCase(p), { color: 0xa21caf, px: 13 }) });
     else { const pts = P.loop.map(toCase); if (pts.length >= 2) marks.push({ m: viewer.line(pts, { color: 0xe879f9, width: 3, closed: pts.length >= 3, depthTest: false }) }); if (id === 'teeth') { for (const p of pts) marks.push({ m: viewer.marker(p, { color: 0xa21caf, px: 12 }) }); if (P.seed) marks.push({ m: viewer.marker(toCase(P.seed), { color: 0x0f2a44, px: 16 }) }); } }
   }
   legend.hidden = true;
@@ -374,13 +440,19 @@ function refreshView() {
     if (B.thick) { const col = new Float32Array(B.mesh.positions.length); for (let v = 0; v < B.thick.length; v++) { const c = B.edge && B.edge[v] ? new THREE.Color(0x94a3b8) : thickColour(B.thick[v]); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; } const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.BufferAttribute(B.mesh.positions, 3)); ng.setIndex(new THREE.BufferAttribute(B.mesh.indices, 1)); ng.setAttribute('color', new THREE.BufferAttribute(col, 3)); ng.computeVertexNormals(); mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }); const o = new THREE.Mesh(ng, mat); o.userData.noFit = true; viewer.add(o); extra.push(o);
       legend.hidden = false; legend.innerHTML = '<div><i style="background:#dc2626"></i>under 0.5 mm</div><div><i style="background:#f59e0b"></i>0.5 – 1.0 mm</div><div><i style="background:#14b8a6"></i>1.0 mm or more</div><div><i style="background:#94a3b8"></i>the edge at the margin</div>';
       if (B.info && B.info.thinAt) { const v = new THREE.Vector3(...B.info.thinAt); marks.push({ m: viewer.marker(v, { color: 0x0f2a44, px: 11 }), l: viewer.label(`thinnest ${mm(B.info.thinnest)}`, v, { dy: -16 }) }); } }
+    else if (B.off) {                                                 // the spaced model: the spacer in pink, the rest as the model
+      const col = new Float32Array(B.mesh.positions.length), a = new THREE.Color(0xe879f9), b = new THREE.Color(0xe5e7eb); for (let v = 0; v < B.off.length; v++) { const c = B.off[v] > 0.05 ? a : b; col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+      const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.BufferAttribute(B.mesh.positions, 3)); ng.setIndex(new THREE.BufferAttribute(B.mesh.indices, 1)); ng.setAttribute('color', new THREE.BufferAttribute(col, 3)); ng.computeVertexNormals();
+      const o = new THREE.Mesh(ng, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 })); o.userData.noFit = true; viewer.add(o); extra.push(o); if (scans[jaw]) scans.setVisible(jaw, false);
+      legend.hidden = false; legend.innerHTML = `<div><i style="background:#e879f9"></i>spacer (${P.space.toFixed(1)} mm)</div><div><i style="background:#e5e7eb"></i>the wax-up model</div>`;
+    }
     else { const o = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.6, roughness: 0.3, side: THREE.DoubleSide, depthWrite: false })); o.userData.noFit = true; viewer.add(o); extra.push(o); }
   }
   if (B && B.focus && ['design', 'export'].includes(id)) {           // a single crown is small: frame it, seen from the cheek side and a little above, once
     B.focus = false; const bb = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(B.mesh.positions, 3)), c = bb.getCenter(new THREE.Vector3()), up = jaw === 'upper' ? -1 : 1, out = new THREE.Vector3(c.x, c.y + 8, 0).normalize();
     viewer.fit(bb.expandByScalar(4), { dir: [out.x, out.y, up * 0.9] });
   }
-  if (id === 'teeth' && jaw) { if (viewer.tool !== tapTool) viewer.setTool(tapTool); shell.hint(P.mode === 'matrix' ? 'Tap each tooth to cover' : !P.seed ? 'Tap the prepared tooth' : 'Tap round the margin'); } else if (viewer.tool === tapTool) { viewer.setTool(null); shell.hint(''); }
+  if (id === 'teeth' && jaw) { if (viewer.tool !== tapTool) viewer.setTool(tapTool); shell.hint(P.mode === 'spacer' ? 'Tap each waxed-up tooth' : P.mode === 'matrix' ? 'Tap each tooth to cover' : !P.seed ? 'Tap the prepared tooth' : 'Tap round the margin'); } else if (viewer.tool === tapTool) { viewer.setTool(null); shell.hint(''); }
   viewer.invalidate();
 }
 shell.onStepChange(() => { syncUI(); refreshView(); });

@@ -50,6 +50,14 @@ as seen from the biting side (no undercuts, so it prints rigid), with a space ov
 and height, and an optional injection hole over each tap. STL downloads in the scan's position; the case file keeps the
 second scan and the result (`shell-shape`, `shell-part`, `data.shell`).
 
+**Spaced model for a VFR injection stent (Shells).** Load the wax-up as the arch scan, build its model with a base on Models
+and choose "Use the models in the other tools" (or load the based wax-up model in Shells on its own). Choose "Spaced model
+(VFR)", tap the waxed-up teeth and set the spacer: its thickness (the clear silicone's), how far across the teeth, how far
+past the first and last tapped teeth, and how far down from the tips. The spacer is joined to the model (Manifold), tapers
+off at its edges, and leaves every other tooth and the base exactly as they were. Print the spaced model and the wax-up
+model; the lab vacuum-forms a retainer on the spaced model, fills its spaced part with clear silicone (e.g. Exaclear) and
+seats it on the wax-up model.
+
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
 hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
 the cusp tips decide instead, and beyond 25° it warns. Raw scans are oriented exactly as before.
