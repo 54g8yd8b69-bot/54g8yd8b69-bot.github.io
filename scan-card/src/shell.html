@@ -44,7 +44,7 @@ import * as SOL from './solid.js';
 const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' }, mm = (v) => v.toFixed(2) + ' mm';
 const MODES = { crown: 'Provisional crown', shell: 'Shell to reline', matrix: 'Matrix', spacer: 'Spaced model (VFR)' };
 const TAPS = (m) => m === 'matrix' || m === 'spacer';           // modes that work from teeth taps
-const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, space: 4, sreach: 11, send: 3.5, sheight: 10.5, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
+const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, space: 3, sreach: 11, send: 3.5, sheight: 10.5, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
 let S = mkS(), B = null, PREP = null;                            // S: the second scan; B: the result; PREP: Prep check's marking, if the case has one
 function mkS() { return { shape: null, rel: null, fit: null, self: false }; }   // rel: the second scan's file → the main scan's file coordinates
 
@@ -81,7 +81,7 @@ const shell = N.createShell({
       <div class="row" id="dMGapRow"><label>Space over the teeth</label><input type="range" id="dMGap" min="0" max="0.3" step="0.01" value="0.05"><span class="val"></span></div>
       <div class="row" id="dReachRow"><label>Reach from each tap</label><input type="range" id="dReach" min="5" max="16" step="0.5" value="9"><span class="val"></span></div>
       <div class="row" id="dHeightRow"><label>Down from the tips</label><input type="range" id="dHeight" min="5" max="16" step="0.5" value="11"><span class="val"></span></div>
-      <div class="row" id="dSpaceRow"><label>Spacer thickness</label><input type="range" id="dSpace" min="0.5" max="6" step="0.1" value="4"><span class="val"></span></div>
+      <div class="row" id="dSpaceRow"><label>Spacer thickness</label><input type="range" id="dSpace" min="0.5" max="6" step="0.1" value="3"><span class="val"></span></div>
       <div class="row" id="dSReachRow"><label>Across the teeth</label><input type="range" id="dSReach" min="4" max="16" step="0.5" value="11"><span class="val"></span></div>
       <div class="row" id="dSEndRow"><label>Past the end teeth</label><input type="range" id="dSEnd" min="0" max="8" step="0.5" value="3.5"><span class="val"></span></div>
       <div class="row" id="dSHeightRow"><label>Down from the tips</label><input type="range" id="dSHeight" min="5" max="16" step="0.5" value="10.5"><span class="val"></span></div>
@@ -135,15 +135,38 @@ function surf(mesh, key) {
   // which way the triangles face (+1 out of the teeth, as scanners write them; −1 if this file has them the other way round)
   const up = pickJaw() === 'upper' ? -1 : 1; let zt = -Infinity; for (let i = 2; i < Pm.length; i += 3) if (up * Pm[i] > zt) zt = up * Pm[i];
   let s = 0; for (let f = 0; f < nF; f++) { const a = idx[3 * f] * 3, b = idx[3 * f + 1] * 3, c = idx[3 * f + 2] * 3; if (up * (Pm[a + 2] + Pm[b + 2] + Pm[c + 2]) / 3 < zt - 2.5) continue; s += up * fn[3 * f + 2]; }
-  const o = { bvh, idx, fn, or: s >= 0 ? 1 : -1, mesh }; if (Q.size > 6) Q.clear(); Q.set(key, o); return o;
+  // which side a point is on is judged by the normal of the nearest feature: the triangle's own inside it, the two triangles' together on
+  // an edge, all the triangles round a corner (weighted by their angles there) at a vertex. With only the triangle's, a point just off a
+  // sharp edge (a model's base) can be judged inside, and a sheet of false material runs out along the face's plane.
+  const nV = Pm.length / 3, vn = new Float32Array(nV * 3), edge = new Map(), fu = new Float32Array(nF * 3);
+  for (let f = 0; f < nF; f++) {
+    const L = Math.hypot(fn[3 * f], fn[3 * f + 1], fn[3 * f + 2]) || 1; fu[3 * f] = fn[3 * f] / L; fu[3 * f + 1] = fn[3 * f + 1] / L; fu[3 * f + 2] = fn[3 * f + 2] / L;
+    for (let k = 0; k < 3; k++) {
+      const a = idx[3 * f + k], b = idx[3 * f + (k + 1) % 3], c = idx[3 * f + (k + 2) % 3];
+      const ux = Pm[3 * b] - Pm[3 * a], uy = Pm[3 * b + 1] - Pm[3 * a + 1], uz = Pm[3 * b + 2] - Pm[3 * a + 2], wx = Pm[3 * c] - Pm[3 * a], wy = Pm[3 * c + 1] - Pm[3 * a + 1], wz = Pm[3 * c + 2] - Pm[3 * a + 2];
+      const ang = Math.acos(Math.max(-1, Math.min(1, (ux * wx + uy * wy + uz * wz) / ((Math.hypot(ux, uy, uz) * Math.hypot(wx, wy, wz)) || 1))));
+      vn[3 * a] += ang * fu[3 * f]; vn[3 * a + 1] += ang * fu[3 * f + 1]; vn[3 * a + 2] += ang * fu[3 * f + 2];
+      const ek = a < b ? a * nV + b : b * nV + a, e = edge.get(ek); if (e) { e[0] += fu[3 * f]; e[1] += fu[3 * f + 1]; e[2] += fu[3 * f + 2]; } else edge.set(ek, [fu[3 * f], fu[3 * f + 1], fu[3 * f + 2]]);
+    }
+  }
+  const o = { bvh, idx, fn: fu, vn, edge, nV, or: s >= 0 ? 1 : -1, mesh }; if (Q.size > 6) Q.clear(); Q.set(key, o); return o;
 }
 const mainSurf = () => surf(scans.framed(pickJaw()), 'main|' + mainKey());
 const shapeMesh = () => (S.self ? scans.framed(pickJaw()) : N.transformMesh(S.shape, shapeMatrix()));
 const shapeSurf = () => (S.self ? mainSurf() : surf(shapeMesh(), 'shape|' + mainKey() + '|' + S.rel.elements.join(',') + '|' + S.shape.positions.length));
 /** signed distance to a surface: + outside the teeth, − inside; hit gets the closest point and triangle */
 function sd(o, q, hit) {
-  o.bvh.closestPointToPoint(q, hit); const f = hit.faceIndex;
-  const side = ((q.x - hit.point.x) * o.fn[3 * f] + (q.y - hit.point.y) * o.fn[3 * f + 1] + (q.z - hit.point.z) * o.fn[3 * f + 2]) * o.or;
+  o.bvh.closestPointToPoint(q, hit); const f = hit.faceIndex, P0 = o.mesh.positions, a = o.idx[3 * f], b = o.idx[3 * f + 1], c = o.idx[3 * f + 2], p = hit.point;
+  // where on the triangle the nearest point lies (barycentric weights): inside, on an edge, or at a corner
+  const ax = P0[3 * a], ay = P0[3 * a + 1], az = P0[3 * a + 2], e0x = P0[3 * b] - ax, e0y = P0[3 * b + 1] - ay, e0z = P0[3 * b + 2] - az, e1x = P0[3 * c] - ax, e1y = P0[3 * c + 1] - ay, e1z = P0[3 * c + 2] - az, px = p.x - ax, py = p.y - ay, pz = p.z - az;
+  const d00 = e0x * e0x + e0y * e0y + e0z * e0z, d01 = e0x * e1x + e0y * e1y + e0z * e1z, d11 = e1x * e1x + e1y * e1y + e1z * e1z, d20 = px * e0x + py * e0y + pz * e0z, d21 = px * e1x + py * e1y + pz * e1z, den = d00 * d11 - d01 * d01;
+  let nx = o.fn[3 * f], ny = o.fn[3 * f + 1], nz = o.fn[3 * f + 2];
+  if (Math.abs(den) > 1e-18) {
+    const w1 = (d11 * d20 - d01 * d21) / den, w2 = (d00 * d21 - d01 * d20) / den, w0 = 1 - w1 - w2, eps = 1e-4, z0 = w0 < eps, z1 = w1 < eps, z2 = w2 < eps, nz_ = z0 + z1 + z2;
+    if (nz_ >= 2) { const v = !z0 ? a : !z1 ? b : c; nx = o.vn[3 * v]; ny = o.vn[3 * v + 1]; nz = o.vn[3 * v + 2]; }
+    else if (nz_ === 1) { const [u, v] = z0 ? [b, c] : z1 ? [a, c] : [a, b], e = o.edge.get(u < v ? u * o.nV + v : v * o.nV + u); if (e) { nx = e[0]; ny = e[1]; nz = e[2]; } }
+  }
+  const side = ((q.x - p.x) * nx + (q.y - p.y) * ny + (q.z - p.z) * nz) * o.or;
   return side >= 0 ? hit.distance : -hit.distance;
 }
 
@@ -255,7 +278,16 @@ async function buildMatrix() {
   const out = { mesh, key: mainKey(), h }; out.info = infoOf(out); return out;
 }
 /** is the loaded model a closed solid (a model with its base), so a spacer can be joined to it? */
-const isSolid = () => { const j = pickJaw(); return !!(j && N.isWatertight(scans[j].raw)); };
+// a model can arrive with a few pin-holes (loading drops slivers of triangles); those are closed, but a real opening is not
+let SOLID = null;
+function solidModel() {
+  const j = pickJaw(); if (!j) return null; const key = mainKey(); if (SOLID && SOLID.key === key) return SOLID.mesh;
+  let m = scans.framed(j), ok = N.isWatertight(m);
+  if (!ok) { const loops = N.boundaryLoops(m), P0 = m.positions; const small = loops.length && loops.length < 200 && loops.every((l) => { let L = 0; for (let i = 0; i < l.verts.length; i++) { const a = l.verts[i], b = l.verts[(i + 1) % l.verts.length]; L += Math.hypot(P0[3 * a] - P0[3 * b], P0[3 * a + 1] - P0[3 * b + 1], P0[3 * a + 2] - P0[3 * b + 2]); } return l.verts.length <= 60 && L < 8; });
+    if (small) { m = N.fillHoles(m, loops); ok = N.isWatertight(m); } }
+  SOLID = { key, mesh: ok ? m : null }; return SOLID.mesh;
+}
+const isSolid = () => !!solidModel();
 async function buildSpacer() {
   const jaw = pickJaw(), up = jaw === 'upper' ? -1 : 1, taps = P.taps.map(toCase); if (!taps.length) throw new Error('Tap the waxed-up teeth first (Teeth step).');
   if (!isSolid()) throw new Error('This needs the wax-up as a solid model with its base: build it on the Models tab (and choose “Use the models in the other tools”), or load that model here.');
@@ -278,22 +310,34 @@ async function buildSpacer() {
     }
     return best;
   };
-  const f = (q) => sd(om, q, hm) - t * weight(q);
   const xs = taps.map((p) => p.x), ys = taps.map((p) => p.y), zs = taps.map((p) => p.z), pad = Math.max(R, E) + t + 1.5;
   const lo = [Math.min(...xs) - pad, Math.min(...ys) - pad, up > 0 ? Math.min(...zs) - H - 2 : Math.min(...zs) - t - 2], hi = [Math.max(...xs) + pad, Math.max(...ys) + pad, up > 0 ? Math.max(...zs) + t + 2 : Math.max(...zs) + H + 2];
+  // a hollow model's cavity is outside the solid too: no spacer there. A point the model shuts in on nearly every side (12 of 14 rays
+  // hit it within 30 mm) is in a cavity; worked out on a 0.5 mm grid where the spacer would go, and blended between grid points
+  const he = 0.5, ne = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / he) + 1), open = new Float32Array(ne[0] * ne[1] * ne[2]).fill(1), ray = new THREE.Ray(), qe = new THREE.Vector3();
+  const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]].map((d) => new THREE.Vector3(...d).normalize());
+  let shut = 0;
+  for (let k = 0; k < ne[2]; k++) { for (let j = 0; j < ne[1]; j++) for (let i = 0; i < ne[0]; i++) {
+    qe.set(lo[0] + i * he, lo[1] + j * he, lo[2] + k * he); if (weight(qe) <= 0) continue; const d = sd(om, qe, hm); if (d < -0.3 || d > t + 0.8) continue;
+    let hits = 0; for (let m = 0; m < dirs.length && hits + (dirs.length - m) >= 12; m++) { ray.origin.copy(qe); ray.direction.copy(dirs[m]); const hh = om.bvh.raycastFirst(ray, THREE.DoubleSide); if (hh && hh.distance < 30) hits++; }
+    if (hits >= 12) { open[i + ne[0] * (j + ne[1] * k)] = 0; shut++; }
+  } if (k % 6 === 0) { shell.setBusyText(`Finding the outside of the model… ${Math.round(100 * k / ne[2])}%`); await N.sleep(0); } }
+  const openAt = (q) => { if (!shut) return 1; const fx = N.clamp((q.x - lo[0]) / he, 0, ne[0] - 1.001), fy = N.clamp((q.y - lo[1]) / he, 0, ne[1] - 1.001), fz = N.clamp((q.z - lo[2]) / he, 0, ne[2] - 1.001), i = Math.floor(fx), j = Math.floor(fy), k = Math.floor(fz), tx = fx - i, ty = fy - j, tz = fz - k, b = i + ne[0] * (j + ne[1] * k), Y = ne[0], Z = ne[0] * ne[1];
+    return ((open[b] * (1 - tx) + open[b + 1] * tx) * (1 - ty) + (open[b + Y] * (1 - tx) + open[b + Y + 1] * tx) * ty) * (1 - tz) + ((open[b + Z] * (1 - tx) + open[b + Z + 1] * tx) * (1 - ty) + (open[b + Z + Y] * (1 - tx) + open[b + Z + Y + 1] * tx) * ty) * tz; };
+  const f = (q) => { const w = weight(q); return sd(om, q, hm) - t * (w > 0 ? w * openAt(q) : w); };
   const vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), h = Math.max(0.12, Math.cbrt(vol / 5e6));
   const { F, n } = await sampleBand(lo, hi, h, f, 0.45 * (1 + 1.12 * t / taper), true);
   shell.setBusyText('Building the spacer…'); await N.sleep(0);
   const piece = N.isoMesh(F, n[0], n[1], n[2], lo, h, { minVolume: 1 });
   if (!piece.indices.length) throw new Error('Nothing to add: check the taps are on the teeth.');
   shell.setBusyText('Joining the spacer to the model…'); await N.sleep(0);
-  await SOL.ready(); let A, Bm, U;
-  try { A = SOL.toManifold(model); Bm = SOL.toManifold(piece); U = A.add(Bm); var mesh = SOL.fromManifold(U); } finally { SOL.free(A, Bm, U); }
+  await SOL.ready(); let A, Bm, U; const solid = solidModel();
+  try { A = SOL.toManifold(solid); Bm = SOL.toManifold(piece); U = A.add(Bm); var mesh = SOL.fromManifold(U); } finally { SOL.free(A, Bm, U); }
   const out = { mesh, key: mainKey(), h, box: [lo, hi] };
   // which vertices are spacer (stand off the model) — for the picture and for the check of its thickness
   const Pr = mesh.positions, nV = Pr.length / 3, off = new Float32Array(nV), q = new THREE.Vector3();
   for (let v = 0; v < nV; v++) { const x = Pr[3 * v], y = Pr[3 * v + 1], z = Pr[3 * v + 2]; if (x < lo[0] || y < lo[1] || z < lo[2] || x > hi[0] || y > hi[1] || z > hi[2]) continue; off[v] = sd(om, q.set(x, y, z), hm); }
-  out.off = off; out.info = infoOf(out); out.info.added = N.meshVolume(mesh) - N.meshVolume(model);
+  out.off = off; out.info = infoOf(out); out.info.added = N.meshVolume(mesh) - N.meshVolume(solid);
   let full = 0; for (let v = 0; v < nV; v++) if (off[v] > 0.5 * t) full++; out.info.spacer = t; out.info.full = full;
   return out;
 }

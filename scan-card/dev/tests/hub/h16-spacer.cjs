@@ -1,5 +1,5 @@
 // The VFR route inside Scan Card: the wax-up scan loaded as the arch → its model with a base built on Models → “Use the models in
-// the other tools” → Shells’ spaced model over the waxed-up incisors → closed, 1.5 mm over them, base unchanged → both STLs.
+// the other tools” → Shells’ spaced model over the waxed-up incisors with the defaults (3 mm) → closed, canines untouched → both STLs.
 const { openHub, ok, OUT, DATA } = require('./lib.cjs');
 const fs = require('fs');
 (async () => {
@@ -22,8 +22,8 @@ const fs = require('fs');
     const gm = new THREE.BufferGeometry(); gm.setAttribute('position', new THREE.BufferAttribute(model.positions, 3)); gm.setIndex(new THREE.BufferAttribute(Uint32Array.from(model.indices), 1)); const bm = new APP.N.MeshBVH(gm), hm = {};
     const can = W.canines.map((t) => { q.set(...t.tip).applyMatrix4(M); bm.closestPointToPoint(q, hm); bvh.closestPointToPoint(hm.point.clone(), hit); return hit.distance; });
     d.sort((x, y) => x - y); lat.sort((x, y) => x - y); return { latMed: lat[lat.length >> 1], latMin: lat[0], info: B.info, closed: APP.N.isWatertight(B.mesh), med: d[d.length >> 1], p05: d[Math.floor(0.05 * (d.length - 1))], n: d.length, can, space: APP.P.space }; }, W);
-  ok(r.space === 4 && r.closed && Math.abs(r.med - 4) < 0.1 && r.p05 > 3.8, `with the defaults: closed, ${r.info.added.toFixed(0)} mm³ added, spacer ${r.med.toFixed(3)} mm over the central incisors (5%: ${r.p05.toFixed(3)}, ${r.n} points; laterals median ${r.latMed.toFixed(2)}, thinnest ${r.latMin.toFixed(2)} mm where it tapers off before the canines), in ${r.info.seconds.toFixed(1)} s`);
-  ok(r.can.every((x) => x < 0.02), `the canines stay unspaced with a 4 mm spacer (tips ${r.can.map((x) => x.toFixed(3)).join(' and ')} mm off)`);
+  ok(r.space === 3 && r.closed && Math.abs(r.med - 3) < 0.08 && r.p05 > 2.85, `with the defaults: closed, ${r.info.added.toFixed(0)} mm³ added, spacer ${r.med.toFixed(3)} mm over the central incisors (5%: ${r.p05.toFixed(3)}, ${r.n} points; laterals median ${r.latMed.toFixed(2)}, thinnest ${r.latMin.toFixed(2)} mm where it tapers off before the canines), in ${r.info.seconds.toFixed(1)} s`);
+  ok(r.can.every((x) => x < 0.02), `the canines stay unspaced with the 3 mm spacer (tips ${r.can.map((x) => x.toFixed(3)).join(' and ')} mm off)`);
   await sh.evaluate(() => APP.shell.goto('export')); await a.idle(sh);
   const [d1] = await Promise.all([page.waitForEvent('download'), sh.click('#xStl')]); await d1.saveAs(OUT + 'h16-spaced.stl');
   const [d2] = await Promise.all([page.waitForEvent('download'), sh.click('#xWax')]); await d2.saveAs(OUT + 'h16-waxup.stl');

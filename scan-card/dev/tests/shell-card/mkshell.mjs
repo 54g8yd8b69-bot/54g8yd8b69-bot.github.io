@@ -4,6 +4,8 @@
 //   shell-waxup-lower.stl   the demo lower arch with 0.6 mm added to the labial and incisal surfaces of 31, 32, 41 and 42
 //   shell-waxup-model-lower.stl  that wax-up as a solid model with a horseshoe base, built the way Models builds it
 //   shell-truth.json        the move, the incisors' tips and centres, the wax thickness
+//   shell-upper-model-solid.stl / -hollow.stl  the demo upper arch as a model with a 4 mm horseshoe base (sharp-edged), solid and hollowed
+//   shell-upper-truth.json  its canine-to-canine tips, and the first premolars beside them
 import fs from 'fs';
 import * as N from '/home/claude/suite/shared/core.js';
 import * as S from '/home/claude/suite/shared/solid.js';
@@ -26,4 +28,10 @@ if (!N.isWatertight(waxModel.mesh)) throw new Error('the wax-up model is not clo
 fs.writeFileSync(DATA + 'shell-waxup-model-lower.stl', Buffer.from(N.stlBinary(waxModel.mesh)));
 const truth = { move: move.toArray(), wax: WAX, incisors: teeth.map((t) => ({ fdi: t.fdi, tip: t.tip, centre: t.centre, width: t.width })), canines: pair.truth.lower.teeth.filter((t) => [33, 43].includes(t.fdi)).map((t) => ({ fdi: t.fdi, tip: t.tip, centre: t.centre, width: t.width })) };
 fs.writeFileSync(DATA + 'shell-truth.json', JSON.stringify(truth, null, 1));
+for (const [name, o] of [['solid', {}], ['hollow', { hollow: 'open' }]]) {
+  const m = await makeBasedModel(N, S, { jaw: 'upper', style: 'horseshoe', arch: pair.upper, baseH: 4, ...o });
+  if (!N.isWatertight(m.mesh)) throw new Error('the upper model is not closed'); fs.writeFileSync(DATA + `shell-upper-model-${name}.stl`, Buffer.from(N.stlBinary(m.mesh)));
+}
+const ut = (f) => pair.truth.upper.teeth.filter((t) => f.includes(t.fdi)).map((t) => ({ fdi: t.fdi, tip: t.tip, centre: t.centre, width: t.width }));
+fs.writeFileSync(DATA + 'shell-upper-truth.json', JSON.stringify({ teeth: ut([13, 12, 11, 21, 22, 23]), neighbours: ut([14, 24]) }, null, 1));
 console.log('shell test data written:', lo.indices.length / 3, 'triangles per arch; incisors', teeth.map((t) => t.fdi).join(', '));
