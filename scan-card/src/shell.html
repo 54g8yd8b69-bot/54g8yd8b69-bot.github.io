@@ -44,7 +44,7 @@ import * as SOL from './solid.js';
 const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' }, mm = (v) => v.toFixed(2) + ' mm';
 const MODES = { crown: 'Provisional crown', shell: 'Shell to reline', matrix: 'Matrix', spacer: 'Spaced model (VFR)' };
 const TAPS = (m) => m === 'matrix' || m === 'spacer';           // modes that work from teeth taps
-const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, space: 1.5, sreach: 8, send: 3.5, sheight: 10.5, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
+const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, space: 4, sreach: 11, send: 3.5, sheight: 10.5, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
 let S = mkS(), B = null, PREP = null;                            // S: the second scan; B: the result; PREP: Prep check's marking, if the case has one
 function mkS() { return { shape: null, rel: null, fit: null, self: false }; }   // rel: the second scan's file → the main scan's file coordinates
 
@@ -81,8 +81,8 @@ const shell = N.createShell({
       <div class="row" id="dMGapRow"><label>Space over the teeth</label><input type="range" id="dMGap" min="0" max="0.3" step="0.01" value="0.05"><span class="val"></span></div>
       <div class="row" id="dReachRow"><label>Reach from each tap</label><input type="range" id="dReach" min="5" max="16" step="0.5" value="9"><span class="val"></span></div>
       <div class="row" id="dHeightRow"><label>Down from the tips</label><input type="range" id="dHeight" min="5" max="16" step="0.5" value="11"><span class="val"></span></div>
-      <div class="row" id="dSpaceRow"><label>Spacer thickness</label><input type="range" id="dSpace" min="0.5" max="3" step="0.1" value="1.5"><span class="val"></span></div>
-      <div class="row" id="dSReachRow"><label>Across the teeth</label><input type="range" id="dSReach" min="4" max="14" step="0.5" value="8"><span class="val"></span></div>
+      <div class="row" id="dSpaceRow"><label>Spacer thickness</label><input type="range" id="dSpace" min="0.5" max="6" step="0.1" value="4"><span class="val"></span></div>
+      <div class="row" id="dSReachRow"><label>Across the teeth</label><input type="range" id="dSReach" min="4" max="16" step="0.5" value="11"><span class="val"></span></div>
       <div class="row" id="dSEndRow"><label>Past the end teeth</label><input type="range" id="dSEnd" min="0" max="8" step="0.5" value="3.5"><span class="val"></span></div>
       <div class="row" id="dSHeightRow"><label>Down from the tips</label><input type="range" id="dSHeight" min="5" max="16" step="0.5" value="10.5"><span class="val"></span></div>
       <label class="check" id="dHolesRow"><input type="checkbox" id="dHoles" checked> Injection hole over each tapped tooth</label>
@@ -193,9 +193,15 @@ function interpAt(o, hit, val) {                                   // a per-vert
 
 // ───────────── making it ─────────────
 /** a field sampled on a fine grid, worked out exactly only near its surface (a coarse grid says where that is) */
-async function sampleBand(lo, hi, h, f, band = 0.45) {
+async function sampleBand(lo, hi, h, f, band = 0.45, adaptive = false) {
   const hc = 0.4, cn = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / hc) + 1), C = new Float32Array(cn[0] * cn[1] * cn[2]), q = new THREE.Vector3();
   for (let k = 0; k < cn[2]; k++) { for (let j = 0; j < cn[1]; j++) for (let i = 0; i < cn[0]; i++) C[i + cn[0] * (j + cn[1] * k)] = f(q.set(lo[0] + i * hc, lo[1] + j * hc, lo[2] + k * hc)); if (k % 8 === 0) await N.sleep(0); }
+  // a coarse cell needs working out exactly if the surface may pass through it: its corners' range, widened by that range, reaches zero
+  const cc = [cn[0] - 1, cn[1] - 1, cn[2] - 1], need = new Uint8Array(cc[0] * cc[1] * cc[2]);
+  for (let k = 0; k < cc[2]; k++) for (let j = 0; j < cc[1]; j++) for (let i = 0; i < cc[0]; i++) {
+    let mn = Infinity, mx = -Infinity; for (let c = 0; c < 8; c++) { const v = C[(i + (c & 1)) + cn[0] * ((j + ((c >> 1) & 1)) + cn[1] * (k + (c >> 2)))]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    const span = Math.max(mx - mn, band * 0.5); need[i + cc[0] * (j + cc[1] * k)] = adaptive ? (mn - span < 0 && mx + span > 0 ? 1 : 0) : 2;
+  }
   const n = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / h) + 1), F = new Float32Array(n[0] * n[1] * n[2]); let exact = 0;
   for (let k = 0; k < n[2]; k++) {
     const z = lo[2] + k * h, fz = Math.min(cn[2] - 1.001, (z - lo[2]) / hc), kz = Math.floor(fz), tz = fz - kz;
@@ -204,7 +210,8 @@ async function sampleBand(lo, hi, h, f, band = 0.45) {
       for (let i = 0; i < n[0]; i++) {
         const x = lo[0] + i * h, fx = Math.min(cn[0] - 1.001, (x - lo[0]) / hc), ix = Math.floor(fx), tx = fx - ix, b = ix + cn[0] * (jy + cn[1] * kz), X = 1, Y = cn[0], Z = cn[0] * cn[1];
         const c = (C[b] * (1 - tx) + C[b + X] * tx) * (1 - ty) * (1 - tz) + (C[b + Y] * (1 - tx) + C[b + Y + X] * tx) * ty * (1 - tz) + (C[b + Z] * (1 - tx) + C[b + Z + X] * tx) * (1 - ty) * tz + (C[b + Z + Y] * (1 - tx) + C[b + Z + Y + X] * tx) * ty * tz;
-        F[i + n[0] * (j + n[1] * k)] = Math.abs(c) > band ? c : (exact++, f(q.set(x, y, z)));
+        const nd = need[Math.min(ix, cc[0] - 1) + cc[0] * (Math.min(jy, cc[1] - 1) + cc[1] * Math.min(kz, cc[2] - 1))];   // 2: not adaptive — work out exactly within the band
+        F[i + n[0] * (j + n[1] * k)] = (nd === 2 ? Math.abs(c) <= band : nd === 1) ? (exact++, f(q.set(x, y, z))) : c;
       }
     }
     if (k % 6 === 0) { shell.setBusyText(`Working out the shape… ${Math.round(100 * k / n[2])}%`); await N.sleep(0); }
@@ -275,7 +282,7 @@ async function buildSpacer() {
   const xs = taps.map((p) => p.x), ys = taps.map((p) => p.y), zs = taps.map((p) => p.z), pad = Math.max(R, E) + t + 1.5;
   const lo = [Math.min(...xs) - pad, Math.min(...ys) - pad, up > 0 ? Math.min(...zs) - H - 2 : Math.min(...zs) - t - 2], hi = [Math.max(...xs) + pad, Math.max(...ys) + pad, up > 0 ? Math.max(...zs) + t + 2 : Math.max(...zs) + H + 2];
   const vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), h = Math.max(0.12, Math.cbrt(vol / 5e6));
-  const { F, n } = await sampleBand(lo, hi, h, f, 0.45 * (1 + 1.12 * t / taper));
+  const { F, n } = await sampleBand(lo, hi, h, f, 0.45 * (1 + 1.12 * t / taper), true);
   shell.setBusyText('Building the spacer…'); await N.sleep(0);
   const piece = N.isoMesh(F, n[0], n[1], n[2], lo, h, { minVolume: 1 });
   if (!piece.indices.length) throw new Error('Nothing to add: check the taps are on the teeth.');

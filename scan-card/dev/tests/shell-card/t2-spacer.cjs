@@ -19,6 +19,8 @@ const ok = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) proce
   await page.setInputFiles('input[data-ss=file]', DATA + 'shell-waxup-model-lower.stl'); await idle();
   await page.evaluate(() => { APP.P.jaw = 'lower'; APP.shell.goto('shape'); });
   ok(/closed solid/.test(await page.evaluate(() => document.getElementById('shModel').innerText)), 'the wax-up model with its base is accepted');
+  const def = await page.evaluate(() => ({ p: APP.P.space, ui: +document.getElementById('dSpace').value, max: +document.getElementById('dSpace').max }));
+  ok(def.p === 4 && def.ui === 4 && def.max >= 6, `the spacer starts at 4 mm (slider up to ${def.max} mm); this run uses 1.5 mm`);
   await page.evaluate((W) => { APP.P.taps = W.incisors.map((t) => t.tip); APP.RB.space.set(1.5); APP.P.space = 1.5; APP.shell.goto('design'); }, W);
   await page.click('#dBuild'); await idle();
   if (!(await page.evaluate(() => !!APP.B))) { console.log('  status: ' + await page.evaluate(() => [...document.querySelectorAll('[class*=status],[id*=status],.toast')].map((e) => e.className + ': ' + e.textContent).join(' || ').slice(0, 500))); console.log(errors); }
