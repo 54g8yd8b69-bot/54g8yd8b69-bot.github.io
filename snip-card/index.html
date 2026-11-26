@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Snip Card</title>
+<meta name="description" content="Snip Card: capture text from the screen or an image. The text is read in your browser and the image is never sent anywhere.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Snip Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+/* Snip Card: get an image (screen capture, paste, drop or file), drag over the text, and it is read on this device and copied.
+   The OCR engine and English model are ImplantRef's (/implantref/src/vendor/tesseract, /implantref/data/ocr), shared so they download once. */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0; --warn:#8A5A00;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4; --stage:#E3EAEE;
+  --f-display:"Caladea", Cambria, Georgia, serif;
+  --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, sans-serif;
+  --f-mono:ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --navy:#CFE2EE; --teal:#4FB3C9; --mint:#5CC3B7; --warn:#F3D9A4;
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836; --stage:#0A1118; color-scheme:dark }}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--f-body);min-height:100vh}
+[hidden]{display:none!important}
+header{display:flex;align-items:center;gap:14px;padding:12px max(18px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line);background:var(--panel)}
+a.brand{display:flex;align-items:center;gap:10px;color:var(--navy);text-decoration:none;font-family:var(--f-display);font-size:1.35rem;font-weight:700}
+a.brand em{font-style:normal;color:var(--mint)}
+.brand-dot{width:32px;height:32px;border-radius:9px;background:#0B2E4A;display:grid;place-items:center;flex:none}
+.brand-dot svg{width:20px;height:20px}
+.pill{margin-left:auto;font-size:.82rem;color:var(--muted);background:var(--chip);border:1px solid var(--line);padding:3px 10px;border-radius:99px}
+main{max-width:1120px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}
+.src{display:grid;gap:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+button.btn,label.btn{font:600 15px var(--f-body);border:1px solid transparent;border-radius:9px;padding:9px 14px;min-height:42px;cursor:pointer;background:var(--teal);color:#fff;display:inline-flex;align-items:center;gap:8px}
+button.btn.ghost,label.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
+button.btn:focus-visible,label.btn:focus-within{outline:3px solid var(--mint);outline-offset:2px}
+button.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn svg{width:18px;height:18px;flex:none}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#status{font-weight:600;color:var(--navy)}
+.bar{height:6px;background:var(--chip);border-radius:99px;overflow:hidden}
+.bar>div{height:100%;width:0;background:var(--mint);transition:width .2s}
+.hint{font-size:.9rem;color:var(--muted);margin:0}
+kbd{font:12px var(--f-mono);background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+.stagecard{display:grid;gap:12px}
+.stage{background:var(--stage);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center;overflow:hidden}
+.pick{position:relative;display:inline-block;line-height:0;max-width:100%;cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none}
+#view{display:block;max-width:100%;max-height:76vh;width:auto;height:auto;border-radius:4px}
+#sel{position:absolute;border:2px solid var(--mint);background:rgba(63,169,160,.18);box-shadow:0 0 0 9999px rgba(11,46,74,.28);pointer-events:none;border-radius:2px}
+.pick.busy{cursor:progress}
+textarea{width:100%;min-height:220px;resize:vertical;font:17px/1.6 var(--f-body);color:var(--fg);background:var(--panel);padding:14px;border:1px solid var(--line);border-radius:10px}
+textarea:focus{outline:2px solid var(--teal);outline-offset:0}
+label.sw{display:flex;gap:6px;align-items:center;font-size:.92rem;color:var(--fg)}
+label.sw input{width:17px;height:17px;accent-color:var(--teal);margin:0}
+#count,#conf{font-size:.85rem;color:var(--muted)}
+#conf.low{color:var(--warn);font-weight:600}
+.drop{outline:3px dashed var(--mint);outline-offset:-8px}
+details summary{cursor:pointer;font-weight:600;color:var(--navy)}
+details[open] summary{margin-bottom:8px}
+details ul{margin:0;padding-left:20px;font-size:.95rem}
+details li{margin:4px 0}
+footer{font-size:.85rem;color:var(--muted);max-width:75ch}
+#toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0B2E4A;color:#fff;padding:8px 14px;border-radius:9px;font-size:.92rem;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 32px);z-index:5}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){.bar>div,#toast{transition:none}}
+@media (max-width:560px){.pill{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/" title="Back to all apps" aria-label="Snip Card: back to all Notile apps"><span class="brand-dot" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M9 9h6M12 9v7"/></svg></span><span>Snip <em>Card</em></span></a>
+  <span class="pill">On-device · images never leave this computer</span>
+</header>
+<main>
+  <section class="card src" aria-label="Get an image">
+    <div class="row">
+      <button class="btn" id="cap" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Capture screen</button>
+      <button class="btn ghost" id="paste" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/></svg>Paste image</button>
+      <label class="btn ghost" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Choose image<input class="vh" id="file" type="file" accept="image/*"></label>
+    </div>
+    <div><span id="status" role="status" aria-live="polite">Paste a screenshot, or choose an image.</span></div>
+    <div class="bar" id="bar" hidden><div></div></div>
+    <p class="hint" id="howto">On this computer: press <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> to snip part of the screen, then <kbd>Ctrl</kbd> + <kbd>V</kbd> here. The text is read and copied, ready to paste into your notes.</p>
+  </section>
+
+  <section class="card stagecard" id="stagecard" aria-label="Image" hidden>
+    <div class="row">
+      <span class="hint" id="stagehint">Drag over the text you want.</span>
+      <span class="sp"></span>
+      <button class="btn ghost" id="all" type="button">Read whole image</button>
+      <button class="btn ghost" id="drop" type="button">Remove image</button>
+    </div>
+    <div class="stage"><div class="pick" id="pick"><canvas id="view" aria-label="The captured image. Drag over an area to read its text."></canvas><div id="sel" hidden></div></div></div>
+  </section>
+
+  <section class="card" style="display:grid;gap:10px" aria-label="Captured text">
+    <textarea id="out" placeholder="Captured text appears here…" aria-label="Captured text" spellcheck="true"></textarea>
+    <div class="row">
+      <button class="btn" id="copy" type="button">Copy all</button>
+      <button class="btn ghost" id="clear" type="button">Clear</button>
+      <span id="count"></span><span id="conf" role="status"></span>
+      <span class="sp"></span>
+      <label class="sw"><input type="checkbox" id="autocopy" checked> Copy automatically</label>
+      <label class="sw"><input type="checkbox" id="breaks" checked> Keep line breaks</label>
+      <label class="sw"><input type="checkbox" id="append"> Add to existing text</label>
+    </div>
+  </section>
+
+  <section class="card" style="display:grid;gap:12px">
+    <details>
+      <summary>Ways to get an image in</summary>
+      <ul>
+        <li id="li-cap"><b>Capture screen</b>: choose a window or screen to take one still picture of. Sharing stops straight away.</li>
+        <li><b>Paste</b>: snip with <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> (Windows) or <kbd>Ctrl</kbd> + <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>4</kbd> (Mac), then <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>V</kbd> on this page.</li>
+        <li><b>Drop or choose</b> an image file. On a phone, Choose image also offers the camera.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>Getting a clean read</summary>
+      <ul>
+        <li>Drag a box that holds only the text you want, with a little space around it.</li>
+        <li>Small text reads better if you zoom in on it before taking the screenshot.</li>
+        <li>Printed and on-screen text reads well. Handwriting does not.</li>
+        <li>Turn off <b>Keep line breaks</b> to join wrapped lines into paragraphs.</li>
+      </ul>
+    </details>
+    <p class="hint">The reading engine (about 7 MB) downloads the first time and is then kept by the browser. English only.</p>
+  </section>
+
+  <footer>Snip Card is a copying aid. Check the text against the original before it goes into the notes: letters and numbers can be misread (0 and O, 1 and l, 5 and S). The image and the text are held only while this page is open, and nothing is sent anywhere. Follow your organisation’s policy on capturing patient information.</footer>
+</main>
+<video id="vid" muted playsinline hidden></video>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const TESS='/implantref/src/vendor/tesseract/',LANG='/implantref/data/ocr';
+const statusEl=$('status'),bar=$('bar'),barFill=bar.firstElementChild,out=$('out'),view=$('view'),pick=$('pick'),sel=$('sel');
+const store={get(k,d){try{const v=localStorage.getItem('snip.'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('snip.'+k,JSON.stringify(v))}catch(e){}}};
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),ms||2000)}
+function setStatus(s){statusEl.textContent=s}
+function progress(p){if(p==null){bar.hidden=true;return}bar.hidden=false;barFill.style.width=Math.round(Math.max(0,Math.min(1,p))*100)+'%'}
+
+const S={img:null,busy:false,worker:null,loading:null,drag:null,psm:''};
+const served=/^https?:$/.test(location.protocol);
+
+/* ------------------------------------------------------------ settings */
+['autocopy','breaks','append'].forEach(id=>{const el=$(id);el.checked=store.get(id,el.checked);el.addEventListener('change',()=>store.set(id,el.checked))});
+const isMac=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent),touchOnly=matchMedia('(hover:none) and (pointer:coarse)').matches;
+if(touchOnly)$('howto').textContent='Choose a photo or take one, then drag over the text you want. It is read and copied, ready to paste.';
+else if(isMac)$('howto').innerHTML='On this Mac: press <kbd>Ctrl</kbd> + <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>4</kbd> to snip part of the screen to the clipboard, then <kbd>Cmd</kbd> + <kbd>V</kbd> here. The text is read and copied, ready to paste into your notes.';
+const canCapture=!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!touchOnly;
+$('cap').hidden=!canCapture;$('li-cap').hidden=!canCapture;
+const IDLE=touchOnly?'Choose a photo, or paste an image.':canCapture?'Capture the screen, paste a screenshot, or drop an image here.':'Paste a screenshot, or drop an image here.';setStatus(IDLE);
+
+/* ------------------------------------------------------------ text clean-up */
+// Tidy OCR output. With keepBreaks off, wrapped lines are joined into paragraphs (list items and blank lines are kept).
+function tidy(raw,keepBreaks){
+  let t=String(raw||'').replace(/\r\n?/g,'\n').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\s+$/g,'');
+  if(keepBreaks||!t)return t;
+  const listy=l=>/^\s*(?:[-•*·–]|\(?\d{1,2}[.)]|\(?[a-z][.)])\s+/i.test(l);
+  return t.split(/\n{2,}/).map(par=>{const lines=par.split('\n');let acc=lines[0]||'';
+    for(let i=1;i<lines.length;i++){const l=lines[i];
+      if(listy(l))acc+='\n'+l;
+      else if(/[A-Za-z]-$/.test(acc)&&/^[a-z]/.test(l))acc=acc.slice(0,-1)+l;   // word split across a line end
+      else acc+=' '+l.replace(/^\s+/,'')}
+    return acc}).join('\n\n');
+}
+function words(t){const m=String(t).trim().match(/\S+/g);return m?m.length:0}
+function updateCount(){const n=words(out.value);$('count').textContent=n?n+(n===1?' word':' words'):''}
+out.addEventListener('input',updateCount);
+
+/* ------------------------------------------------------------ clipboard */
+async function copyText(t,quiet){
+  if(!t)return false;
+  try{await navigator.clipboard.writeText(t);if(!quiet)toast('Copied '+words(t)+(words(t)===1?' word':' words'));return true}
+  catch(e){ // older browsers, or the page is not focused
+    try{const a=document.activeElement;out.focus();out.select();const ok=document.execCommand('copy');out.setSelectionRange(out.value.length,out.value.length);if(a&&a!==out&&a.focus)a.focus();
+      if(ok&&t===out.value){if(!quiet)toast('Copied');return true}}catch(_){}
+    if(!quiet)toast('Could not copy by itself. Press Copy all.',3200);return false}
+}
+$('copy').addEventListener('click',()=>{if(!out.value.trim())return toast('Nothing to copy yet');copyText(out.value)});
+$('clear').addEventListener('click',()=>{out.value='';$('conf').textContent='';$('conf').className='';updateCount();out.focus()});
+
+/* ------------------------------------------------------------ image in */
+function showImage(src,w,h,what){
+  const MAX=6000,k=Math.min(1,MAX/Math.max(w,h));
+  view.width=Math.max(1,Math.round(w*k));view.height=Math.max(1,Math.round(h*k));
+  const ctx=view.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingQuality='high';ctx.drawImage(src,0,0,view.width,view.height);
+  S.img={w:view.width,h:view.height};sel.hidden=true;$('stagecard').hidden=false;
+  setStatus((what||'Image')+' ready. Drag over the text you want, or read the whole image.');
+  $('stagecard').scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});
+  ensureOcr().catch(()=>{}); // start loading the engine while the user is choosing an area
+}
+async function loadBlob(blob,what){
+  if(!blob||!/^image\//.test(blob.type||''))return toast('That is not an image. Use a screenshot, photo or picture file.',3200);
+  try{
+    if(window.createImageBitmap){let bm;try{bm=await createImageBitmap(blob,{imageOrientation:'from-image'})}catch(e){bm=await createImageBitmap(blob)}
+      showImage(bm,bm.width,bm.height,what);if(bm.close)bm.close();return}
+    await new Promise((res,rej)=>{const url=URL.createObjectURL(blob),im=new Image();im.onload=()=>{showImage(im,im.naturalWidth,im.naturalHeight,what);URL.revokeObjectURL(url);res()};im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('decode'))};im.src=url});
+  }catch(e){toast('Could not open that image.',3000)}
+}
+$('file').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)loadBlob(f,'Image')});
+$('drop').addEventListener('click',()=>{S.img=null;view.width=view.height=1;sel.hidden=true;$('stagecard').hidden=true;setStatus('Image removed. '+IDLE)});
+
+addEventListener('paste',e=>{const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(const it of items){if(it.kind==='file'&&/^image\//.test(it.type)){const f=it.getAsFile();if(f){e.preventDefault();loadBlob(f,'Pasted image');return}}}});
+$('paste').addEventListener('click',async()=>{
+  const tip=()=>toast('Press '+(isMac?'Cmd':'Ctrl')+' + V to paste the image.',3200);
+  if(!(navigator.clipboard&&navigator.clipboard.read))return tip();
+  try{const items=await navigator.clipboard.read();
+    for(const it of items){const type=it.types.find(t=>/^image\//.test(t));if(type)return loadBlob(await it.getType(type),'Pasted image')}
+    toast('There is no image on the clipboard. Take a screenshot first.',3200)}
+  catch(e){tip()}
+});
+let dragDepth=0;
+addEventListener('dragenter',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){dragDepth++;document.body.classList.add('drop')}});
+addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;document.body.classList.remove('drop')}});
+addEventListener('dragover',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files'))e.preventDefault()});
+addEventListener('drop',e=>{dragDepth=0;document.body.classList.remove('drop');const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f){e.preventDefault();loadBlob(f,'Image')}});
+
+/* ------------------------------------------------------------ screen capture: one still frame, then sharing stops */
+$('cap').addEventListener('click',async()=>{
+  let stream;
+  try{stream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'window'},audio:false,selfBrowserSurface:'exclude',surfaceSwitching:'exclude',monitorTypeSurfaces:'include'})}
+  catch(e){if(e&&e.name!=='NotAllowedError'&&e.name!=='AbortError')toast('This browser could not capture the screen. Paste a screenshot instead.',3600);return}
+  const v=$('vid');
+  try{v.srcObject=stream;await v.play();
+    await new Promise(r=>setTimeout(r,450)); // let the browser's own chooser close and a full frame arrive
+    if(!v.videoWidth)throw new Error('no frame');
+    showImage(v,v.videoWidth,v.videoHeight,'Screen capture')}
+  catch(e){toast('Could not take the picture. Paste a screenshot instead.',3600)}
+  finally{stream.getTracks().forEach(t=>t.stop());v.srcObject=null;try{window.focus()}catch(_){}}
+});
+
+/* ------------------------------------------------------------ area selection */
+function pt(e){const r=view.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top)),r}}
+function drawSel(a,b){const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),w=Math.abs(a.x-b.x),h=Math.abs(a.y-b.y);
+  sel.style.left=(view.offsetLeft+x)+'px';sel.style.top=(view.offsetTop+y)+'px';sel.style.width=w+'px';sel.style.height=h+'px';sel.hidden=false;return{x,y,w,h}}
+pick.addEventListener('pointerdown',e=>{if(!S.img||S.busy||e.button>0)return;e.preventDefault();pick.setPointerCapture(e.pointerId);S.drag={a:pt(e),box:null};sel.hidden=true});
+pick.addEventListener('pointermove',e=>{if(!S.drag)return;S.drag.box=drawSel(S.drag.a,pt(e))});
+function endDrag(e){if(!S.drag)return;const d=S.drag;S.drag=null;try{pick.releasePointerCapture(e.pointerId)}catch(_){}
+  const b=d.box;if(!b||b.w<8||b.h<8){sel.hidden=true;return}
+  const k=view.width/view.getBoundingClientRect().width;
+  readArea({x:Math.round(b.x*k),y:Math.round(b.y*k),w:Math.round(b.w*k),h:Math.round(b.h*k)},false)}
+pick.addEventListener('pointerup',endDrag);pick.addEventListener('pointercancel',e=>{S.drag=null;sel.hidden=true});
+$('all').addEventListener('click',()=>{if(S.img){sel.hidden=true;readArea({x:0,y:0,w:S.img.w,h:S.img.h},true)}});
+addEventListener('keydown',e=>{if(e.key==='Escape'&&!sel.hidden&&!S.busy)sel.hidden=true});
+
+/* ------------------------------------------------------------ OCR */
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('load '+src));document.head.appendChild(s)})}
+function ensureOcr(){
+  if(S.worker)return Promise.resolve(S.worker);
+  if(S.loading)return S.loading;
+  if(!served||!window.Worker||!window.WebAssembly)return Promise.reject(new Error('unsupported'));
+  S.loading=(async()=>{
+    if(!window.Tesseract)await loadScript(TESS+'tesseract.min.js');
+    const w=await window.Tesseract.createWorker('eng',1,{workerPath:TESS+'worker.min.js',corePath:TESS,langPath:LANG,workerBlobURL:false,gzip:true,cacheMethod:'write',
+      logger:m=>{if(!m||typeof m.progress!=='number')return;
+        if(m.status==='recognizing text'){if(S.busy)progress(m.progress)}
+        else if(!S.worker&&S.busy){setStatus('Getting the reading engine ready (first time only)…');progress(m.progress)}}});
+    await w.setParameters({preserve_interword_spaces:'1'});
+    S.worker=w;return w})().catch(e=>{S.loading=null;throw e});
+  return S.loading;
+}
+// Cut the area out, enlarge small text, and turn light-on-dark screenshots into dark-on-light.
+const autoScale=a=>Math.max(1,Math.min(3,1800/Math.max(a.w,a.h)));
+function prep(a,scale){
+  scale=scale||autoScale(a);
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(a.w*scale));c.height=Math.max(1,Math.round(a.h*scale));
+  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingQuality='high';ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+  ctx.drawImage(view,a.x,a.y,a.w,a.h,0,0,c.width,c.height);
+  const img=ctx.getImageData(0,0,c.width,c.height),d=img.data;let sum=0,n=0;
+  for(let i=0;i<d.length;i+=16){sum+=.299*d[i]+.587*d[i+1]+.114*d[i+2];n++}
+  if(n&&sum/n<110){for(let i=0;i<d.length;i+=4){d[i]=255-d[i];d[i+1]=255-d[i+1];d[i+2]=255-d[i+2]}ctx.putImageData(img,0,0)}
+  return c;
+}
+async function readArea(a,whole){
+  if(S.busy||!S.img||a.w<2||a.h<2)return null;
+  S.busy=true;pick.classList.add('busy');$('all').disabled=true;$('cap').disabled=true;progress(0);setStatus('Reading the text…');
+  try{
+    const w=await ensureOcr();
+    const psm=whole?'3':'6';if(S.psm!==psm){await w.setParameters({tessedit_pageseg_mode:psm});S.psm=psm}
+    setStatus('Reading the text…');
+    let data=(await w.recognize(prep(a))).data||{};
+    // An unsure read is often a text-size problem: try once more at another enlargement and keep the surer result.
+    if((data.confidence||0)<85){const s1=autoScale(a),alt=(await w.recognize(prep(a,s1>1.5?1:2))).data||{};
+      if((alt.confidence||0)>(data.confidence||0)&&String(alt.text||'').trim())data=alt}
+    const text=tidy(data.text,$('breaks').checked);
+    if(!text){setStatus('No text found there. Try a slightly larger box, or zoom in before taking the screenshot.');return ''}
+    const add=$('append').checked&&out.value.trim();
+    out.value=add?out.value.replace(/\s+$/,'')+'\n'+text:text;updateCount();out.scrollTop=out.scrollHeight;
+    const conf=Math.round(data.confidence||0),low=conf<75,cf=$('conf');
+    cf.textContent=conf?(low?'Low confidence ('+conf+'%): check carefully':'Read with '+conf+'% confidence'):'';cf.className=low?'low':'';
+    let copied=false;if($('autocopy').checked)copied=await copyText(add?out.value:text,true);
+    const n=words(text);setStatus((copied?'Copied ':'Read ')+n+(n===1?' word':' words')+'. '+(copied?'Paste it where you need it.':$('autocopy').checked?'Press Copy all to copy it.':'')+(low?' Check it against the original.':''));
+    if(copied)toast('Copied '+n+(n===1?' word':' words'));
+    return text;
+  }catch(e){
+    setStatus(served?'The reading engine could not start. Check the connection and try again.':'Snip Card needs to be opened from the Notile site to read text.');return null;
+  }finally{S.busy=false;pick.classList.remove('busy');$('all').disabled=false;$('cap').disabled=false;progress(null)}
+}
+
+if(!served)setStatus('Snip Card needs to be opened from the Notile site to read text.');
+updateCount();
+// for tests and for other Notile apps
+window.snipCard={tidy,load:loadBlob,readAll:()=>S.img?readArea({x:0,y:0,w:S.img.w,h:S.img.h},true):Promise.resolve(null),readArea:(x,y,w,h)=>readArea({x,y,w,h},false),ready:()=>!!S.worker};
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+})();
+</script>
+</body>
+</html>

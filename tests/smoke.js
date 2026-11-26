@@ -1,9 +1,9 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
 run({name:'Landing page',fn:async()=>{
-  await test('shows all fourteen apps and a sign-out link',async()=>{const pg=await page('/');
-    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/scan-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
-    expect(hrefs.length===14&&!hrefs.includes('/wax-card/')&&!hrefs.includes('/tray-card/'),'Wax Card and Tray Card are opened from inside Scan Card now, not from tiles of their own');
+  await test('shows all fifteen apps and a sign-out link',async()=>{const pg=await page('/');
+    const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/snip-card/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/scan-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
+    expect(hrefs.length===15&&!hrefs.includes('/wax-card/')&&!hrefs.includes('/tray-card/'),'Wax Card and Tray Card are opened from inside Scan Card now, not from tiles of their own');
     expect(await pg.locator('a[href="/cdn-cgi/access/logout"]').count(),'sign-out link missing');await noErrors(pg)});
   await test('manifest is valid and icons exist',async()=>{const pg=await page('/');
     const m=await (await pg.request.get(BASE+'/manifest.webmanifest')).json();expect(m.start_url==='/'&&m.icons.length>=2,'bad manifest');
@@ -17,6 +17,18 @@ run({name:'Landing page',fn:async()=>{
       await pg.selectOption('#mode','fast');await pg.waitForFunction(()=>/Ready/.test(document.getElementById('status').textContent),null,{timeout:120000});expect(await pg.evaluate(()=>localStorage.getItem('dictate.model'))==='"fast"','Fast mode not saved')}
     else{await pg.waitForFunction(()=>/not available/.test(document.getElementById('status').textContent),null,{timeout:15000})}
     await noErrors(pg)});
+  await test('Snip Card opens under the site CSP, joins wrapped lines, and reads text from an image on the device',async()=>{const pg=await page('/snip-card/');
+    expect((await pg.request.get(BASE+'/snip-card/manifest.webmanifest')).ok(),'Snip Card manifest missing');
+    const j=await pg.evaluate(()=>snipCard.tidy('Pain from the up-\nper left six  \nsince Monday.\n\n\n\n- item one\n- item two',false));
+    expect(j==='Pain from the upper left six since Monday.\n\n- item one\n- item two','tidy: '+JSON.stringify(j));
+    await pg.evaluate(async()=>{const c=document.createElement('canvas');c.width=900;c.height=260;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,900,260);x.fillStyle='#111';x.font='26px Arial, sans-serif';
+      x.fillText('Review in three months',40,90);x.fillText('Tooth 26 crown fitted',40,180);const b=await new Promise(r=>c.toBlob(r,'image/png'));await snipCard.load(b,'Test image')});
+    expect(await pg.isVisible('#stagecard'),'image not shown');
+    const all=await pg.evaluate(()=>snipCard.readAll());expect(/Review in three months/.test(all)&&/Tooth 26 crown fitted/.test(all),'whole image misread: '+JSON.stringify(all));
+    expect((await pg.inputValue('#out'))===all,'text box not filled');
+    const box=await pg.locator('#view').boundingBox(),k=box.width/900;await pg.mouse.move(box.x+20*k,box.y+130*k);await pg.mouse.down();await pg.mouse.move(box.x+700*k,box.y+215*k,{steps:6});await pg.mouse.up();
+    await pg.waitForFunction(()=>/crown/.test(document.getElementById('out').value)&&!/Review/.test(document.getElementById('out').value),null,{timeout:60000});
+    expect(/Tooth 26 crown fitted/.test(await pg.inputValue('#out')),'dragged area misread: '+await pg.inputValue('#out'));await noErrors(pg)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');
@@ -283,7 +295,7 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#hoImport');await pg.waitForTimeout(300);
     const txt=await pg.innerText('#page');expect(/Lateral luxation/.test(txt)&&/Assessment: Monitor/.test(txt),'trauma findings missing from the letter');
     expect(await pg.evaluate(()=>localStorage.getItem('notile:letterHandoff'))===null,'handoff left on the device');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card'],['/snip-card/','header a.brand','Snip Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

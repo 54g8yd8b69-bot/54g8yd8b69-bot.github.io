@@ -24,6 +24,7 @@ How it works
     the suite for each tool's page (SUITE.page) and puts that in the frame. Its Models, Analysis and Splint pages,
     and Wax Card and Tray Card (which it opens as tabs), are in the file but have no button of their own.
 Dictate (/dictate/) is left out: it needs the ~100 MB speech model served from the site.
+Snip Card (/snip-card/) is left out: its reading engine runs in a worker, which a single file cannot start.
 Data entered in the file is saved by the browser for that file on that computer only.
 """
 import argparse
@@ -68,7 +69,7 @@ APPS = [
 ]
 
 # Apps on the site that are not put in the file (see the note at the top).
-LEFT_OUT = ['/dictate/']
+LEFT_OUT = ['/dictate/', '/snip-card/']
 
 warnings = []
 
