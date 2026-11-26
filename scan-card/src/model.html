@@ -160,6 +160,10 @@ async function buildBody(M, jaw, W) {
   const r = S.scanToSolid(scan, { baseZ, margin: P.margin, smooth: P.smooth });
   let man = S.toManifold(r.mesh);
   const add = (o) => { const t = man.add(o); S.free(man, o); man = t; }, sub = (o) => { const t = man.subtract(o); S.free(man, o); man = t; };
+  if (r.extras.length) {                                         // a wax-up exported with the scan as separate closed teeth: joined on, not left out
+    let joined = 0; for (const q of r.extras) { let o = null; try { o = S.toManifold(q); } catch (e) { continue; } add(o); joined++; }
+    if (joined) notes.push(`${joined} closed piece${joined > 1 ? 's' : ''} (a wax-up) joined on`); if (joined < r.extras.length) notes.push(`${r.extras.length - joined} closed piece${r.extras.length - joined > 1 ? 's' : ''} could not be joined`);
+  }
   const rp = r.report; if (rp.holesFilled) notes.push(`${rp.holesFilled} hole${rp.holesFilled > 1 ? 's' : ''} closed (largest ${rp.largestHole.toFixed(0)} mm round)`); if (rp.piecesDropped) notes.push(`${rp.piecesDropped} separate piece${rp.piecesDropped > 1 ? 's' : ''} left out`);
   const O = r.outline;
   if (O && P.style === 'full') { const cs = new M.CrossSection([O], 'NonZero'), hull = cs.hull(); add(hull.extrude(Math.min(P.plateT, P.baseH)).translate(0, 0, baseZ)); S.free(cs, hull); }

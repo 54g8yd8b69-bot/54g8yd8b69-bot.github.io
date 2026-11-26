@@ -623,8 +623,9 @@ function dropDuplicateFaces(I) {
 /**
  * Make a scan safe to work with: weld, drop collapsed / duplicate / non-manifold triangles, make the winding
  * consistent, and drop small floating islands.  o.islandFraction (default 0.04) = keep parts with at least this
- * fraction of the biggest part's triangles; o.keepIslands = keep everything.
- * → { mesh, report:{ inputTris, tris, degenerate, duplicate, nonManifold, flipped, conflicts, parts, islandsRemoved, islandTris } }
+ * fraction of the biggest part's triangles; o.keepIslands = keep everything. A smaller part that is closed (a wax-up
+ * saved with its scan as separate teeth) is kept too, unless o.keepClosed === false.
+ * → { mesh, report:{ inputTris, tris, degenerate, duplicate, nonManifold, flipped, conflicts, parts, islandsRemoved, islandTris, closedKept } }
  */
 export function cleanMesh(mesh, o = {}) {
   const rep = { inputTris: mesh.indices.length / 3, degenerate: 0, duplicate: 0, nonManifold: 0, flipped: 0, conflicts: 0, parts: 0, islandsRemoved: 0, islandTris: 0 };
@@ -649,13 +650,25 @@ export function cleanMesh(mesh, o = {}) {
     sizes.push(size); flips.push(nflip);
   }
   const big = Math.max(0, ...sizes), minKeep = o.keepIslands ? 0 : Math.max(o.minTris || 0, big * (o.islandFraction ?? 0.04));
+  // a small piece that is closed (a wax-up saved with its scan as separate teeth) is kept whatever its size: only open scraps are
+  // specks. Unless o.keepClosed === false. Closed: no open edge; at least o.minClosedVolume (1 mm³)
+  const keepC = new Uint8Array(sizes.length);
+  if (o.keepClosed !== false && minKeep > 0 && sizes.some((s) => s < minKeep)) {
+    const openE = new Int32Array(sizes.length), vol = new Float64Array(sizes.length), P = w.positions;
+    for (let f = 0; f < nF; f++) {
+      const c = comp[f]; if (sizes[c] >= minKeep) continue; for (let e = 0; e < 3; e++) if (twin[3 * f + e] < 0) openE[c]++;
+      const fl = flips[c] > sizes[c] / 2 ? 1 - flip[f] : flip[f], a = 3 * I[3 * f], b = 3 * I[3 * f + (fl ? 2 : 1)], d = 3 * I[3 * f + (fl ? 1 : 2)];
+      vol[c] += (P[a] * (P[b + 1] * P[d + 2] - P[b + 2] * P[d + 1]) - P[a + 1] * (P[b] * P[d + 2] - P[b + 2] * P[d]) + P[a + 2] * (P[b] * P[d + 1] - P[b + 1] * P[d])) / 6;
+    }
+    for (let c = 0; c < sizes.length; c++) if (sizes[c] < minKeep && !openE[c] && Math.abs(vol[c]) >= (o.minClosedVolume ?? 1)) { keepC[c] = 1; rep.closedKept = (rep.closedKept || 0) + 1; }
+  }
   const out = new Uint32Array(I.length); let t = 0;
   for (let f = 0; f < nF; f++) {
-    const c = comp[f]; if (sizes[c] < minKeep) continue;
+    const c = comp[f]; if (sizes[c] < minKeep && !keepC[c]) continue;
     const fl = flips[c] > sizes[c] / 2 ? 1 - flip[f] : flip[f]; if (fl) rep.flipped++;
     out[t++] = I[3 * f]; out[t++] = fl ? I[3 * f + 2] : I[3 * f + 1]; out[t++] = fl ? I[3 * f + 1] : I[3 * f + 2];
   }
-  sizes.forEach((s) => { if (s < minKeep) { rep.islandsRemoved++; rep.islandTris += s; } else rep.parts++; });
+  sizes.forEach((s, c) => { if (s < minKeep && !keepC[c]) { rep.islandsRemoved++; rep.islandTris += s; } else rep.parts++; });
   const res = compact({ positions: w.positions, indices: out.slice(0, t), colors: w.colors });
   rep.tris = res.indices.length / 3;
   return { mesh: { positions: res.positions, indices: res.indices, colors: res.colors, name: mesh.name }, report: rep };
@@ -1944,6 +1957,14 @@ export function dropSpecks(mesh, minVolume = 0.3) {
   const keepT = []; for (let t = 0; t < I.length; t += 3) if ((vol.get(find(I[t])) || 0) >= minVolume) keepT.push(I[t], I[t + 1], I[t + 2]);
   if (keepT.length === I.length) return mesh;
   return compact({ positions: P, indices: Uint32Array.from(keepT) });
+}
+/** The connected pieces of a mesh (joined through shared vertices), each as its own compact mesh, most triangles first. */
+export function splitParts(mesh) {
+  const I = mesh.indices, nV = mesh.positions.length / 3, par = new Int32Array(nV); for (let v = 0; v < nV; v++) par[v] = v;
+  const find = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+  for (let t = 0; t < I.length; t += 3) { const a = find(I[t]), b = find(I[t + 1]), c = find(I[t + 2]); par[b] = a; par[find(c)] = a; }
+  const by = new Map(); for (let t = 0; t < I.length; t += 3) { const r = find(I[t]); let l = by.get(r); if (!l) by.set(r, l = []); l.push(I[t], I[t + 1], I[t + 2]); }
+  return [...by.values()].sort((a, b) => b.length - a.length).map((l) => compact({ positions: mesh.positions, indices: Uint32Array.from(l) }));
 }
 /** Vertex neighbours of a mesh (compressed rows): { start, list } with list[start[v] .. start[v+1]) the neighbours of v. */
 export function vertexGraph(mesh) {

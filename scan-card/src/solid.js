@@ -82,16 +82,27 @@ export function cleanOutline(loop, o = {}) {
  *   baseZ  height of the flat underside (must be below the whole scan)
  *   o.margin (0)   mm the wall stands outside the scan border      o.smooth (0.8)  how much the outline is tidied
  *   o.drop (0.25)  mm the wall top sits below the scan's edge      o.step (0.5)    spacing of wall vertices
- * Small holes are closed with flat patches; if the scan is in several pieces only the largest is used.
+ * Small holes are closed with flat patches; if the scan is in several pieces only the largest is closed. Other pieces that are
+ * closed solids of their own (a wax-up exported with its scan as separate teeth, as Wax Card and most CAD do) come back in
+ * `extras`, outside out, for the caller to join on; open bits are left out.
  * The original scan triangles are kept untouched, so undercuts and surface detail survive exactly.
- * → { mesh (watertight MeshData), outline [[x,y]…], report:{ holesFilled, largestHole, piecesDropped, rimVerts, rimZ:[min,max], volume } }
+ * → { mesh (watertight MeshData), outline [[x,y]…], extras [MeshData…], report:{ holesFilled, largestHole, piecesDropped, closedPieces, rimVerts, rimZ:[min,max], volume } }
  */
 export function scanToSolid(mesh, o = {}) {
   const w = need(), baseZ = o.baseZ, drop = o.drop ?? 0.25, rep = { holesFilled: 0, largestHole: 0, piecesDropped: 0 };
-  let m; { const cl = N.cleanMesh(mesh, { islandFraction: 0.999 }); rep.piecesDropped = cl.report.islandsRemoved; m = cl.mesh; }   // largest piece only
+  let m; { const cl = N.cleanMesh(mesh, { islandFraction: 0.999, keepClosed: false }); rep.piecesDropped = cl.report.islandsRemoved; m = cl.mesh; }   // largest piece only
+  const extras = []; rep.closedPieces = 0;
+  if (rep.piecesDropped) {                                        // the other pieces: keep the ones that are closed solids (a separate wax-up)
+    for (const q of N.splitParts(N.cleanMesh(mesh, { keepIslands: true }).mesh).slice(1)) {
+      if (!N.isWatertight(q)) continue; let v = N.meshVolume(q);
+      if (v < 0) { const I = q.indices; for (let t = 0; t < I.length; t += 3) { const s = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = s; } v = -v; }
+      if (v >= 1) extras.push(q);
+    }
+    rep.closedPieces = extras.length; rep.piecesDropped -= extras.length;
+  }
   { const Nn = N.vertexNormals(m); let sz = 0; for (let i = 2; i < Nn.length; i += 3) sz += Nn[i]; if (sz < 0) { const I = m.indices; for (let t = 0; t < I.length; t += 3) { const q = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = q; } } }
   let loops = N.boundaryLoops(m);
-  if (!loops.length) { rep.alreadyClosed = true; rep.volume = N.meshVolume(m); return { mesh: m, outline: null, report: rep }; }
+  if (!loops.length) { rep.alreadyClosed = true; rep.volume = N.meshVolume(m); return { mesh: m, outline: null, extras, report: rep }; }
   if (loops.length > 1) { rep.holesFilled = loops.length - 1; rep.largestHole = loops[1].length; m = N.fillHoles(m, loops.slice(1)); loops = N.boundaryLoops(m); if (loops.length > 1) m = N.fillHoles(m, loops.slice(1)); loops = N.boundaryLoops(m); }
   const rim = loops[0].verts, n = rim.length, P = m.positions;
   let zmin = Infinity, zmax = -Infinity; const loop2 = [];
@@ -127,7 +138,7 @@ export function scanToSolid(mesh, o = {}) {
   const out = { positions: P2, indices: I2, colors: null };
   rep.watertight = N.isWatertight(out); rep.volume = N.meshVolume(out);
   if (!rep.watertight) throw new Error('Could not close this scan into a solid — try trimming its ragged edge first.');
-  return { mesh: out, outline: S, report: rep };
+  return { mesh: out, outline: S, extras, report: rep };
 }
 
 // ───────────────────────────── height-field solids ─────────────────────────────
