@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Task Card</title>
+<meta name="description" content="Task Card: your clinic letters and work to-do list, saved only on this device.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Task Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+/* Task Card: letters to write (each tied to a clinic and its date) and a misc to-do list.
+   Everything lives in this browser's localStorage under "notile:taskCard:v1". Nothing is sent to the site,
+   so other people who use Notile never see it. The launcher shows this app's tile only on devices that have opened it. */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4; --sel:#E2F1F1;
+  --bad:#B3261E; --badbg:#FCE9E7; --warn:#7A4F00; --warnbg:#FFF2CF; --ok:#1E6B3A; --okbg:#E3F3E8;
+  --f-display:"Caladea", Cambria, Georgia, serif;
+  --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --navy:#CFE2EE; --teal:#4FB3C9; --mint:#5CC3B7;
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#93A7B6; --line:#223442; --chip:#182836; --sel:#153337;
+  --bad:#FFB4AB; --badbg:#3B1A18; --warn:#F3D9A4; --warnbg:#3A2C0C; --ok:#9DD9B1; --okbg:#14301F; color-scheme:dark }}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--f-body);min-height:100vh;-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
+header{position:sticky;top:0;z-index:4;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(8px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 0 max(14px,env(safe-area-inset-left,0px))}
+.hrow{max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:12px}
+a.brand{display:flex;align-items:center;gap:10px;color:var(--navy);text-decoration:none;font-family:var(--f-display);font-size:1.3rem;font-weight:700}
+a.brand em{font-style:normal;color:var(--mint)}
+.brand-dot{width:32px;height:32px;border-radius:9px;background:#0B2E4A;display:grid;place-items:center;flex:none}
+.brand-dot svg{width:20px;height:20px}
+.priv{margin-left:auto;font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+.priv svg{width:15px;height:15px;flex:none}
+.iconbtn{border:1px solid var(--line);background:transparent;border-radius:10px;width:42px;height:42px;display:grid;place-items:center;cursor:pointer;color:var(--teal);flex:none}
+.iconbtn svg{width:20px;height:20px}
+.tabs{max-width:1040px;margin:6px auto 0;display:flex;gap:4px}
+.tab{flex:1 1 0;border:0;background:none;border-bottom:3px solid transparent;padding:10px 6px 9px;font-weight:600;color:var(--muted);cursor:pointer;display:flex;justify-content:center;align-items:center;gap:6px;min-height:44px}
+.tab[aria-selected="true"]{color:var(--navy);border-bottom-color:var(--teal)}
+.tab .n{font-size:.78rem;font-weight:700;background:var(--chip);color:var(--fg);border-radius:99px;padding:0 7px;min-width:22px;line-height:20px;text-align:center}
+.tab .n.bad{background:var(--badbg);color:var(--bad)}
+main{max-width:1040px;margin:0 auto;padding:16px max(14px,env(safe-area-inset-right,0px)) calc(40px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));display:grid;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+h2{margin:0;font-size:1.08rem;font-weight:700;color:var(--navy)}
+.sub{margin:2px 0 0;color:var(--muted);font-size:.92rem}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+.btn{border:1px solid transparent;border-radius:10px;padding:9px 14px;min-height:44px;cursor:pointer;background:var(--teal);color:#fff;font-weight:600;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
+.btn.sm{min-height:36px;padding:5px 11px;font-size:.92rem}
+.btn.danger{background:transparent;color:var(--bad);border-color:var(--line)}
+.btn svg{width:17px;height:17px;flex:none}
+/* dashboard */
+.today{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.today h2{font-family:var(--f-display);font-size:1.35rem}
+.today .clin{margin:2px 0 0;color:var(--fg);font-weight:600}
+.today .clin span{color:var(--muted);font-weight:400}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-height:76px}
+.stat b{font-size:1.7rem;line-height:1.1;color:var(--navy);font-variant-numeric:tabular-nums}
+.stat span{font-size:.9rem;color:var(--muted)}
+.stat.bad b{color:var(--bad)}
+.stat:hover{border-color:var(--teal)}
+.wkhead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.wkhead .lbl{font-size:.92rem;color:var(--muted);min-width:7em;text-align:center}
+.week{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media (max-width:640px){.week{grid-template-columns:minmax(0,1fr)}}
+.day{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:10px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-width:0}
+.day:hover{border-color:var(--teal)}
+.day.now{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
+.day .dh{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-weight:700;color:var(--navy)}
+.day .dh small{font-weight:400;color:var(--muted)}
+.day .cl{display:flex;justify-content:space-between;gap:6px;font-size:.9rem;align-items:baseline}
+.day .cl span:first-child{min-width:0;overflow-wrap:anywhere}
+.day .none{font-size:.88rem;color:var(--muted)}
+@media (max-width:640px){.day{flex-direction:row;flex-wrap:wrap;align-items:baseline}.day .dh{flex:0 0 8.5em}.day .cls{flex:1;display:grid;gap:3px}}
+.cnt{font-size:.8rem;font-weight:700;border-radius:99px;padding:0 8px;line-height:20px;background:var(--chip);white-space:nowrap}
+.cnt.bad{background:var(--badbg);color:var(--bad)}
+.cnt.zero{background:transparent;color:var(--muted);font-weight:400}
+/* lists */
+ul.list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.item{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:start;background:var(--panel)}
+.item.sent{opacity:.72}
+.item .t{font-weight:700;color:var(--fg)}
+.item .ref{color:var(--fg)}
+.item .meta{display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center;font-size:.86rem;color:var(--muted);margin-top:2px}
+.item .note{grid-column:1/-1;font-size:.9rem;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.badge{font-size:.8rem;font-weight:700;border-radius:6px;padding:1px 7px;background:var(--chip);color:var(--fg);white-space:nowrap}
+.badge.bad{background:var(--badbg);color:var(--bad)}
+.badge.warn{background:var(--warnbg);color:var(--warn)}
+.badge.ok{background:var(--okbg);color:var(--ok)}
+.st{grid-column:1/-1;display:flex;gap:4px;flex-wrap:wrap}
+.st button{border:1px solid var(--line);background:transparent;border-radius:99px;padding:4px 11px;min-height:34px;font-size:.86rem;cursor:pointer;color:var(--muted)}
+.st button[aria-pressed="true"]{background:var(--sel);border-color:var(--teal);color:var(--navy);font-weight:700}
+.st button.sent[aria-pressed="true"]{background:var(--okbg);border-color:var(--ok);color:var(--ok)}
+.edit{border:0;background:none;color:var(--teal);font-weight:600;cursor:pointer;padding:4px 2px;min-height:34px}
+.group{display:grid;gap:8px}
+.group+.group{margin-top:14px}
+.gh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.gh h3{margin:0;font-size:1rem;color:var(--navy)}
+.gh h3 span{font-weight:400;color:var(--fg)}
+.empty{color:var(--muted);font-size:.95rem;margin:4px 0}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.fchip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:6px 12px;min-height:38px;cursor:pointer;font-size:.92rem;color:var(--fg)}
+.fchip[aria-pressed="true"]{background:var(--sel);border-color:var(--teal);font-weight:700;color:var(--navy)}
+.fchip .k{color:var(--muted);font-weight:400;margin-left:2px}
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:99px;background:var(--sel);border:1px solid var(--teal);padding:3px 4px 3px 11px;font-size:.9rem;font-weight:600;color:var(--navy)}
+.pill button{border:0;background:none;cursor:pointer;width:28px;height:28px;border-radius:50%;color:var(--navy);font-size:1rem;line-height:1}
+select.sel{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:7px 10px;min-height:40px;max-width:100%}
+/* misc */
+.mitem{border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 4px;display:flex;align-items:center;gap:6px;background:var(--panel)}
+.mitem label.ck{display:grid;place-items:center;width:40px;height:40px;flex:none;cursor:pointer}
+.mitem input[type=checkbox]{width:22px;height:22px;accent-color:var(--teal);margin:0}
+.mitem .mt{flex:1;min-width:0;cursor:pointer;padding:6px 0;overflow-wrap:anywhere}
+.mitem .mt small{display:block}
+.mitem.done .mt{text-decoration:line-through;color:var(--muted)}
+.star{border:0;background:none;cursor:pointer;width:38px;height:38px;border-radius:50%;color:var(--muted);flex:none;display:grid;place-items:center}
+.star svg{width:20px;height:20px}
+.star[aria-pressed="true"]{color:#C98A00}
+.star[aria-pressed="true"] svg{fill:currentColor}
+form.madd{display:flex;gap:8px;flex-wrap:wrap}
+form.madd input[type=text]{flex:1 1 220px;min-width:0}
+input[type=text],input[type=date],input[type=number],textarea{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 11px;min-height:44px;width:100%}
+input[type=date]{width:auto;min-width:10.5em}
+textarea{min-height:64px;resize:vertical}
+details.done summary{cursor:pointer;font-weight:600;color:var(--navy);padding:6px 0;min-height:36px}
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--fg);padding:0;width:min(620px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+dialog::backdrop{background:rgba(8,20,30,.5)}
+.dlg{padding:18px;display:grid;gap:14px}
+.dlg h2{font-family:var(--f-display);font-size:1.25rem}
+.f{display:grid;gap:6px;min-width:0}
+.f>.lbl{font-size:.88rem;font-weight:600;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:8px 12px;min-height:42px;cursor:pointer;text-align:left}
+.chip[aria-pressed="true"]{background:var(--sel);border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal);font-weight:600;color:var(--navy)}
+.hint{font-size:.85rem;color:var(--muted);margin:0}
+.err{font-size:.9rem;color:var(--bad);font-weight:600;margin:0}
+.dbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel);padding:12px 18px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
+.dbtns .left{margin-right:auto}
+.rota{display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:8px 10px;align-items:start}
+.rota label{padding-top:10px;font-weight:600}
+.rota textarea{min-height:44px}
+.tip{border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:10px;padding:10px 12px;background:var(--panel);font-size:.92rem;display:flex;gap:10px;align-items:flex-start}
+.tip p{margin:0;flex:1}
+#toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0B2E4A;color:#fff;padding:6px 6px 6px 14px;border-radius:10px;font-size:.95rem;display:flex;align-items:center;gap:8px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100vw - 24px);z-index:9;min-height:44px}
+#toast.show{opacity:1;pointer-events:auto}
+#toast button{border:0;background:#1C7293;color:#fff;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;min-height:34px}
+footer{font-size:.85rem;color:var(--muted);max-width:75ch}
+@media (prefers-color-scheme: dark){.btn:not(.ghost):not(.danger){color:#08141D}#toast button{background:#4FB3C9;color:#08141D}}
+@media (max-width:520px){.dbtns{display:grid;grid-template-columns:1fr 1fr}.dbtns .left{margin:0}.dbtns .btn{justify-content:center}.dbtns #fSave,.dbtns #mSave,.dbtns #setClose{grid-column:1/-1}}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <a class="brand" href="/" title="Back to all apps" aria-label="Task Card: back to all Notile apps"><span class="brand-dot" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 11l2 2 4-4M8.5 17h7"/></svg></span><span>Task <em>Card</em></span></a>
+    <span class="priv" title="Saved only in this browser on this device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Only on this device</span></span>
+    <button class="iconbtn" id="setBtn" type="button" aria-label="Settings, clinic rota and backup" title="Settings, clinic rota and backup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tab-dash" data-tab="dash" aria-controls="v-dash" aria-selected="true">Dashboard</button>
+    <button class="tab" role="tab" id="tab-letters" data-tab="letters" aria-controls="v-letters" aria-selected="false">Letters <span class="n" id="nLetters">0</span></button>
+    <button class="tab" role="tab" id="tab-misc" data-tab="misc" aria-controls="v-misc" aria-selected="false">Misc <span class="n" id="nMisc">0</span></button>
+  </nav>
+</header>
+
+<main>
+  <div id="v-dash" role="tabpanel" aria-labelledby="tab-dash" style="display:grid;gap:14px">
+    <div class="tip" id="iosTip" hidden><p><b>Keep this list safe:</b> Safari can clear a website’s saved data if you don’t open it for a week. Add Task Card to your Home Screen (Share, then Add to Home Screen) and use it from there. The Home Screen app keeps its own copy, so move anything you’ve already added with <b>Settings → Backup</b>.</p><button class="btn ghost sm" id="iosTipX" type="button">Got it</button></div>
+    <section class="card today" aria-label="Today">
+      <div class="sp" style="min-width:12em"><h2 id="todayTitle"></h2><p class="clin" id="todayClin"></p></div>
+      <div class="row" id="todayAdd"></div>
+    </section>
+    <div class="stats" role="group" aria-label="Summary">
+      <button class="stat" type="button" data-go="letters:out"><b id="sOut">0</b><span>Letters to do</span></button>
+      <button class="stat" type="button" data-go="letters:over" id="statOver"><b id="sOver">0</b><span>Overdue</span></button>
+      <button class="stat" type="button" data-go="letters:chk"><b id="sChk">0</b><span>With supervisor</span></button>
+      <button class="stat" type="button" data-go="misc"><b id="sMisc">0</b><span>Misc to do</span></button>
+    </div>
+    <section class="card" aria-label="Week">
+      <div class="wkhead"><h2 class="sp">This week</h2>
+        <button class="iconbtn" id="wkPrev" type="button" aria-label="Previous week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <span class="lbl" id="wkLabel"></span>
+        <button class="iconbtn" id="wkNext" type="button" aria-label="Next week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+      <div class="week" id="week"></div>
+      <p class="hint" style="margin-top:8px">Numbers are letters still to do from that clinic. Tap a day to see them or add one.</p>
+    </section>
+    <section class="card" aria-label="Needs attention" style="display:grid;gap:10px">
+      <div class="row"><h2 class="sp">Needs attention</h2><button class="btn ghost sm" type="button" data-go="letters:out">All letters</button></div>
+      <ul class="list" id="attn"></ul>
+      <p class="empty" id="attnEmpty">Nothing overdue or due in the next two days.</p>
+    </section>
+    <section class="card" aria-label="Misc" style="display:grid;gap:10px">
+      <div class="row"><h2 class="sp">Misc</h2><button class="btn ghost sm" type="button" data-go="misc">All misc</button></div>
+      <form class="madd" id="dashMiscForm" autocomplete="off"><input type="text" id="dashMiscText" placeholder="Add a to-do, e.g. book study day" aria-label="New misc to-do" maxlength="300"><button class="btn" type="submit">Add</button></form>
+      <ul class="list" id="dashMisc"></ul>
+    </section>
+  </div>
+
+  <div id="v-letters" role="tabpanel" aria-labelledby="tab-letters" hidden style="display:grid;gap:12px">
+    <div class="row">
+      <button class="btn" id="addLetter" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add letter</button>
+      <span class="sp"></span>
+      <button class="btn ghost sm" id="copyList" type="button">Copy list</button>
+      <a class="btn ghost sm" href="/letter-card/">Open Letter Card</a>
+    </div>
+    <div class="filters" role="group" aria-label="Show" id="lfilters"></div>
+    <div class="row">
+      <select class="sel" id="clinicFilter" aria-label="Clinic"></select>
+      <span id="datePill"></span>
+    </div>
+    <section class="card" id="groups" aria-live="polite"></section>
+  </div>
+
+  <div id="v-misc" role="tabpanel" aria-labelledby="tab-misc" hidden style="display:grid;gap:12px">
+    <section class="card" style="display:grid;gap:12px">
+      <form class="madd" id="miscForm" autocomplete="off">
+        <input type="text" id="miscText" placeholder="Add a to-do, e.g. sign off logbook entry" aria-label="New misc to-do" maxlength="300">
+        <input type="date" id="miscDue" aria-label="Due date (optional)" title="Due date (optional)">
+        <button class="btn" type="submit">Add</button>
+      </form>
+      <p class="err" id="miscErr" hidden></p>
+      <ul class="list" id="miscList"></ul>
+      <p class="empty" id="miscEmpty">Nothing on the list.</p>
+      <details class="done" id="miscDoneBox" hidden><summary>Done (<span id="miscDoneN">0</span>)</summary>
+        <ul class="list" id="miscDone" style="margin-top:8px"></ul>
+        <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="miscClear" type="button">Clear done</button></div>
+      </details>
+    </section>
+  </div>
+
+  <footer>Task Card saves only in this browser on this device. Nothing is sent to the Notile site, and other people using Notile cannot see it. Don’t enter patient names, CHI or hospital numbers: use a slot time or a short clinical reference you’ll recognise.</footer>
+</main>
+
+<dialog id="ldlg" aria-labelledby="ldlgT">
+  <form method="dialog" id="lform" autocomplete="off" novalidate>
+    <div class="dlg">
+      <h2 id="ldlgT">Add letter</h2>
+      <div class="f"><label class="lbl" for="fDate">Clinic date</label><input type="date" id="fDate" required></div>
+      <div class="f"><span class="lbl" id="fClinicL">Clinic</span>
+        <div class="chips" id="fClinics" role="group" aria-labelledby="fClinicL"></div>
+        <input type="text" id="fClinicOther" list="clinicList" placeholder="Other clinic" aria-label="Other clinic" maxlength="80"><datalist id="clinicList"></datalist></div>
+      <div class="f"><span class="lbl" id="fTypeL">Letter</span>
+        <div class="chips" id="fTypes" role="group" aria-labelledby="fTypeL"></div>
+        <input type="text" id="fTypeOther" placeholder="Other letter type" aria-label="Other letter type" maxlength="80"></div>
+      <div class="f"><label class="lbl" for="fRef">Reference</label><input type="text" id="fRef" maxlength="120" placeholder="e.g. 10:30 slot, UR1 trauma review">
+        <p class="hint">No names, CHI or hospital numbers.</p></div>
+      <div class="f"><span class="lbl" id="fDueL">Due</span>
+        <div class="row"><div class="chips" id="fDues" role="group" aria-labelledby="fDueL"></div><input type="date" id="fDue" aria-label="Due date"></div></div>
+      <div class="f" id="fStatusF"><span class="lbl" id="fStatusL">Status</span><div class="chips" id="fStatus" role="group" aria-labelledby="fStatusL"></div></div>
+      <div class="f"><label class="lbl" for="fNote">Note (optional)</label><textarea id="fNote" maxlength="600" placeholder="e.g. waiting on CBCT report, copy to consultant"></textarea></div>
+      <p class="err" id="fErr" role="alert" hidden></p>
+    </div>
+    <div class="dbtns">
+      <button class="btn danger left" id="fDel" type="button" hidden>Delete</button>
+      <button class="btn ghost" id="fCancel" type="button">Cancel</button>
+      <button class="btn ghost" id="fAgain" type="button">Save and add another</button>
+      <button class="btn" id="fSave" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="mdlg" aria-labelledby="mdlgT">
+  <form method="dialog" id="mform" autocomplete="off" novalidate>
+    <div class="dlg">
+      <h2 id="mdlgT">Edit to-do</h2>
+      <div class="f"><label class="lbl" for="mText">To-do</label><textarea id="mText" maxlength="300"></textarea></div>
+      <div class="f"><label class="lbl" for="mDue">Due date (optional)</label><div class="row"><input type="date" id="mDue"><button class="btn ghost sm" id="mDueX" type="button">No date</button></div></div>
+      <p class="err" id="mErr" role="alert" hidden></p>
+    </div>
+    <div class="dbtns">
+      <button class="btn danger left" id="mDel" type="button">Delete</button>
+      <button class="btn ghost" id="mCancel" type="button">Cancel</button>
+      <button class="btn" id="mSave" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sdlg" aria-labelledby="sdlgT">
+  <div class="dlg">
+    <h2 id="sdlgT">Settings</h2>
+    <div class="f"><span class="lbl">Clinic rota</span><p class="hint">One clinic per line. Letters you add are linked to the clinics on that day.</p>
+      <div class="rota" id="rota"></div></div>
+    <div class="f"><label class="lbl" for="dueDays">Letters are due this many days after the clinic</label><input type="number" id="dueDays" min="0" max="60" step="1" style="max-width:8em"></div>
+    <div class="row"><button class="btn" id="setSave" type="button">Save settings</button><span class="hint" id="setMsg" role="status"></span></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:4px 0">
+    <div class="f"><span class="lbl">Backup</span>
+      <p class="hint" id="persistMsg">The list is saved in this browser only. Keep a backup in case the browser’s data is cleared, or to move the list to another device.</p>
+      <div class="row"><button class="btn ghost" id="bkDown" type="button">Download backup</button><button class="btn ghost" id="bkCopy" type="button">Copy backup</button></div>
+      <label class="lbl" for="bkText" style="margin-top:6px">Restore from a backup</label>
+      <textarea id="bkText" placeholder="Paste a backup here, or choose the file"></textarea>
+      <div class="row"><label class="btn ghost" for="bkFile">Choose file<input type="file" id="bkFile" accept=".json,application/json,text/plain" style="position:absolute;width:1px;height:1px;opacity:0"></label><button class="btn ghost" id="bkRestore" type="button">Restore</button></div>
+      <p class="hint" id="bkMsg" role="status"></p></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:4px 0">
+    <div class="row"><button class="btn ghost" id="clearSent" type="button">Remove sent letters older than 30 days</button><button class="btn danger" id="eraseAll" type="button">Erase everything</button></div>
+  </div>
+  <div class="dbtns"><button class="btn" id="setClose" type="button">Done</button></div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button id="toastUndo" type="button" hidden>Undo</button></div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const KEY='notile:taskCard:v1',SEEN='notile:taskCard:seen',TIPKEY='notile:taskCard:iosTip';
+const DAYN=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const DEF_ROTA={1:['B Burns Treatment'],2:['Restorative A+E'],3:['A Asuni NP clinic','A Asuni Tx clinic'],4:['Restorative A+E'],5:['G Calvert Treatment']};
+const TYPES=['Clinic letter to GDP','Referral','Discharge to GDP','Patient letter','Treatment plan','Results letter','MDT / case summary'];
+const STATUS=[['todo','To do'],['drafted','Drafted / dictated'],['checking','With supervisor'],['sent','Sent']],SNAME=Object.fromEntries(STATUS);
+const DUES=[[2,'2 days'],[7,'1 week'],[14,'2 weeks'],[28,'4 weeks']];
+// CHI and NHS numbers are ten digits, often written 3-3-4 or 6-4: refuse them anywhere in the list
+const IDRX=/\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b/;
+const IDMSG='That looks like a CHI or NHS number. Use a slot time or a short reference instead.';
+
+/* ------------------------------------------------------------ dates (local, as YYYY-MM-DD) */
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const pd=s=>{const a=String(s).split('-').map(Number);return new Date(a[0],a[1]-1,a[2])};
+const okDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&!isNaN(pd(s));
+const today=()=>iso(new Date());
+const addDays=(s,n)=>{const d=pd(s);d.setDate(d.getDate()+n);return iso(d)};
+const diff=(a,b)=>Math.round((pd(a)-pd(b))/864e5);
+const fmt=(s,o)=>pd(s).toLocaleDateString('en-GB',o||{weekday:'short',day:'numeric',month:'short'});
+const monday=s=>{const d=pd(s);d.setDate(d.getDate()-((d.getDay()+6)%7));return iso(d)};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const str=(v,n)=>typeof v==='string'?v.slice(0,n||300):'';
+
+/* ------------------------------------------------------------ data */
+function blank(){return {v:1,rota:JSON.parse(JSON.stringify(DEF_ROTA)),dueDays:7,letters:[],misc:[]}}
+function norm(o){const b=blank();if(!o||typeof o!=='object')return b;
+  if(o.rota&&typeof o.rota==='object'){b.rota={};for(let d=0;d<7;d++){const a=Array.isArray(o.rota[d])?o.rota[d].map(x=>str(x,80).trim()).filter(Boolean):[];if(a.length)b.rota[d]=a}}
+  if(Number.isFinite(+o.dueDays)&&+o.dueDays>=0&&+o.dueDays<=60)b.dueDays=Math.round(+o.dueDays);
+  if(Array.isArray(o.letters))b.letters=o.letters.filter(l=>l&&okDate(l.date)&&str(l.clinic).trim()).map(l=>({id:str(l.id,40)||uid(),date:l.date,clinic:str(l.clinic,80),type:str(l.type,80)||'Letter',ref:str(l.ref,120),
+    due:okDate(l.due)?l.due:'',status:SNAME[l.status]?l.status:'todo',note:str(l.note,600),created:+l.created||Date.now(),done:+l.done||0}));
+  if(Array.isArray(o.misc))b.misc=o.misc.filter(m=>m&&str(m.text).trim()).map(m=>({id:str(m.id,40)||uid(),text:str(m.text,300),due:okDate(m.due)?m.due:'',star:!!m.star,created:+m.created||Date.now(),done:+m.done||0}));
+  return b}
+function load(){try{const raw=localStorage.getItem(KEY);if(raw)return norm(JSON.parse(raw))}catch(e){}return blank()}
+let D=load(),storageOK=true;
+function save(){try{localStorage.setItem(KEY,JSON.stringify(D));storageOK=true;askPersist();return true}
+  catch(e){storageOK=false;toast('Could not save on this device. The browser may be blocking storage.');return false}}
+try{localStorage.setItem(SEEN,'1')}catch(e){storageOK=false}
+let persistAsked=false;
+function askPersist(){if(persistAsked||!(navigator.storage&&navigator.storage.persist))return;persistAsked=true;navigator.storage.persist().catch(()=>{})}
+addEventListener('storage',e=>{if(e.key===KEY){D=load();render()}});
+
+/* ------------------------------------------------------------ helpers */
+const clinicsOn=s=>D.rota[pd(s).getDay()]||[];
+function allClinics(){const set=new Set();for(let d=1;d<=7;d++)(D.rota[d%7]||[]).forEach(c=>set.add(c));D.letters.forEach(l=>set.add(l.clinic));return [...set]}
+function lastClinicDay(s){for(let i=0;i<7;i++){const d=addDays(s,-i);if(clinicsOn(d).length)return d}return s}
+const isOut=l=>l.status!=='sent',isOver=l=>isOut(l)&&l.due&&l.due<today(),plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+function dueInfo(l){
+  if(l.status==='sent')return {t:'Sent'+(l.done?' '+new Date(l.done).toLocaleDateString('en-GB',{day:'numeric',month:'short'}):''),c:'ok'};
+  if(!l.due)return {t:'',c:''};const n=diff(l.due,today());
+  if(n<0)return {t:`Overdue ${plural(-n,'day')}`,c:'bad'};if(n===0)return {t:'Due today',c:'warn'};if(n===1)return {t:'Due tomorrow',c:'warn'};
+  if(n<7)return {t:`Due in ${n} days`,c:''};return {t:'Due '+fmt(l.due,{day:'numeric',month:'short'}),c:''}}
+function miscDue(m){if(!m.due||m.done)return '';const n=diff(m.due,today());const c=n<0?'bad':n<=1?'warn':'';
+  const t=n<0?`Overdue ${plural(-n,'day')}`:n===0?'Due today':n===1?'Due tomorrow':'Due '+fmt(m.due,{day:'numeric',month:'short'});return `<span class="badge ${c}">${t}</span>`}
+const byDue=(a,b)=>(a.due||'9999')<(b.due||'9999')?-1:(a.due||'9999')>(b.due||'9999')?1:a.created-b.created;
+const miscOpen=()=>D.misc.filter(m=>!m.done).sort((a,b)=>(b.star-a.star)||byDue(a,b));
+
+let toastT=null,undoFn=null;
+function toast(msg,undo){$('toastMsg').textContent=msg;undoFn=undo||null;$('toastUndo').hidden=!undo;const t=$('toast');t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>{t.classList.remove('show');undoFn=null},undo?6000:2600)}
+$('toastUndo').addEventListener('click',()=>{const f=undoFn;undoFn=null;$('toast').classList.remove('show');if(f){f();save();render()}});
+
+/* ------------------------------------------------------------ view state */
+const S={tab:'dash',lf:'out',clinic:'',date:'',wk:monday(today())};
+function setTab(t,push){if(!['dash','letters','misc'].includes(t))t='dash';S.tab=t;
+  ['dash','letters','misc'].forEach(k=>{$('v-'+k).hidden=k!==t;$('tab-'+k).setAttribute('aria-selected',String(k===t))});
+  if(push!==false){try{history.replaceState(null,'',t==='dash'?location.pathname:'#'+t)}catch(e){}}
+  render();scrollTo(0,0)}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
+document.addEventListener('click',e=>{const g=e.target.closest('[data-go]');if(!g)return;const [t,f]=g.dataset.go.split(':');
+  if(t==='letters'){S.lf=f||'out';S.date='';S.clinic=''}setTab(t)});
+
+/* ------------------------------------------------------------ render */
+function letterItem(l,showClinic){const di=dueInfo(l);
+  return `<li class="item${l.status==='sent'?' sent':''}" data-id="${esc(l.id)}"><div><div><span class="t">${esc(l.type)}</span>${l.ref?` · <span class="ref">${esc(l.ref)}</span>`:''}</div>
+    <div class="meta">${showClinic?`<span>${esc(fmt(l.date))} · ${esc(l.clinic)}</span>`:''}${di.t?`<span class="badge ${di.c}">${esc(di.t)}</span>`:''}</div></div>
+    <button class="edit" type="button" data-edit="${esc(l.id)}" aria-label="Edit ${esc(l.type)}${l.ref?', '+esc(l.ref):''}">Edit</button>
+    ${l.note?`<div class="note">${esc(l.note)}</div>`:''}
+    <div class="st" role="group" aria-label="Status">${STATUS.map(([k,n])=>`<button type="button" class="${k}" data-st="${esc(l.id)}|${k}" aria-pressed="${l.status===k}">${n}</button>`).join('')}</div></li>`}
+function miscItem(m){return `<li class="mitem${m.done?' done':''}" data-mid="${esc(m.id)}"><label class="ck"><input type="checkbox" data-mtog="${esc(m.id)}"${m.done?' checked':''} aria-label="Done: ${esc(m.text)}"></label>
+  <div class="mt" data-medit="${esc(m.id)}" role="button" tabindex="0" aria-label="Edit: ${esc(m.text)}">${esc(m.text)}${miscDue(m)?`<small>${miscDue(m)}</small>`:''}</div>
+  ${m.done?'':`<button class="star" type="button" data-mstar="${esc(m.id)}" aria-pressed="${m.star}" aria-label="Priority"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></button>`}</li>`}
+
+function renderDash(){const t=today(),cl=clinicsOn(t);
+  $('todayTitle').textContent=pd(t).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+  $('todayClin').innerHTML=cl.length?esc(cl.join(' · ')):'<span>No clinic today</span>';
+  const ld=cl.length?t:lastClinicDay(t),lc=cl.length?cl:[];
+  $('todayAdd').innerHTML=(lc.length?lc.map(c=>`<button class="btn" type="button" data-add="${esc(t)}|${esc(c)}">+ Letter${lc.length>1?': '+esc(c):''}</button>`).join(''):`<button class="btn" type="button" data-add="${esc(ld)}|">+ Letter</button>`);
+  const out=D.letters.filter(isOut);
+  $('sOut').textContent=out.length;$('sOver').textContent=out.filter(isOver).length;$('statOver').classList.toggle('bad',out.some(isOver));
+  $('sChk').textContent=out.filter(l=>l.status==='checking').length;$('sMisc').textContent=D.misc.filter(m=>!m.done).length;
+  // week
+  const wk=S.wk,days=[0,1,2,3,4].map(i=>addDays(wk,i));
+  $('wkLabel').textContent=`${pd(days[0]).getDate()} ${pd(days[0]).getMonth()!==pd(days[4]).getMonth()?pd(days[0]).toLocaleDateString('en-GB',{month:'short'})+' ':''}– ${fmt(days[4],{day:'numeric',month:'short'})}`;
+  $('week').innerHTML=days.map(d=>{const cs=clinicsOn(d),extra=[...new Set(out.filter(l=>l.date===d&&!cs.includes(l.clinic)).map(l=>l.clinic))],all=cs.concat(extra);
+    const lines=all.map(c=>{const ls=out.filter(l=>l.date===d&&l.clinic===c),o=ls.some(isOver);return `<div class="cl"><span>${esc(c)}</span><span class="cnt${ls.length?(o?' bad':''):' zero'}">${ls.length||'–'}</span></div>`}).join('');
+    return `<button type="button" class="day${d===t?' now':''}" data-day="${d}" aria-label="${esc(fmt(d,{weekday:'long',day:'numeric',month:'long'}))}: ${esc(all.join(', ')||'no clinic')}"><span class="dh">${fmt(d,{weekday:'short'})} <small>${fmt(d,{day:'numeric',month:'short'})}</small></span><span class="cls">${lines||'<span class="none">No clinic</span>'}</span></button>`}).join('');
+  // attention: overdue or due within 2 days
+  const at=out.filter(l=>l.due&&diff(l.due,t)<=2).sort(byDue).slice(0,8);
+  $('attn').innerHTML=at.map(l=>letterItem(l,true)).join('');$('attnEmpty').hidden=at.length>0;
+  const mo=miscOpen();$('dashMisc').innerHTML=mo.slice(0,5).map(miscItem).join('')+(mo.length>5?`<li class="hint">and ${mo.length-5} more</li>`:'');
+}
+function letterMatch(l){
+  if(S.lf==='out'&&!isOut(l))return false;if(S.lf==='over'&&!isOver(l))return false;
+  if(S.lf==='chk'&&!(isOut(l)&&l.status==='checking'))return false;if(S.lf==='sent'&&isOut(l))return false;
+  if(S.clinic&&l.clinic!==S.clinic)return false;if(S.date&&l.date!==S.date)return false;return true}
+function renderLetters(){const out=D.letters.filter(isOut);
+  const F=[['out','To do',out.length],['over','Overdue',out.filter(isOver).length],['chk','With supervisor',out.filter(l=>l.status==='checking').length],['sent','Sent',D.letters.length-out.length],['all','All',D.letters.length]];
+  $('lfilters').innerHTML=F.map(([k,n,c])=>`<button type="button" class="fchip" data-lf="${k}" aria-pressed="${S.lf===k}">${n}<span class="k"> ${c}</span></button>`).join('');
+  const cs=allClinics();if(S.clinic&&!cs.includes(S.clinic))cs.push(S.clinic);
+  $('clinicFilter').innerHTML='<option value="">All clinics</option>'+cs.map(c=>`<option${c===S.clinic?' selected':''}>${esc(c)}</option>`).join('');
+  $('datePill').innerHTML=S.date?`<span class="pill">${esc(fmt(S.date,{weekday:'long',day:'numeric',month:'short'}))}<button type="button" id="dateX" aria-label="Show all dates">×</button></span>`:'';
+  const g=new Map();
+  if(S.date&&(S.lf==='out'||S.lf==='all'))clinicsOn(S.date).filter(c=>!S.clinic||c===S.clinic).forEach(c=>g.set(S.date+'|'+c,[]));
+  D.letters.filter(letterMatch).forEach(l=>{const k=l.date+'|'+l.clinic;if(!g.has(k))g.set(k,[]);g.get(k).push(l)});
+  let keys=[...g.keys()].sort();if(S.lf==='sent'||S.lf==='all')keys.reverse();
+  if(!keys.length){$('groups').innerHTML=`<p class="empty">${{out:'No letters to do.',over:'Nothing overdue.',chk:'Nothing with your supervisor.',sent:'No sent letters yet.',all:'No letters yet.'}[S.lf]} ${S.lf==='out'||S.lf==='all'?'Tap <b>Add letter</b> after clinic.':''}</p>`;return}
+  $('groups').innerHTML=keys.map(k=>{const [d,c]=[k.slice(0,10),k.slice(11)],ls=g.get(k).sort((a,b)=>S.lf==='sent'?(b.done-a.done):byDue(a,b)),n=ls.filter(isOut).length;
+    return `<div class="group"><div class="gh"><h3>${esc(fmt(d))} <span>· ${esc(c)}</span></h3><span class="cnt${n?'':' zero'}">${n?n+' to do':'none to do'}</span><span class="sp"></span><button class="btn ghost sm" type="button" data-add="${esc(d)}|${esc(c)}">+ Letter</button></div>
+      ${ls.length?`<ul class="list">${ls.map(l=>letterItem(l,false)).join('')}</ul>`:''}</div>`}).join('')}
+function renderMisc(){const o=miscOpen(),d=D.misc.filter(m=>m.done).sort((a,b)=>b.done-a.done);
+  $('miscList').innerHTML=o.map(miscItem).join('');$('miscEmpty').hidden=o.length>0;
+  $('miscDoneBox').hidden=!d.length;$('miscDoneN').textContent=d.length;$('miscDone').innerHTML=d.map(miscItem).join('')}
+function render(){const out=D.letters.filter(isOut),ov=out.some(isOver);
+  $('nLetters').textContent=out.length;$('nLetters').classList.toggle('bad',ov);$('nMisc').textContent=D.misc.filter(m=>!m.done).length;
+  if(S.tab==='dash')renderDash();else if(S.tab==='letters')renderLetters();else renderMisc()}
+
+/* ------------------------------------------------------------ list interactions */
+document.addEventListener('click',e=>{
+  const st=e.target.closest('[data-st]');
+  if(st){const [id,k]=st.dataset.st.split('|'),l=D.letters.find(x=>x.id===id);if(!l||l.status===k)return;const prev={status:l.status,done:l.done};
+    l.status=k;l.done=k==='sent'?Date.now():0;save();render();
+    toast(k==='sent'?`Sent: ${l.type}${l.ref?' · '+l.ref:''}`:`Marked ${SNAME[k].toLowerCase()}`,()=>{l.status=prev.status;l.done=prev.done});return}
+  const ed=e.target.closest('[data-edit]');if(ed){openLetter(D.letters.find(x=>x.id===ed.dataset.edit));return}
+  const ad=e.target.closest('[data-add]');if(ad){const s=ad.dataset.add,i=s.indexOf('|');openLetter(null,s.slice(0,i),s.slice(i+1));return}
+  const day=e.target.closest('[data-day]');if(day){S.date=day.dataset.day;S.clinic='';S.lf='out';setTab('letters');return}
+  const lf=e.target.closest('[data-lf]');if(lf){S.lf=lf.dataset.lf;render();return}
+  if(e.target.closest('#dateX')){S.date='';render();return}
+  const ms=e.target.closest('[data-mstar]');if(ms){const m=D.misc.find(x=>x.id===ms.dataset.mstar);if(m){m.star=!m.star;save();render()}return}
+  const me=e.target.closest('[data-medit]');if(me){openMisc(D.misc.find(x=>x.id===me.dataset.medit));return}
+});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-medit]')){e.preventDefault();openMisc(D.misc.find(x=>x.id===e.target.dataset.medit))}});
+document.addEventListener('change',e=>{const t=e.target.closest('[data-mtog]');if(!t)return;const m=D.misc.find(x=>x.id===t.dataset.mtog);if(!m)return;
+  m.done=t.checked?Date.now():0;save();setTimeout(render,t.checked?180:0);if(t.checked)toast('Done: '+m.text.slice(0,40),()=>{m.done=0})});
+$('clinicFilter').addEventListener('change',e=>{S.clinic=e.target.value;render()});
+$('addLetter').addEventListener('click',()=>openLetter(null,S.date||lastClinicDay(today()),S.clinic||''));
+$('wkPrev').addEventListener('click',()=>{S.wk=addDays(S.wk,-7);render()});
+$('wkNext').addEventListener('click',()=>{S.wk=addDays(S.wk,7);render()});
+$('wkLabel').addEventListener('dblclick',()=>{S.wk=monday(today());render()});
+$('copyList').addEventListener('click',async()=>{const out=D.letters.filter(isOut).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:byDue(a,b));
+  if(!out.length)return toast('No letters to do');let txt=`Letters to do (${fmt(today(),{day:'numeric',month:'short',year:'numeric'})})\n`,last='';
+  out.forEach(l=>{const h=`${fmt(l.date)} · ${l.clinic}`;if(h!==last){txt+='\n'+h+'\n';last=h}const di=dueInfo(l);txt+=`– ${l.type}${l.ref?': '+l.ref:''} (${[SNAME[l.status].toLowerCase(),di.t.toLowerCase()].filter(Boolean).join(', ')})\n`});
+  try{await navigator.clipboard.writeText(txt.trim());toast('List copied')}catch(e){toast('Could not copy on this device')}});
+
+/* ------------------------------------------------------------ misc add */
+function addMisc(text,due,errEl){text=(text||'').trim();if(!text)return false;
+  if(IDRX.test(text)){if(errEl){errEl.textContent=IDMSG;errEl.hidden=false}else toast(IDMSG);return false}
+  if(errEl)errEl.hidden=true;D.misc.push({id:uid(),text:text.slice(0,300),due:okDate(due)?due:'',star:false,created:Date.now(),done:0});save();render();return true}
+$('miscForm').addEventListener('submit',e=>{e.preventDefault();if(addMisc($('miscText').value,$('miscDue').value,$('miscErr'))){$('miscText').value='';$('miscDue').value='';$('miscText').focus()}});
+$('dashMiscForm').addEventListener('submit',e=>{e.preventDefault();if(addMisc($('dashMiscText').value,'')){$('dashMiscText').value='';$('dashMiscText').focus()}});
+$('miscClear').addEventListener('click',()=>{const gone=D.misc.filter(m=>m.done);if(!gone.length)return;D.misc=D.misc.filter(m=>!m.done);save();render();toast(`Cleared ${plural(gone.length,'item')}`,()=>{D.misc=D.misc.concat(gone)})});
+
+/* ------------------------------------------------------------ letter dialog */
+const L={id:null,clinic:'',type:'',dueAuto:true,status:'todo'};
+function chips(el,opts,val,attr){el.innerHTML=opts.map(o=>`<button type="button" class="chip" data-${attr}="${esc(o[0])}" aria-pressed="${o[0]===val}">${esc(o[1])}</button>`).join('')}
+function drawClinics(){const d=$('fDate').value,day=okDate(d)?clinicsOn(d):[],opts=day.length?day:allClinics();
+  chips($('fClinics'),opts.map(c=>[c,c]),L.clinic,'clin');
+  $('fClinicOther').value=L.clinic&&!opts.includes(L.clinic)?L.clinic:'';
+  $('clinicList').innerHTML=allClinics().map(c=>`<option value="${esc(c)}">`).join('')}
+function drawTypes(){chips($('fTypes'),TYPES.map(t=>[t,t]),L.type,'type');$('fTypeOther').value=L.type&&!TYPES.includes(L.type)?L.type:''}
+function drawDues(){const d=$('fDate').value,due=$('fDue').value;chips($('fDues'),DUES.map(([n,t])=>[String(n),t]),okDate(d)&&okDate(due)?String(diff(due,d)):'','due')}
+function drawStatus(){chips($('fStatus'),STATUS,L.status,'fst')}
+function openLetter(l,date,clinic){const edit=!!l;L.id=edit?l.id:null;$('fErr').hidden=true;
+  $('ldlgT').textContent=edit?'Edit letter':'Add letter';$('fDel').hidden=!edit;$('fAgain').hidden=edit;$('fStatusF').hidden=!edit;
+  const d=edit?l.date:(okDate(date)?date:lastClinicDay(today()));$('fDate').value=d;
+  const day=clinicsOn(d);L.clinic=edit?l.clinic:(clinic||(day.length===1?day[0]:''));
+  L.type=edit?l.type:'';L.status=edit?l.status:'todo';
+  $('fRef').value=edit?l.ref:'';$('fNote').value=edit?l.note:'';
+  $('fDue').value=edit?l.due:addDays(d,D.dueDays);L.dueAuto=!edit||l.due===addDays(l.date,D.dueDays);
+  drawClinics();drawTypes();drawDues();drawStatus();$('ldlg').showModal();
+  if(!edit)setTimeout(()=>{(L.clinic?(document.querySelector('#fTypes .chip')):document.querySelector('#fClinics .chip')||$('fClinicOther')).focus()},30)}
+$('fDate').addEventListener('change',()=>{const d=$('fDate').value;if(!okDate(d))return;const day=clinicsOn(d);
+  if(L.clinic&&!day.includes(L.clinic)&&day.length&&!$('fClinicOther').value)L.clinic='';if(!L.clinic&&day.length===1)L.clinic=day[0];
+  if(L.dueAuto)$('fDue').value=addDays(d,D.dueDays);drawClinics();drawDues()});
+$('fDue').addEventListener('change',()=>{L.dueAuto=false;drawDues()});
+$('ldlg').addEventListener('click',e=>{const c=e.target.closest('[data-clin]');if(c){L.clinic=c.dataset.clin;$('fClinicOther').value='';drawClinics();return}
+  const t=e.target.closest('[data-type]');if(t){L.type=t.dataset.type;$('fTypeOther').value='';drawTypes();return}
+  const du=e.target.closest('[data-due]');if(du){const d=$('fDate').value;if(okDate(d)){$('fDue').value=addDays(d,+du.dataset.due);L.dueAuto=false;drawDues()}return}
+  const s=e.target.closest('[data-fst]');if(s){L.status=s.dataset.fst;drawStatus()}});
+$('fClinicOther').addEventListener('input',e=>{L.clinic=e.target.value.trim();document.querySelectorAll('#fClinics .chip').forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.clin===L.clinic)))});
+$('fTypeOther').addEventListener('input',e=>{L.type=e.target.value.trim();document.querySelectorAll('#fTypes .chip').forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.type===L.type)))});
+function saveLetter(again){const err=m=>{$('fErr').textContent=m;$('fErr').hidden=false;return false};
+  const d=$('fDate').value,clinic=(L.clinic||'').trim(),type=(L.type||'').trim(),ref=$('fRef').value.trim(),note=$('fNote').value.trim(),due=$('fDue').value;
+  if(!okDate(d))return err('Choose the clinic date.');if(!clinic)return err('Choose the clinic.');if(!type)return err('Choose the letter type.');
+  if(IDRX.test(ref)||IDRX.test(note))return err(IDMSG);
+  if(L.id){const l=D.letters.find(x=>x.id===L.id);if(l){const wasSent=l.status==='sent';Object.assign(l,{date:d,clinic,type,ref,note,due:okDate(due)?due:'',status:L.status});l.done=L.status==='sent'?(wasSent&&l.done?l.done:Date.now()):0}}
+  else D.letters.push({id:uid(),date:d,clinic:clinic.slice(0,80),type:type.slice(0,80),ref:ref.slice(0,120),note:note.slice(0,600),due:okDate(due)?due:'',status:'todo',created:Date.now(),done:0});
+  if(!save())return false;render();
+  if(again){toast(`Added: ${type}`);$('fRef').value='';$('fNote').value='';$('fErr').hidden=true;$('fRef').focus();return true}
+  $('ldlg').close();toast(L.id?'Letter updated':`Added: ${type} · ${clinic}`);return true}
+$('lform').addEventListener('submit',e=>{e.preventDefault();saveLetter(false)});
+$('fAgain').addEventListener('click',()=>saveLetter(true));
+$('fCancel').addEventListener('click',()=>$('ldlg').close());
+$('fDel').addEventListener('click',()=>{const i=D.letters.findIndex(x=>x.id===L.id);if(i<0)return;const [gone]=D.letters.splice(i,1);save();$('ldlg').close();render();toast('Letter deleted',()=>{D.letters.splice(i,0,gone)})});
+
+/* ------------------------------------------------------------ misc dialog */
+let MID=null;
+function openMisc(m){if(!m)return;MID=m.id;$('mText').value=m.text;$('mDue').value=m.due||'';$('mErr').hidden=true;$('mdlg').showModal();$('mText').focus()}
+$('mform').addEventListener('submit',e=>{e.preventDefault();const m=D.misc.find(x=>x.id===MID);if(!m)return $('mdlg').close();const t=$('mText').value.trim();
+  if(!t){$('mErr').textContent='Write the to-do, or delete it.';$('mErr').hidden=false;return}if(IDRX.test(t)){$('mErr').textContent=IDMSG;$('mErr').hidden=false;return}
+  m.text=t.slice(0,300);m.due=okDate($('mDue').value)?$('mDue').value:'';save();$('mdlg').close();render()});
+$('mDueX').addEventListener('click',()=>{$('mDue').value=''});
+$('mCancel').addEventListener('click',()=>$('mdlg').close());
+$('mDel').addEventListener('click',()=>{const i=D.misc.findIndex(x=>x.id===MID);if(i<0)return;const [gone]=D.misc.splice(i,1);save();$('mdlg').close();render();toast('To-do deleted',()=>{D.misc.splice(i,0,gone)})});
+
+/* ------------------------------------------------------------ settings, backup */
+function openSettings(){$('rota').innerHTML=[1,2,3,4,5,6,0].map(d=>`<label for="rota${d}">${DAYN[d]}</label><textarea id="rota${d}" data-rd="${d}" rows="${Math.max(1,(D.rota[d]||[]).length)}" placeholder="${d===0||d===6?'No clinic':''}">${esc((D.rota[d]||[]).join('\n'))}</textarea>`).join('');
+  $('dueDays').value=D.dueDays;$('setMsg').textContent='';$('bkMsg').textContent='';$('bkText').value='';armErase(false);
+  if(navigator.storage&&navigator.storage.persisted)navigator.storage.persisted().then(p=>{if(p)$('persistMsg').textContent='The list is saved in this browser only, and the browser has agreed not to clear it automatically. Keep a backup anyway, or to move the list to another device.'}).catch(()=>{});
+  $('sdlg').showModal()}
+$('setBtn').addEventListener('click',openSettings);
+$('setClose').addEventListener('click',()=>$('sdlg').close());
+$('setSave').addEventListener('click',()=>{const r={};document.querySelectorAll('[data-rd]').forEach(t=>{const a=t.value.split('\n').map(x=>x.trim().slice(0,80)).filter(Boolean);if(a.length)r[t.dataset.rd]=a});
+  const dd=Math.round(+$('dueDays').value);D.rota=r;if(Number.isFinite(dd)&&dd>=0&&dd<=60)D.dueDays=dd;if(save()){$('setMsg').textContent='Saved';render()}});
+function backupText(){return JSON.stringify(Object.assign({app:'Task Card',saved:new Date().toISOString()},D),null,1)}
+$('bkDown').addEventListener('click',()=>{const b=new Blob([backupText()],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`task-card-backup-${today()}.json`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);$('bkMsg').textContent='Backup downloaded.'});
+$('bkCopy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(backupText());$('bkMsg').textContent='Backup copied. Paste it somewhere safe, such as a note to yourself.'}catch(e){$('bkText').value=backupText();$('bkText').select();$('bkMsg').textContent='Could not copy by itself: the backup is in the box above, selected.'}});
+$('bkFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;if(f.size>2e6){$('bkMsg').textContent='That file is too large to be a Task Card backup.';return}
+  const r=new FileReader();r.onload=()=>{$('bkText').value=String(r.result||'');$('bkMsg').textContent='File loaded. Press Restore to replace the list on this device.'};r.readAsText(f)});
+let restoreArmed=false;
+$('bkRestore').addEventListener('click',()=>{let o;try{o=JSON.parse($('bkText').value)}catch(e){$('bkMsg').textContent='That isn’t a Task Card backup.';return}
+  if(!o||o.v!==1||!Array.isArray(o.letters)||!Array.isArray(o.misc)){$('bkMsg').textContent='That isn’t a Task Card backup.';return}
+  const n=norm(o);if(!restoreArmed){restoreArmed=true;$('bkRestore').textContent='Tap again to replace';$('bkMsg').textContent=`The backup has ${plural(n.letters.length,'letter')} and ${plural(n.misc.length,'to-do')}. Restoring replaces everything on this device.`;return}
+  restoreArmed=false;$('bkRestore').textContent='Restore';const prev=D;D=n;if(save()){render();$('bkMsg').textContent='Restored.';toast('Backup restored',()=>{D=prev})}});
+$('clearSent').addEventListener('click',()=>{const cut=Date.now()-30*864e5,gone=D.letters.filter(l=>l.status==='sent'&&l.done&&l.done<cut);if(!gone.length){toast('No sent letters older than 30 days');return}
+  D.letters=D.letters.filter(l=>!gone.includes(l));save();render();toast(`Removed ${plural(gone.length,'letter')}`,()=>{D.letters=D.letters.concat(gone)})});
+let eraseArmed=false;
+function armErase(on){eraseArmed=on;$('eraseAll').textContent=on?'Tap again to erase everything':'Erase everything'}
+$('eraseAll').addEventListener('click',()=>{if(!eraseArmed)return armErase(true);armErase(false);const prev=D;D=blank();D.rota=prev.rota;D.dueDays=prev.dueDays;save();render();$('sdlg').close();toast('Everything erased',()=>{D=prev})});
+
+/* ------------------------------------------------------------ start */
+const ios=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),standalone=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
+let tipSeen=false;try{tipSeen=!!localStorage.getItem(TIPKEY)}catch(e){}
+$('iosTip').hidden=!(ios&&!standalone&&!tipSeen);
+$('iosTipX').addEventListener('click',()=>{$('iosTip').hidden=true;try{localStorage.setItem(TIPKEY,'1')}catch(e){}});
+if(!storageOK)toast('This browser is blocking storage, so nothing will be kept. Try a normal (not private) window.',8000);
+setTab((location.hash||'').slice(1),false);
+// keep "today" right if the page is left open overnight
+let lastDay=today();setInterval(()=>{if(today()!==lastDay){lastDay=today();S.wk=monday(lastDay);render()}},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&today()!==lastDay){lastDay=today();S.wk=monday(lastDay);render()}});
+window.taskCard={data:()=>JSON.parse(JSON.stringify(D))};
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+})();
+</script>
+</body>
+</html>

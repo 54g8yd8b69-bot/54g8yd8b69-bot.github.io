@@ -29,6 +29,29 @@ run({name:'Landing page',fn:async()=>{
     const box=await pg.locator('#view').boundingBox(),k=box.width/900;await pg.mouse.move(box.x+20*k,box.y+130*k);await pg.mouse.down();await pg.mouse.move(box.x+700*k,box.y+215*k,{steps:6});await pg.mouse.up();
     await pg.waitForFunction(()=>/crown/.test(document.getElementById('out').value)&&!/Review/.test(document.getElementById('out').value),null,{timeout:60000});
     expect(/Tooth 26 crown fitted/.test(await pg.inputValue('#out')),'dragged area misread: '+await pg.inputValue('#out'));await noErrors(pg)});
+  await test('Task Card keeps letters tied to the clinic rota and a misc list on this device only, and its tile shows only where it has been used',async()=>{
+    const lp=await page('/');expect(!(await lp.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')))).includes('/task-card/'),'Task Card tile should not show on a device that has not used it');
+    const pg=await lp.context().newPage();pg._errors=[];pg.on('pageerror',e=>pg._errors.push(e.message));await pg.goto(BASE+'/task-card/');await pg.waitForTimeout(500);
+    expect((await pg.request.get(BASE+'/task-card/manifest.webmanifest')).ok(),'Task Card manifest missing');
+    const iso=d=>d.toISOString().slice(0,10),now=new Date(),wed=new Date(now);wed.setDate(now.getDate()-((now.getDay()+4)%7));const old=new Date(now);old.setDate(now.getDate()-14);
+    await pg.click('[data-tab="letters"]');await pg.click('#addLetter');await pg.fill('#fDate',iso(wed));await pg.dispatchEvent('#fDate','change');
+    const clin=await pg.$$eval('#fClinics .chip',a=>a.map(x=>x.textContent));expect(clin.join('|')==='A Asuni NP clinic|A Asuni Tx clinic','Wednesday should offer both Asuni clinics, got '+clin.join('|'));
+    await pg.click('#fClinics .chip >> text=A Asuni NP clinic');await pg.click('#fTypes .chip >> text=Clinic letter to GDP');await pg.fill('#fRef','1203851234');await pg.click('#fSave');
+    expect(await pg.isVisible('#fErr')&&/CHI or NHS/.test(await pg.innerText('#fErr')),'a CHI-like number should be refused');
+    await pg.fill('#fRef','10:30 slot, UR1');await pg.click('#fAgain');await pg.fill('#fDate',iso(old));await pg.dispatchEvent('#fDate','change');
+    await pg.fill('#fClinicOther','Restorative A+E');await pg.click('#fTypes .chip >> text=Referral');await pg.fill('#fRef','14:00 new patient');await pg.click('#fSave');await pg.waitForTimeout(200);
+    let d=await pg.evaluate(()=>taskCard.data());expect(d.letters.length===2,'expected two letters, got '+d.letters.length);
+    const a=d.letters.find(l=>l.clinic==='A Asuni NP clinic');expect(a&&a.date===iso(wed)&&a.type==='Clinic letter to GDP'&&a.due===iso(new Date(wed.getFullYear(),wed.getMonth(),wed.getDate()+7,12)),'letter not linked to clinic and date: '+JSON.stringify(a));
+    await pg.click('[data-tab="dash"]');expect(await pg.innerText('#sOut')==='2'&&await pg.innerText('#sOver')==='1','dashboard counts wrong');
+    expect(/A Asuni NP clinic/.test(await pg.innerText('#week')),'week strip should show the Wednesday clinics');
+    await pg.click('[data-tab="letters"]');await pg.click('[data-lf="over"]');expect(/14:00 new patient/.test(await pg.innerText('#groups'))&&!/10:30 slot/.test(await pg.innerText('#groups')),'overdue filter wrong');
+    await pg.click('[data-lf="out"]');await pg.click('.item:has-text("10:30 slot") [data-st$="|sent"]');expect((await pg.evaluate(()=>taskCard.data())).letters.filter(l=>l.status!=='sent').length===1,'marking sent failed');
+    await pg.click('#toastUndo');expect((await pg.evaluate(()=>taskCard.data())).letters.filter(l=>l.status!=='sent').length===2,'undo failed');
+    await pg.click('[data-tab="misc"]');await pg.fill('#miscText','Book study day');await pg.press('#miscText','Enter');expect(await pg.innerText('#nMisc')==='1','misc not added');
+    await pg.fill('#miscText','call re 120 385 1234');await pg.press('#miscText','Enter');expect(await pg.isVisible('#miscErr'),'CHI-like number accepted in misc');
+    await pg.reload();await pg.waitForTimeout(400);d=await pg.evaluate(()=>taskCard.data());expect(d.letters.length===2&&d.misc.length===1,'list not kept after reload');
+    await lp.reload();await lp.waitForTimeout(300);const tile=lp.locator('a.app[href="/task-card/"]');expect(await tile.count()===1,'Task Card tile missing after use');
+    expect(/2 letters to do · 1 overdue · 1 misc/.test(await tile.innerText()),'tile summary wrong: '+await tile.innerText());await noErrors(pg);await noErrors(lp)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');
@@ -295,7 +318,7 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#hoImport');await pg.waitForTimeout(300);
     const txt=await pg.innerText('#page');expect(/Lateral luxation/.test(txt)&&/Assessment: Monitor/.test(txt),'trauma findings missing from the letter');
     expect(await pg.evaluate(()=>localStorage.getItem('notile:letterHandoff'))===null,'handoff left on the device');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card'],['/snip-card/','header a.brand','Snip Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card'],['/snip-card/','header a.brand','Snip Card'],['/task-card/','header a.brand','Task Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

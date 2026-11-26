@@ -1,0 +1,14 @@
+{
+  "name": "Task Card",
+  "short_name": "Task Card",
+  "description": "Your clinic letters and work to-do list, saved only on this device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F3F6F8",
+  "theme_color": "#0B2E4A",
+  "icons": [
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}
