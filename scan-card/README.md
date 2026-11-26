@@ -29,6 +29,21 @@ of it, judged along the tooth's own axis: an upper incisor leans forward, so fro
 outside its own margin. The axis is the direction (within 40° of the occlusal axis) along which the margin takes in the most
 surface, scored against its tilt, then set along the side walls. The path of insertion starts there.
 
+**Prep check: onlays and inlays.** Choose Crown, Onlay or Inlay / partial in "The prepared tooth". Crowns are measured
+as before. For onlays and inlays it also reports occlusal room per quarter against an adjustable target (closest and
+typical), the remaining wall thickness of each cavity wall (a note to consider cusp coverage below the target), the
+isthmus at its narrowest, the total taper of facing walls, the gap from the margin to each neighbour, and occlusal
+contacts near the margin when the opposing arch is in the bite. Targets are adjustable starting points, not rules.
+
+**Survey.** A surveyor for partial dentures: tilt the path of insertion, see survey lines and undercut depth in gauge
+bands (0.25 / 0.5 / 0.75 mm), tap abutment teeth for their buccal and lingual readings, and build a blocked-out model
+(a closed solid, optional relief, optional clasp-tip undercut kept on chosen teeth) to download as STL or keep in the
+case file (`survey-blockout`, `data.survey`).
+
+**Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
+hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
+the cusp tips decide instead, and beyond 25° it warns. Raw scans are oriented exactly as before.
+
 **Lining up with a bite scan.** Once both arches are loaded, the Load step offers "Line up with a bite scan…": load the
 buccal bite registration (STL, PLY or OBJ) that the scanner exported with the arches. If the bite scan shares an arch's
 file coordinates (most scanners export it that way), that arch is placed at once and the other arch is fitted to the

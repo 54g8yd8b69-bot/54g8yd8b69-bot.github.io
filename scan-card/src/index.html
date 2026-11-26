@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan Card — models, analysis, splints, comparisons, preparations, trays and wax-ups from one scan</title>
+<title>Scan Card — models, analysis, splints, comparisons, preparations, surveys, trays and wax-ups from one scan</title>
 <script type="importmap">
 {"imports":{
  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -72,12 +72,13 @@ const TOOLS = [
   { id: 'analysis', name: 'Analysis', what: 'Model analysis', blurb: 'Tooth widths, Bolton, space, arch form, overjet and overbite, restorative space — with a report for the notes.', url: 'analysis.html', path: '/scan-card/analysis/', kind: 'case', key: 'analysis', roles: [] },
   { id: 'splint', name: 'Splint', what: 'Splints and guards', blurb: 'A flat-plane splint or guard on either arch, with canine and front guidance ramps, checked against the opposing teeth.', url: 'splint.html', path: '/scan-card/splint/', kind: 'case', key: 'splint', roles: ['splint'] },
   { id: 'compare', name: 'Compare', what: 'Scan comparison', blurb: 'Line up a later scan of the same arch and see what changed: wear, restorations, tooth movement — as a colour map.', url: 'compare.html', path: '/scan-card/compare/', kind: 'case', key: 'compare', roles: ['compare-second'] },
-  { id: 'prep', name: 'Prep check', what: 'Preparation checker', blurb: 'Mark a prepared tooth and see its undercuts, wall angles, convergence, wall heights and room to the opposing teeth.', url: 'prep.html', path: '/scan-card/prep/', kind: 'case', key: 'prep', roles: [] },
+  { id: 'prep', name: 'Prep check', what: 'Preparation checker', blurb: 'Mark a crown, onlay or inlay preparation and see its undercuts, wall angles, convergence, remaining walls, isthmus and room to the opposing teeth.', url: 'prep.html', path: '/scan-card/prep/', kind: 'case', key: 'prep', roles: [] },
+  { id: 'survey', name: 'Survey', what: 'Surveyor and block-out', blurb: 'Tilt the path of insertion and see survey lines and undercut depths at the 0.25, 0.5 and 0.75 mm gauges on each abutment, then a blocked-out model.', url: 'survey.html', path: '/scan-card/survey/', kind: 'case', key: 'survey', roles: ['survey-blockout'] },
   { id: 'tray', name: 'Trays', what: 'Special trays and record bases', blurb: 'Tray Card: special trays, record bases and Gothic arch plates on the scan.', url: '/tray-card/', path: '/tray-card/', kind: 'files' },
   { id: 'wax', name: 'Wax-up', what: 'Digital wax-up', blurb: 'Wax Card: place library teeth on the scan, blend them in and check the occlusion.', url: '/wax-card/', path: '/wax-card/', kind: 'files' },
 ].filter((t) => !CFG.tools || CFG.tools.includes(t.id)).map((t) => ({ ...t, url: (CFG.urls && CFG.urls[t.id]) || t.url }));
 const TOOL = Object.fromEntries(TOOLS.map((t) => [t.id, t])), CASE_TOOLS = TOOLS.filter((t) => t.kind === 'case');
-const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep', 'scanCard']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second']);
+const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep', 'survey', 'scanCard']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second', 'survey-blockout']);
 // Inside the single-file offline copy of the Notile suite there are no URLs to load: the suite hands over each page's HTML instead.
 const SUITE = (() => { try { return (window.parent !== window && window.parent.SUITE) || null; } catch (_) { return null; } })();
 if (SUITE && !window.SUITE) window.SUITE = SUITE;                // the tools' own offline shims look for it one level up
@@ -116,10 +117,10 @@ const shell = N.createShell({
     { id: 'trim', title: 'Tidy and trim', optional: true, html: '' },
     { id: 'tools', title: 'Choose a tool', html: `
       <p class="lead">The scans are loaded once, here. Every tool works on them — switch at any time with the tabs at the top.</p>
-      <div class="row"><label>Tools work on</label><div class="seg" id="srcSeg"><button data-v="scan" type="button" title="Trays, Analysis, Splint, Compare, Prep check and Wax-up get the scans as loaded here">The scans</button><button data-v="model" type="button" title="They get the model with its base, as built on the Models tab, in place of the scan">Models with base</button></div></div>
+      <div class="row"><label>Tools work on</label><div class="seg" id="srcSeg"><button data-v="scan" type="button" title="Trays, Analysis, Splint, Compare, Prep check, Survey and Wax-up get the scans as loaded here">The scans</button><button data-v="model" type="button" title="They get the model with its base, as built on the Models tab, in place of the scan">Models with base</button></div></div>
       <p class="note" id="srcNote"></p>
       ${TOOLS.map((t) => `<button class="tool" type="button" data-tool="${t.id}" title="Open ${N.esc(t.what.toLowerCase())}"><em hidden>in use</em><b>${N.esc(t.what)}</b><span>${N.esc(t.blurb)}</span></button>`).join('')}
-      <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis, Splint, Compare and Prep check in one file. Trays and Wax-up save their own project files from inside their tab.</p>
+      <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis, Splint, Compare, Prep check and Survey in one file. Trays and Wax-up save their own project files from inside their tab.</p>
       <p class="tip">Each tool is a design aid, not a certified medical device: check everything it makes against the scan and the patient before it is used.</p>` },
   ],
 });
@@ -395,7 +396,7 @@ async function setSource(v, fromModels) {
   if (fromModels && H.active === 'model') await pull('model');   // the models as they are now
   H.src = v === 'model' ? 'model' : 'scan'; stashSoon(); srcUI(); paintTabs();
   const got = JAWS.filter((j) => !!modelItem(j));
-  if (H.src === 'model') toast(got.length ? `Trays, Analysis, Splint, Compare, Prep check and Wax-up now work on the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base` : 'No finished model yet: build one on the Models tab first. Until then the tools get the scans.', !got.length);
+  if (H.src === 'model') toast(got.length ? `Trays, Analysis, Splint, Compare, Prep check, Survey and Wax-up now work on the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base` : 'No finished model yet: build one on the Models tab first. Until then the tools get the scans.', !got.length);
   else toast('The tools work on the scans again');
   return { ok: H.src === 'scan' || got.length > 0, jaws: got, source: H.src };
 }

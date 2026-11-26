@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Survey Card — surveyor and block-out</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+ "manifold-3d/manifold.js":"https://cdn.jsdelivr.net/npm/manifold-3d@3.5.5/manifold.js"
+}}
+</script>
+<script src="manifold-wasm.js"></script>
+<style>
+button{touch-action:manipulation}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+.bands{display:flex;margin:6px 0 2px;border-radius:5px;overflow:hidden;height:10px;border:1px solid #e2e8f0}
+.bands i{flex:1}
+.scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tooth{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:6px 8px;background:#fff}
+.tooth.sel{border-color:var(--teal);box-shadow:0 0 0 3px rgba(20,184,166,.12)}
+.tooth .hd{display:flex;align-items:center;gap:6px}
+.tooth .hd select{padding:4px 5px;border:1px solid var(--line);border-radius:6px;font:inherit;font-weight:600;color:var(--navy);background:#fff}
+.tooth .hd .x{margin-left:auto;padding:3px 8px}
+.tooth .row{margin:5px 0}
+.tooth .row label{flex:none;width:62px;color:#334155}
+table.uc{width:100%;border-collapse:collapse;font-size:11.5px;margin:6px 0 2px}
+table.uc th{font-weight:600;color:var(--muted);text-align:right;padding:2px 4px;font-size:10.5px}
+table.uc th:first-child,table.uc td:first-child{text-align:left}
+table.uc td{padding:3px 4px;border-top:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums;color:var(--navy)}
+table.uc td.no{color:#94a3b8}
+@media (max-width:520px){#view .legend{bottom:84px;font-size:10.5px;padding:5px 8px;max-width:190px}#view .legend div{margin:1px 0;gap:5px}}
+pre.out{white-space:pre-wrap;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:7px 8px;margin:8px 0;max-height:200px;overflow:auto;user-select:text;color:#0f172a}
+</style>
+</head>
+<body>
+<script type="module">
+// Survey Card — a digital dental surveyor. One arch is surveyed along a path of insertion (the analysing rod), which starts
+// square to the biting surfaces and can be tilted front–back and side to side, as the model would be on a surveyor table.
+//  • Survey lines (heights of contour): where the surface turns from facing the path to facing away from it, on the parts of
+//    the surface that the rod can see.
+//  • Undercut depth: at any point below a survey line, the horizontal distance (square to the path) from the point to a rod
+//    parallel to the path that touches the height of contour — what a surveyor's undercut gauge measures. It is worked out
+//    on a fine height field of the arch seen along the path: the rod's side of the solid at the point's level.
+//  • Block-out: the arch filled along the path, every undercut filled (parallel block-out), as a closed solid with a flat base
+//    square to the path; optionally with an even relief over it.
+// All figures are measurements of the scan for planning and lab communication.
+import * as N from './core.js';
+import * as SOL from './solid.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' };
+const GAUGES = [0.25, 0.5, 0.75], SIDES = ['buccal', 'lingual'];                // clasp tips go on buccal or lingual surfaces
+const SIDE_NAME = { buccal: 'Buccal', lingual: 'Lingual / palatal', mesial: 'Mesial', distal: 'Distal' }, SIDE_SHORT = { buccal: 'B', lingual: 'L', mesial: 'M', distal: 'D' };
+const BAND = ['#ccfbf1', '#5eead4', '#0d9488', '#134e4a'], NO_UC = 0xe9dcc6, LINE = 0xc026d3;
+const mm = (v) => (v === Infinity ? 'over 1.5 mm' : v.toFixed(2) + ' mm');
+const P = { jaw: null, ap: 0, lat: 0, show: 'map', teeth: [], relief: 0, notation: 'fdi', bshow: 'wax', pos: 'scan', sel: -1 };
+let A = null;                                                    // the survey of the chosen arch along the path (see computeSurvey)
+let B = mkBlock();                                               // the blocked-out model
+function mkBlock() { return { sig: null, mesh: null, info: null, obj: null }; }
+
+const shell = N.createShell({
+  name: 'Survey Card', tagline: 'Surveyor and block-out', title: document.title,
+  emptyHtml: '<div><b>Load the arch to survey</b>Drop the scan here, or use the demo.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'path', title: 'Path of insertion', html: `
+      <div class="row" id="pJawRow"><label>Arch</label><div class="seg" id="pJaw"><button data-v="upper" type="button" title="Survey the upper arch">Upper</button><button data-v="lower" type="button" title="Survey the lower arch">Lower</button></div></div>
+      <p class="lead">The rod shows the path of insertion. It starts square to the biting surfaces; tilt it to even out undercuts and guide planes.</p>
+      <div class="row"><label>Front / back</label><input type="range" id="pAp" min="-30" max="30" step="0.5" value="0"><span class="val"></span></div>
+      <div class="row"><label>Left / right</label><input type="range" id="pLat" min="-30" max="30" step="0.5" value="0"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="pView" type="button" title="Turn the model until you look straight down the path you want, then press this">Use this view</button><button class="btn" id="pLevel" type="button" title="Back to square to the biting surfaces (no tilt)">Level</button></div>
+      <div id="pInfo"></div>
+      <p class="tip">Tilting works as on a surveyor table: “front up 5°” is the model with its front raised 5°, so the rod leans 5° towards the front of the arch. Left and right are the patient’s. The tilt is the record of the path (what tripod marks record on a stone model): it is kept in the case file, and a blocked-out model downloaded with its base square to the path sits on a surveyor table at this tilt. Survey lines and undercuts are worked out again when you let go of a slider.</p>` },
+    { id: 'survey', title: 'Survey lines and undercuts', html: `
+      <div class="row"><label>Show</label><div class="seg" id="sShow"><button data-v="map" type="button" title="Colour the undercuts by depth">Undercut map</button><button data-v="lines" type="button" title="Only the survey lines on the scan">Survey lines</button></div></div>
+      <div class="bands">${BAND.map((c) => `<i style="background:${c}"></i>`).join('')}</div><div class="scale"><span>0</span><span>0.25</span><span>0.5</span><span>0.75 mm</span><span>deeper</span></div>
+      <div id="sInfo"></div>
+      <div class="btns"><button class="btn" id="sShot" type="button" title="Save the view as a picture">Save picture</button></div>
+      <p class="tip">The magenta line is the survey line (height of contour) for this path: above it the surface faces the rod, below it the surface turns away. Undercut depth is the horizontal distance — square to the path — from a point to a rod parallel to the path that touches the height of contour, as an undercut gauge measures it. The bands are the 0.25, 0.5 and 0.75 mm gauges. Tap the scan to read the undercut at a point and how far it lies below the survey line. Areas hidden under a bulge but facing the rod (the gum under a tooth’s widest part) are coloured too: they are filled by the block-out but are not surfaces a clasp can use. The scan’s accuracy limits what can be told apart: a few hundredths of a millimetre is within its noise.</p>` },
+    { id: 'teeth', title: 'Abutment teeth', html: `
+      <p class="lead">Tap each tooth you plan to clasp. Its undercuts are listed by side, with how far below the survey line each gauge first touches.</p>
+      <div class="row"><label>Tooth numbers</label><div class="seg" id="tNot"><button data-v="fdi" type="button" title="Two-digit FDI numbers (36, 44 …)">FDI</button><button data-v="palmer" type="button" title="Palmer quadrants (LL6, LR4 …)">Palmer</button></div></div>
+      <div id="tList"></div>
+      <pre class="out" id="tOut" hidden></pre>
+      <div class="btns"><button class="btn" id="tCopy" type="button" title="Copy the summary as text">Copy summary</button><button class="btn" id="tClear" type="button" title="Remove all the abutment teeth">Clear teeth</button></div>
+      <p class="tip">The tooth number is a guess from where the tooth sits in the arch — correct it in the list if needed. The tooth is found from the shape of the crowns round your tap; the side of each surface is worked out from the arch (buccal faces away from its centre, mesial towards the midline). For each side the table gives the deepest undercut on the surfaces facing away from the path, and for each gauge the height below the survey line at which it first touches (“–”: that gauge does not touch on that side). The dots on the model mark those points. “Clasp tip” leaves that much undercut on one side of the tooth when the model is blocked out, so a clasp designed on the blocked-out model can reach into it; everything else is still filled.</p>` },
+    { id: 'block', title: 'Block-out', html: `
+      <p class="lead">Every undercut is filled parallel to the path, so a framework designed on this model goes on and comes off along it.</p>
+      <div class="row"><label>Relief</label><input type="range" id="bRelief" min="0" max="0.5" step="0.05" value="0"><span class="val"></span></div>
+      <div class="row"><label>Show</label><div class="seg" id="bShow"><button data-v="wax" type="button" title="The scan with the block-out wax in blue">Wax on the scan</button><button data-v="model" type="button" title="The blocked-out model on its own">Model</button></div></div>
+      <div id="bInfo"></div>
+      <div class="row"><label>Position</label><div class="seg" id="bPos"><button data-v="scan" type="button" title="Exactly where the scanner put the scan, so the model lines up with it in other software">As scanned</button><button data-v="path" type="button" title="Base down at Z = 0, square to the path: on a flat surveyor table the model sits at this path">Base square to the path</button></div></div>
+      <div class="btns"><button class="btn pri" id="bStl" type="button" title="Download the blocked-out model as STL">Download STL</button><button class="btn" id="bCase" type="button" title="Save the scans, the path and the blocked-out model as one case file">Save case</button></div>
+      <p class="note">A design aid for planning partial dentures and talking to the lab. Check the blocked-out model against the scan and the patient before relying on it.</p>
+      <p class="tip">The blocked-out model is a closed solid with a flat base square to the path, 3 mm below the lowest point of the scan, on a 0.15 mm grid. Above the survey lines it follows the scan (to within about 0.07 mm where the surface turns vertical just above the line); below them it drops straight along the path. “Relief” adds an even layer over the blocked-out model (a spacer), in millimetres. With a clasp tip set on the Abutment teeth step, that side of the tooth keeps its undercut up to the chosen gauge and is blocked out deeper than that; relief is not added there.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const legend = shell.panel('', 'legend'); legend.hidden = true;
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Survey Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility' || what === 'case') return; dropSurvey(); syncUI(); refreshView(); },
+  extendCase: (c) => {
+    c.remove('survey-blockout');
+    const sc = P.jaw && scans[P.jaw];
+    if (sc && B.mesh && B.sig === blockSig()) c.add({ role: 'survey-blockout', name: `blockout-${P.jaw}`, mesh: N.transformMesh(B.mesh, sc.matrix.clone().invert()), matrix: sc.matrix, meta: { jaw: P.jaw, sig: B.sig, info: B.info } });
+    c.data.survey = { version: 1, jaw: P.jaw, tilt: { ap: P.ap, lat: P.lat }, dir: P.jaw ? pathDir().toArray() : null, relief: P.relief, notation: P.notation, teeth: P.teeth.map((t) => ({ fdi: t.fdi, at: t.at, keep: t.keep, side: t.side })), summary: A ? summaryData() : null };
+  },
+  readCase: (c) => {
+    dropSurvey(); const d = c.data.survey;
+    if (d) { P.jaw = d.jaw || P.jaw; P.ap = d.tilt ? +d.tilt.ap || 0 : 0; P.lat = d.tilt ? +d.tilt.lat || 0 : 0; P.relief = d.relief || 0; P.notation = d.notation || 'fdi'; P.teeth = (d.teeth || []).map((t) => ({ fdi: t.fdi, at: t.at, keep: t.keep || 0, side: t.side || 'buccal' })); }
+    paramsToUI();
+    const it = c.get('survey-blockout');
+    if (it && it.mesh && pickJaw() && it.meta && it.meta.jaw === P.jaw && it.meta.sig === blockSig()) { B.sig = it.meta.sig; B.mesh = N.transformMesh(it.mesh, it.matrix); B.info = it.meta.info || null; }
+    if (pickJaw()) survey();
+    syncUI(); refreshView();
+  },
+});
+function pickJaw() { if (P.jaw && scans.has(P.jaw)) return P.jaw; P.jaw = scans.has('lower') && !scans.has('upper') ? 'lower' : scans.has('upper') && !scans.has('lower') ? 'upper' : scans.has('lower') ? 'lower' : null; return P.jaw; }
+
+// ───────────── the path ─────────────
+/** Out of the teeth along the path (case frame): the occlusal axis tilted by the two table angles (in their own planes). */
+function dirOf(jaw, ap, lat) { const r = Math.PI / 180; return new THREE.Vector3(Math.tan(lat * r), -Math.tan(ap * r), jaw === 'upper' ? -1 : 1).normalize(); }
+const pathDir = () => dirOf(P.jaw, P.ap, P.lat);
+/** case frame → "path frame": the path along +Z, the arch's own x roughly kept (an upper arch is turned over first) */
+function frameOf(d, jaw) {
+  const F = jaw === 'upper' ? N.rotationAbout('y', 180) : new THREE.Matrix4(), fd = d.clone().transformDirection(F);
+  return new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(fd, new THREE.Vector3(0, 0, 1))).multiply(F);
+}
+const tiltText = (ap, lat) => { const a = Math.abs(ap) < 0.05 ? 'front / back level' : `${ap > 0 ? 'front' : 'back'} up ${Math.abs(ap).toFixed(1)}°`, b = Math.abs(lat) < 0.05 ? 'left / right level' : `patient’s ${lat > 0 ? 'left' : 'right'} up ${Math.abs(lat).toFixed(1)}°`; return `${a}, ${b}`; };
+
+// ───────────── the survey (pure: any mesh in the case frame) ─────────────
+const OFFS = new Map();
+function offsets(R) {
+  let o = OFFS.get(R); if (o) return o; const L = [];
+  for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) { const r = Math.hypot(di, dj); if (r <= R + 0.5) L.push([di, dj, r]); }
+  L.sort((a, b) => a[2] - b[2]); o = { di: Int16Array.from(L, (x) => x[0]), dj: Int16Array.from(L, (x) => x[1]), r: Float32Array.from(L, (x) => x[2]), n: L.length }; OFFS.set(R, o); return o;
+}
+/**
+ * Survey a mesh (case frame) along d (unit, out of the teeth).
+ *   o.jaw   'upper' | 'lower' (only sets how the path frame is turned)   o.cell (0.05) height-field spacing, mm   o.maxDepth (1.5)
+ * → { Q (case → path frame), Pd (positions in the path frame), hf (max height field along the path), s (vertex normal · d),
+ *     depth (undercut depth per vertex, mm; 0 where the rod sees the point; Infinity beyond maxDepth), seg (survey line segments,
+ *     case frame, xyz pairs), segD (the same in the path frame), search(x, y, h, out), heightBelow(x, y, h), time }
+ */
+function computeSurvey(mesh, d, o = {}) {
+  const t0 = performance.now(), cell = o.cell || 0.05, maxD = o.maxDepth ?? 1.5, tau = 0.02, minU = o.minUndercut ?? 0.1;
+  const Q = frameOf(d, o.jaw), e = Q.elements, Pc = mesh.positions, I = mesh.indices, nV = Pc.length / 3, nF = I.length / 3, Pd = new Float32Array(Pc.length);
+  for (let i = 0; i < Pc.length; i += 3) { const x = Pc[i], y = Pc[i + 1], z = Pc[i + 2]; Pd[i] = e[0] * x + e[4] * y + e[8] * z; Pd[i + 1] = e[1] * x + e[5] * y + e[9] * z; Pd[i + 2] = e[2] * x + e[6] * y + e[10] * z; }
+  const md = { positions: Pd, indices: I }, hf = N.rasterHeightfield(md, { cell, mode: 'max', pad: maxD + 1 }), { nx, ny, x0, y0 } = hf, H = hf.z, inv = 1 / cell;
+  // which way the triangles face (+1 out of the tissue, as scanners write them): judged on the top 2.5 mm, as Compare and Prep check do
+  let zt = -Infinity; for (let i = 2; i < Pd.length; i += 3) if (Pd[i] > zt) zt = Pd[i];
+  let sz = 0; for (let f = 0; f < nF; f++) { const a = I[3 * f] * 3, b = I[3 * f + 1] * 3, c = I[3 * f + 2] * 3; if ((Pd[a + 2] + Pd[b + 2] + Pd[c + 2]) / 3 < zt - 2.5) continue; sz += (Pd[b] - Pd[a]) * (Pd[c + 1] - Pd[a + 1]) - (Pd[b + 1] - Pd[a + 1]) * (Pd[c] - Pd[a]); }
+  const flip = sz < 0 ? -1 : 1, Nv = N.vertexNormals(md), s = new Float32Array(nV);
+  for (let v = 0; v < nV; v++) { Nv[3 * v] *= flip; Nv[3 * v + 1] *= flip; Nv[3 * v + 2] *= flip; s[v] = Nv[3 * v + 2]; }
+  // undercut depth: the nearest column, at the point's own level, whose top is below that level (the rod's side of the solid)
+  const O = offsets(Math.ceil(maxD * inv) + 2);
+  const search = (x, y, h, out) => {
+    const fx = (x - x0) * inv, fy = (y - y0) * inv, i0 = Math.round(fx), j0 = Math.round(fy), lim = h + tau;
+    if (i0 >= 0 && j0 >= 0 && i0 < nx && j0 < ny && !(H[j0 * nx + i0] >= lim)) { if (out) { out.wx = x; out.wy = y; } return 0; }
+    let best = Infinity, bx = fx, by = fy;
+    for (let k = 0; k < O.n; k++) {
+      if (O.r[k] - 1.42 > best) break;
+      const i = i0 + O.di[k], j = j0 + O.dj[k];
+      if (i >= 0 && j >= 0 && i < nx && j < ny && H[j * nx + i] >= lim) continue;
+      const cx = Math.min(Math.max(fx, i - 0.5), i + 0.5), cy = Math.min(Math.max(fy, j - 0.5), j + 0.5), dd = Math.hypot(fx - cx, fy - cy);   // to the edge of that column's cell
+      if (dd < best) { best = dd; bx = cx; by = cy; }
+    }
+    if (out) { out.wx = x0 + bx * cell; out.wy = y0 + by * cell; }
+    return best === Infinity || best * cell > maxD ? Infinity : best * cell;
+  };
+  const depth = new Float32Array(nV); let shadowed = 0;
+  for (let v = 0; v < nV; v++) { const dd = search(Pd[3 * v], Pd[3 * v + 1], Pd[3 * v + 2]); depth[v] = dd; if (dd > 0.02) shadowed++; }
+  // survey lines: where the vertex normal turns past square to the path, between a point the rod sees and a patch of surface
+  // facing away from it that holds a real undercut (≥ minU) — so fissures and scan noise do not draw lines
+  const par = new Int32Array(nV); for (let v = 0; v < nV; v++) par[v] = v;
+  const find = (v) => { while (par[v] !== v) { par[v] = par[par[v]]; v = par[v]; } return v; };
+  for (let f = 0; f < nF; f++) for (let k = 0; k < 3; k++) { const a = I[3 * f + k], b = I[3 * f + (k + 1) % 3]; if (s[a] < 0 && s[b] < 0) { const ra = find(a), rb = find(b); if (ra !== rb) par[ra] = rb; } }
+  const cmax = new Float32Array(nV); for (let v = 0; v < nV; v++) if (s[v] < 0) { const r = find(v); if (depth[v] > cmax[r]) cmax[r] = depth[v]; }
+  const kept = (v) => s[v] < 0 && cmax[find(v)] >= minU, seen = (v) => s[v] >= 0 && depth[v] <= 0.05;
+  const seg = [], segD = [], cross = (a, b, out, outD) => { const t = s[a] / (s[a] - s[b]); for (let k = 0; k < 3; k++) { out.push(Pc[3 * a + k] + t * (Pc[3 * b + k] - Pc[3 * a + k])); outD.push(Pd[3 * a + k] + t * (Pd[3 * b + k] - Pd[3 * a + k])); } };
+  for (let f = 0; f < nF; f++) {
+    const a = I[3 * f], b = I[3 * f + 1], c = I[3 * f + 2];
+    if ((s[a] < 0) === (s[b] < 0) && (s[b] < 0) === (s[c] < 0)) continue;
+    if (!(kept(a) || kept(b) || kept(c)) || !(seen(a) || seen(b) || seen(c))) continue;
+    const p = [], pd = [];
+    if ((s[a] < 0) !== (s[b] < 0)) cross(a, b, p, pd); if ((s[b] < 0) !== (s[c] < 0)) cross(b, c, p, pd); if ((s[c] < 0) !== (s[a] < 0)) cross(c, a, p, pd);
+    if (p.length === 6) { seg.push(...p); segD.push(...pd); }
+  }
+  // The survey line segments, by where they lie seen along the path. Below a survey line the rod's side of the solid is the line
+  // carried straight down, so the depth is refined to the distance (seen along the path) from the point to the nearest segment
+  // that stands above it, near the wall the height field found — the line is exact to the mesh, the height field to a cell.
+  const HC = 0.25, hash = new Map(), nS = segD.length / 6;
+  for (let k = 0; k < nS; k++) { const o = 6 * k, ax = Math.floor(Math.min(segD[o], segD[o + 3]) / HC), bx = Math.floor(Math.max(segD[o], segD[o + 3]) / HC), ay = Math.floor(Math.min(segD[o + 1], segD[o + 4]) / HC), by = Math.floor(Math.max(segD[o + 1], segD[o + 4]) / HC); for (let gx = ax; gx <= bx; gx++) for (let gy = ay; gy <= by; gy++) { const key = gx * 100003 + gy; let l = hash.get(key); if (!l) hash.set(key, (l = [])); l.push(k); } }
+  /** the nearest survey segment above level h, looked for within r of (wx, wy), measured from (x, y) → { d, hc } ; also whether one lies below h there */
+  const lineNear = (x, y, h, wx, wy, r) => {
+    let d = Infinity, hc = NaN, below = false; const g0x = Math.floor((wx - r) / HC), g1x = Math.floor((wx + r) / HC), g0y = Math.floor((wy - r) / HC), g1y = Math.floor((wy + r) / HC), seenK = new Set();
+    for (let gx = g0x; gx <= g1x; gx++) for (let gy = g0y; gy <= g1y; gy++) { const l = hash.get(gx * 100003 + gy); if (!l) continue; for (const k of l) {
+      if (seenK.has(k)) continue; seenK.add(k); const o = 6 * k, x0s = segD[o], y0s = segD[o + 1], ex = segD[o + 3] - x0s, ey = segD[o + 4] - y0s, L2 = ex * ex + ey * ey;
+      const tw = L2 > 1e-12 ? N.clamp(((wx - x0s) * ex + (wy - y0s) * ey) / L2, 0, 1) : 0; if ((x0s + tw * ex - wx) ** 2 + (y0s + tw * ey - wy) ** 2 > r * r) continue;
+      const t = L2 > 1e-12 ? N.clamp(((x - x0s) * ex + (y - y0s) * ey) / L2, 0, 1) : 0, z = segD[o + 2] + t * (segD[o + 5] - segD[o + 2]);
+      if (z < h - 0.005) { below = true; continue; } const dd = Math.hypot(x0s + t * ex - x, y0s + t * ey - y); if (dd < d) { d = dd; hc = z; }
+    } }
+    return { d, hc, below };
+  };
+  const out0 = {}, refine = (x, y, h, dp, out, sv) => {
+    if (!(dp > 0) || dp === Infinity) return { depth: dp, hc: NaN };
+    const q = lineNear(x, y, h, out.wx, out.wy, 0.2);
+    if (q.d < Infinity && Math.abs(q.d - dp) <= cell) return { depth: q.d, hc: q.hc };
+    if (q.d === Infinity && q.below && dp <= 2 * cell) return { depth: 0, hc: NaN };      // above the survey line here: the rod sees it
+    // a sloping face the rod sees, made to look hidden only by the grid (each vertex's height sits on its nearest grid point,
+    // which on a slope is up to two thirds of a cell away): the column's height at the exact point, allowing for that slope
+    const slack = sv > 0.05 ? Math.min(0.25, 0.75 * cell * Math.sqrt(1 - sv * sv) / sv) : 0;
+    if (dp <= 2 * cell && !(N.sampleField(hf, x, y) > h + tau + slack)) return { depth: 0, hc: NaN };
+    return { depth: dp, hc: NaN };
+  };
+  for (let v = 0; v < nV; v++) { const dp = depth[v]; if (!(dp > 0) || dp === Infinity) continue; const x = Pd[3 * v], y = Pd[3 * v + 1], h = Pd[3 * v + 2]; search(x, y, h, out0); depth[v] = refine(x, y, h, dp, out0, s[v]).depth; }
+  shadowed = 0; for (let v = 0; v < nV; v++) if (depth[v] > 0.02) shadowed++;
+  /** undercut depth at any point (path frame) and how far below the survey line it is (the line above its wall) */
+  const heightBelow = (x, y, h, sv, strict) => {
+    const out = {}, dp = search(x, y, h, out), r = refine(x, y, h, dp, out, sv); if (!(r.depth > 0)) return { depth: r.depth, below: r.depth === 0 ? 0 : NaN };
+    let hc = r.hc; if (!(hc === hc)) { hc = lineNear(x, y, h, out.wx, out.wy, strict ? 0.3 : 0.6).hc; if (!(hc === hc) && !strict) hc = lineNear(x, y, h, out.wx, out.wy, 1.2).hc; }
+    return { depth: r.depth, below: hc === hc ? hc - h : NaN, wall: [out.wx, out.wy] };
+  };
+  return { Q, Qi: Q.clone().invert(), Pd, Nv, indices: I, hf, s, depth, seg: Float32Array.from(seg), segD: Float32Array.from(segD), search, heightBelow, flip, maxD, shadowed, time: performance.now() - t0 };
+}
+
+// ───────────── the blocked-out model (pure) ─────────────
+/**
+ * Block out a surveyed arch: the height field along the path (every column filled up to the highest point of the scan in it,
+ * so every undercut is filled) closed into a solid with a flat base square to the path.
+ *   o.cell (0.15) mesh spacing (a multiple of the survey's cell)   o.relief (0) an even layer over it, mm   o.base (3) mm under the lowest point
+ * Where the surface drops past the height of contour, the grid point just outside is moved onto the rod's line (found on the fine
+ * survey field), so the drop stands outside the original surface rather than cutting a corner off it.
+ * → { mesh (case frame, closed), meshD (path frame), baseZ, watertight, tris, time }
+ */
+function blockOut(S, o = {}) {
+  const t0 = performance.now(), hf = S.hf, k = Math.max(1, Math.round((o.cell || 0.15) / hf.cell)), cb = hf.cell * k, relief = o.relief || 0;
+  const nx = Math.floor((hf.nx - 1) / k) + 1, ny = Math.floor((hf.ny - 1) / k) + 1; let Z = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) Z[j * nx + i] = hf.z[j * k * hf.nx + i * k];
+  if (relief > 0) Z = N.morphField({ nx, ny, x0: hf.x0, y0: hf.y0, cell: cb, z: Z, mode: 'max' }, relief, { op: 'dilate', shape: 'sphere' }).z;
+  { // one grid point past the edge of the scan, so its last part-cell is inside the solid too
+    const Z0 = Float32Array.from(Z); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = j * nx + i; if (Z0[q] > -1e30) continue; let m = -Infinity; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && Z0[jj * nx + ii] > m) m = Z0[jj * nx + ii]; } if (m > -1e30) Z[q] = m; }
+  }
+  const fin = (q) => Z[q] > -1e30, X0 = new Float32Array(nx * ny), Y0 = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { X0[j * nx + i] = hf.x0 + i * cb; Y0[j * nx + i] = hf.y0 + j * cb; }
+  const X = Float32Array.from(X0), Y = Float32Array.from(Y0), T = Float32Array.from(Z), moved = new Uint8Array(nx * ny);   // moved: 1 = top of a drop, 2 = its foot
+  // Where the surface drops past the height of contour (a grid point more than 2.5 cells' slope below a neighbour), the point at
+  // the top is moved onto the silhouette (the first column of the fine survey field that is inside) and the one beyond it to just
+  // outside, so the drop between them stands along the path, as a wall from the survey line, instead of leaning across a cell.
+  if (!(relief > 0)) {
+    const wallT = 2.5 * cb, F = hf.z, fnx = hf.nx, fny = hf.ny, fc = hf.cell;
+    /** the nearest fine column (within r mm of grid point q) whose top stands more than `rise` above q's own: the silhouette seen from q */
+    const nearestInside = (q, r, rise) => {
+      const fi0 = (q % nx) * k, fj0 = Math.floor(q / nx) * k, R = Math.ceil(r / fc), lim = Z[q] + rise; let bd = Infinity, bi = -1, bj = -1;
+      for (let dj = -R; dj <= R; dj++) { const fj = fj0 + dj; if (fj < 0 || fj >= fny) continue; for (let di = -R; di <= R; di++) { const fi = fi0 + di; if (fi < 0 || fi >= fnx) continue; const d2 = di * di + dj * dj; if (d2 < bd && F[fj * fnx + fi] > lim) { bd = d2; bi = fi; bj = fj; } } }
+      return bi < 0 || Math.sqrt(bd) * fc > r ? null : [bi, bj];
+    };
+    // a drop is a jump in the fine field between neighbouring columns (the silhouette), not merely a steep slope
+    const jumpTo = (q, r) => { const sx = (q % nx) * k, sy = Math.floor(q / nx) * k, ex = (r % nx) * k, ey = Math.floor(r / nx) * k, n = Math.ceil(2 * Math.hypot(ex - sx, ey - sy)); let prev = F[sy * fnx + sx], mj = 0; for (let st = 1; st <= n; st++) { const fi = Math.round(sx + (ex - sx) * st / n), fj = Math.round(sy + (ey - sy) * st / n), z = F[fj * fnx + fi]; if (z > -1e30 && prev > -1e30 && z - prev > mj) mj = z - prev; prev = z; } return mj > 0.6 * wallT; };
+    const tops = [];
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const q = j * nx + i; if (!fin(q)) continue; let drop = false;
+      for (let dj = -1; dj <= 1 && !drop; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if ((di || dj) && ii >= 0 && jj >= 0 && ii < nx && jj < ny && Z[jj * nx + ii] > Z[q] + wallT && jumpTo(q, jj * nx + ii)) { drop = true; break; } }
+      if (drop) tops.push(q);
+    }
+    for (const q of tops) { const s = nearestInside(q, 0.95 * cb, wallT / 2); if (!s) continue; X[q] = hf.x0 + s[0] * fc; Y[q] = hf.y0 + s[1] * fc; T[q] = F[s[1] * fnx + s[0]]; moved[q] = 1; }   // top of the drop: on the silhouette, on the surface
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {                                        // its foot: the next point out, to just outside the silhouette
+      const c = j * nx + i; if (!fin(c) || moved[c]) continue; let nb = false;
+      for (let dj = -1; dj <= 1 && !nb; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && moved[jj * nx + ii] === 1) { nb = true; break; } }
+      if (!nb) continue; const s = nearestInside(c, 1.9 * cb, wallT / 2); if (!s) continue;
+      const sx = i * k, sy = j * k, L = Math.hypot(s[0] - sx, s[1] - sy), steps = Math.ceil(2 * L); let lx = sx, ly = sy, lz = Z[c];
+      for (let st = 1; st < steps; st++) { const t = st / steps, fx = sx + (s[0] - sx) * t, fy = sy + (s[1] - sy) * t, fi = Math.round(fx), fj = Math.round(fy), hz = F[fj * fnx + fi]; if (!(hz > -1e30) || hz > Z[c] + wallT / 2) break; lx = fx; ly = fy; lz = hz; }
+      if (lx !== sx || ly !== sy) { X[c] = hf.x0 + lx * fc; Y[c] = hf.y0 + ly * fc; T[c] = lz; moved[c] = 2; }
+    }
+  }
+  const undone = [0, 0, 0], undo = (q) => { undone[moved[q]]++; X[q] = X0[q]; Y[q] = Y0[q]; T[q] = Z[q]; moved[q] = 0; };
+  // cells: all four corners present; no two cells touching only at a corner (that would not be a clean solid)
+  const cx = nx - 1, cy = ny - 1, on = new Uint8Array(cx * cy);
+  for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) { const q = j * nx + i; on[j * cx + i] = fin(q) && fin(q + 1) && fin(q + nx) && fin(q + nx + 1) ? 1 : 0; }
+  for (let pass = 0; pass < 12; pass++) { let ch = 0; for (let j = 1; j < cy; j++) for (let i = 1; i < cx; i++) { const a = on[(j - 1) * cx + i - 1], b = on[(j - 1) * cx + i], c = on[j * cx + i - 1], d = on[j * cx + i]; if (a && d && !b && !c) { on[j * cx + i] = 0; ch++; } else if (b && c && !a && !d) { on[j * cx + i - 1] = 0; ch++; } } if (!ch) break; }
+  const C = (i, j) => i >= 0 && j >= 0 && i < cx && j < cy && on[j * cx + i] === 1;
+  // a moved point must not fold a triangle over (seen along the path every top triangle keeps its turn): undo feet, then tops
+  const diag = (a, b, c, d) => Math.abs(T[a] - T[c]) <= Math.abs(T[b] - T[d]), turn = (p, q, r) => (X[q] - X[p]) * (Y[r] - Y[p]) - (Y[q] - Y[p]) * (X[r] - X[p]);
+  for (let pass = 0; pass < 8; pass++) {
+    let bad = 0;
+    for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) {
+      if (!on[j * cx + i]) continue; const a = j * nx + i, b = a + 1, c = a + nx + 1, d = a + nx, vs = [a, b, c, d]; if (!vs.some((v) => moved[v])) continue;
+      const tr = diag(a, b, c, d) ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]]; if (tr.every(([p, q, r]) => turn(p, q, r) > 1e-9)) continue;
+      bad++; const feet = vs.filter((v) => moved[v] === 2); (feet.length ? feet : vs.filter((v) => moved[v] === 1)).forEach(undo);
+    }
+    if (!bad) break;
+  }
+  // Never cut into the scan: where the fine survey field stands above a top triangle (a straight edge between grid points cuts a
+  // convex curve — the steep band just above a survey line, a cusp tip, an incisal edge), raise that triangle's corners by as much.
+  // The drops themselves (triangles with a foot point) are left alone: they stand outside the silhouette by construction.
+  const dg = new Uint8Array(cx * cy); for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) if (on[j * cx + i]) { const a = j * nx + i; dg[j * cx + i] = diag(a, a + 1, a + nx + 1, a + nx) ? 1 : 0; }
+  { const lift = new Float32Array(nx * ny), F = hf.z, fnx = hf.nx, fny = hf.ny, fc = hf.cell, foot = new Uint8Array(nx * ny), wallT = 2.5 * cb;
+    for (let q = 0; q < nx * ny; q++) { if (moved[q] !== 1) continue; const i = q % nx, j = Math.floor(q / nx); for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const r = jj * nx + ii; if (moved[r] === 2 || (fin(r) && moved[r] !== 1 && T[q] - T[r] > wallT)) foot[r] = 1; } }   // the low side of every drop, moved or not (a top is never a foot)
+    /** the original stands e above triangle p q r at barycentric W: raise its corners that are not at a drop's foot */
+    const apply = (p, q, r, e, W) => {
+      // e is measured up the path; square to the triangle it is e·cos(slope): more than 0.1 mm means the triangle spans a drop that could
+      // not be snapped. Only corners that are not at the foot of a drop are raised (by e over their share at that point), so a drop's
+      // foot never lifts; if they hold too little of that point, the triangle is left as it is.
+      const ux = X[q] - X[p], uy = Y[q] - Y[p], uz = T[q] - T[p], vx = X[r] - X[p], vy = Y[r] - Y[p], vz = T[r] - T[p], cz = ux * vy - uy * vx, cl = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, cz) || 1;
+      if (e * Math.abs(cz) / cl >= 0.1) return;
+      const vs = [p, q, r], low = foot[p] && foot[q] && foot[r];       // a triangle wholly on the low side (the gum beyond a drop) is raised as any other
+      const share = low ? 1 : vs.reduce((t, v, i) => t + (foot[v] ? 0 : W[i]), 0); if (share < 0.5) return;
+      const up = e / share; for (const v of vs) if ((low || !foot[v]) && up > lift[v]) lift[v] = up;
+    };
+    const bary = (p, q, r, x, y) => { const den = (Y[q] - Y[r]) * (X[p] - X[r]) + (X[r] - X[q]) * (Y[p] - Y[r]); if (Math.abs(den) < 1e-12) return null; const w0 = ((Y[q] - Y[r]) * (x - X[r]) + (X[r] - X[q]) * (y - Y[r])) / den, w1 = ((Y[r] - Y[p]) * (x - X[r]) + (X[p] - X[r]) * (y - Y[r])) / den, w2 = 1 - w0 - w1; return w0 < -1e-7 || w1 < -1e-7 || w2 < -1e-7 ? null : [w0, w1, w2]; };
+    const tris = (i, j) => { const a = j * nx + i, b = a + 1, c = a + nx + 1, d = a + nx; return dg[j * cx + i] ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]]; };
+    // 1. the fine survey field's columns inside each top triangle
+    const check = (p, q, r) => {
+      const ax = (X[p] - hf.x0) / fc, ay = (Y[p] - hf.y0) / fc, bx = (X[q] - hf.x0) / fc, by = (Y[q] - hf.y0) / fc, qx = (X[r] - hf.x0) / fc, qy = (Y[r] - hf.y0) / fc;
+      let e = 0, W = null;
+      for (let fj = Math.max(0, Math.ceil(Math.min(ay, by, qy))); fj <= Math.min(fny - 1, Math.floor(Math.max(ay, by, qy))); fj++) for (let fi = Math.max(0, Math.ceil(Math.min(ax, bx, qx))); fi <= Math.min(fnx - 1, Math.floor(Math.max(ax, bx, qx))); fi++) {
+        const w = bary(p, q, r, hf.x0 + fi * fc, hf.y0 + fj * fc); if (!w) continue; const z = F[fj * fnx + fi]; if (!(z > -1e30)) continue; const ex = z - (w[0] * T[p] + w[1] * T[q] + w[2] * T[r]); if (ex > e) { e = ex; W = w; }
+      }
+      if (e > 0.005) apply(p, q, r, e, W);
+    };
+    for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) if (on[j * cx + i]) for (const [p, q, r] of tris(i, j)) check(p, q, r);
+    // 2. the scan's own points (a thin triangle along the top of a drop may hold no column of the fine field)
+    const Pd = S.Pd, skip = o.skipV || null;
+    for (let v = 0; v < Pd.length / 3; v++) {
+      if (skip && skip[v]) continue; const x = Pd[3 * v], y = Pd[3 * v + 1], h = Pd[3 * v + 2], ci = Math.floor((x - hf.x0) / cb), cj = Math.floor((y - hf.y0) / cb);
+      found: for (let dj = 0; dj <= 2; dj++) for (let di = 0; di <= 2; di++) {
+        const i = ci + [0, -1, 1][di], j = cj + [0, -1, 1][dj]; if (i < 0 || j < 0 || i >= cx || j >= cy || !on[j * cx + i]) continue;
+        for (const [p, q, r] of tris(i, j)) { const w = bary(p, q, r, x, y); if (!w) continue; const e = h - (w[0] * T[p] + w[1] * T[q] + w[2] * T[r]); if (e > 0.005) apply(p, q, r, e, w); break found; }
+      }
+    }
+    if (o.debug) o.debug.state = { X, Y, T, moved, foot, lift, nx, ny, cb, x0: hf.x0, y0: hf.y0, on, cx, cy, dg, tris, bary, undone, nTop: moved.reduce((t, m) => t + (m === 1), 0), nFoot: moved.reduce((t, m) => t + (m === 2), 0) };
+    for (let q = 0; q < nx * ny; q++) if (lift[q] > 0) T[q] += lift[q];
+  }
+  let zmin = Infinity; for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) if (on[j * cx + i]) { const q = j * nx + i; zmin = Math.min(zmin, T[q], T[q + 1], T[q + nx], T[q + nx + 1]); }
+  if (zmin === Infinity) return null;
+  const baseZ = zmin - (o.base ?? 3), top = new Int32Array(nx * ny).fill(-1), bot = new Int32Array(nx * ny).fill(-1), Pv = [], F = [];
+  const vt = (q) => { if (top[q] < 0) { top[q] = Pv.length / 3; Pv.push(X[q], Y[q], T[q]); } return top[q]; };
+  const vb = (q) => { if (bot[q] < 0) { bot[q] = Pv.length / 3; Pv.push(hf.x0 + (q % nx) * cb, hf.y0 + Math.floor(q / nx) * cb, baseZ); } return bot[q]; };
+  const edge = (p, q) => F.push(vt(p), vb(p), vb(q), vt(p), vb(q), vt(q));          // a wall where the solid ends (p → q anticlockwise round it)
+  for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) {
+    if (!on[j * cx + i]) continue; const a = j * nx + i, b = a + 1, c = a + nx + 1, d = a + nx;
+    if (dg[j * cx + i]) F.push(vt(a), vt(b), vt(c), vt(a), vt(c), vt(d)); else F.push(vt(a), vt(b), vt(d), vt(b), vt(c), vt(d));
+    if (!C(i, j - 1)) edge(a, b); if (!C(i + 1, j)) edge(b, c); if (!C(i, j + 1)) edge(c, d); if (!C(i - 1, j)) edge(d, a);
+  }
+  // the flat base: each run of cells along a row is one strip, zipped between the base points on its two grid lines (the ends of
+  // this row's and the neighbouring rows' runs, and the foot of every wall) — so it meets the walls and the strips beside it exactly
+  const runs = [];
+  for (let j = 0; j < cy; j++) { let i = 0; while (i < cx) { if (!on[j * cx + i]) { i++; continue; } const i0 = i; while (i < cx && on[j * cx + i]) i++; runs.push([j, i0, i]); vb(j * nx + i0); vb(j * nx + i); vb((j + 1) * nx + i0); vb((j + 1) * nx + i); } }
+  for (const [j, i0, i1] of runs) {
+    const lo = [], hi = []; for (let i = i0; i <= i1; i++) { if (bot[j * nx + i] >= 0) lo.push(bot[j * nx + i]); if (bot[(j + 1) * nx + i] >= 0) hi.push(bot[(j + 1) * nx + i]); }
+    let a = 0, b = 0; const xOf = (v) => Pv[3 * v];
+    while (a < lo.length - 1 || b < hi.length - 1) {
+      if (b >= hi.length - 1 || (a < lo.length - 1 && xOf(lo[a + 1]) <= xOf(hi[b + 1]))) { F.push(lo[a], hi[b], lo[a + 1]); a++; } else { F.push(lo[a], hi[b], hi[b + 1]); b++; }
+    }
+  }
+  const meshD = { positions: Float32Array.from(Pv), indices: Uint32Array.from(F), colors: null }, mesh = N.transformMesh(meshD, S.Qi);
+  return { mesh, meshD, baseZ, tris: F.length / 3, watertight: N.isWatertight(mesh), cell: cb, time: performance.now() - t0 };
+}
+
+/**
+ * Block out leaving `g` mm of undercut on one side of chosen teeth (for a clasp tip). In each zone (that half of the tooth, seen
+ * along the path) the height field is first lowered to the lowest column within g (a flat erosion), so the block-out wall there
+ * stands g inside the rod's line; the solid is then joined (Manifold) with the scan's own surface in the zone, closed into a solid,
+ * which puts back everything of the tooth outside that wall: its surface down to where the undercut reaches g, then the wall.
+ *   keeps: [{ R (toothRegion), side: 'buccal' | 'lingual', g }]   → as blockOut, plus { kept: [{ side, g, ok }] }
+ */
+async function blockOutKeep(S, keeps, o = {}) {
+  const t0 = performance.now(), hf = S.hf, { nx, ny, x0, y0, cell } = hf, Z = Float32Array.from(hf.z), Pd = S.Pd, I = S.indices;
+  const zoneOf = (K) => { const p = K.R.plan, sg = K.side === 'lingual' ? -1 : 1; return (x, y) => { const i = Math.floor((x - p.ox) / p.cs), j = Math.floor((y - p.oy) / p.cs); return i >= 0 && j >= 0 && i < p.n && j < p.n && p.mask[j * p.n + i] === 1 && sg * ((x - K.R.cD[0]) * K.R.b[0] + (y - K.R.cD[1]) * K.R.b[1]) >= 0; }; };
+  const zones = keeps.map((K) => ({ K, inZ: zoneOf(K) }));
+  for (const { K, inZ } of zones) {                              // flat erosion by g inside the zone (empty columns ignored)
+    const gr = K.g + (o.relief || 0), R = Math.ceil(gr / cell), off = []; for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) if ((di * di + dj * dj) * cell * cell <= gr * gr + 1e-9) off.push(di, dj);   // (with relief, set back by that too: the relief then brings the wall to g, and the zone's own surface is not covered)
+    const p = K.R.plan, i0 = Math.max(0, Math.floor((p.ox - x0) / cell)), i1 = Math.min(nx - 1, Math.ceil((p.ox + p.n * p.cs - x0) / cell)), j0 = Math.max(0, Math.floor((p.oy - y0) / cell)), j1 = Math.min(ny - 1, Math.ceil((p.oy + p.n * p.cs - y0) / cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { if (!inZ(x0 + i * cell, y0 + j * cell) || !(hf.z[j * nx + i] > -1e30)) continue; let m = Infinity; for (let k = 0; k < off.length; k += 2) { const ii = i + off[k], jj = j + off[k + 1]; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const z = hf.z[jj * nx + ii]; if (z > -1e30 && z < m) m = z; } Z[j * nx + i] = m; }
+  }
+  const skipV = new Uint8Array(Pd.length / 3); for (let v = 0; v < skipV.length; v++) for (const { inZ } of zones) if (inZ(Pd[3 * v], Pd[3 * v + 1])) { skipV[v] = 1; break; }
+  const base = blockOut({ ...S, hf: { ...hf, z: Z } }, { ...o, skipV }); if (!base) return null;
+  const M = await SOL.ready(); let man = SOL.toManifold(base.meshD); const kept = [];
+  for (const { K, inZ } of zones) {                              // the scan's own surface in the zone, closed down to below the base
+    const nV = Pd.length / 3, inV = new Uint8Array(nV); for (let v = 0; v < nV; v++) inV[v] = inZ(Pd[3 * v], Pd[3 * v + 1]) ? 1 : 0;
+    const F = []; for (let f = 0; f < I.length; f += 3) if (inV[I[f]] && inV[I[f + 1]] && inV[I[f + 2]]) F.push(I[f], I[f + 1], I[f + 2]);
+    let ok = false;
+    try {
+      const sub = N.compact({ positions: Pd, indices: Uint32Array.from(F), colors: null }); let zl = Infinity; for (let i = 2; i < sub.positions.length; i += 3) zl = Math.min(zl, sub.positions[i]);
+      const sol = SOL.scanToSolid(sub, { baseZ: Math.max(base.baseZ + 0.05, Math.min(base.baseZ + 1, zl - 0.5)), smooth: 0.3, drop: 0.1 });   // its floor inside the block-out, above its base
+      const piece = SOL.toManifold(sol.mesh), u = man.add(piece); SOL.free(man, piece); man = u; ok = true;
+    } catch (e) { console.warn('clasp-tip zone left blocked out:', e && e.message); }
+    kept.push({ side: K.side, g: K.g, ok });
+  }
+  const meshD = SOL.fromManifold(man); SOL.free(man);
+  return { ...base, meshD, mesh: N.transformMesh(meshD, S.Qi), tris: meshD.indices.length / 3, watertight: N.isWatertight(meshD), kept, time: performance.now() - t0 };
+}
+
+// ───────────── the abutment teeth ─────────────
+const WIDTHS = { upper: [8.6, 6.7, 7.6, 7.0, 6.7, 10.3, 9.6, 9.0], lower: [5.4, 5.9, 6.9, 7.0, 7.1, 10.9, 10.3, 10.0] };   // typical crown widths, for guessing a tooth's number from where it sits
+const label = (fdi) => { if (P.notation !== 'palmer') return String(fdi); const q = Math.floor(fdi / 10); return ['', 'UR', 'UL', 'LL', 'LR'][q] + (fdi % 10); };
+const jawTeeth = (jaw) => (jaw === 'upper' ? [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28] : [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]);
+/** a guess at the tooth's FDI number: the quadrant from its side of the midline, the tooth from the length of arch from the midline
+ *  to it (along the ridge of the crowns: the median distance of the crown tops from the middle of the arch, every 3°), in typical widths */
+function guessTooth(mesh, p) {
+  const Pm = mesh.positions, up = P.jaw === 'upper' ? -1 : 1; let zt = -Infinity; for (let i = 2; i < Pm.length; i += 3) if (up * Pm[i] > zt) zt = up * Pm[i];
+  const pts = []; let cy = 0; for (let i = 0; i < Pm.length; i += 3) if (up * Pm[i + 2] >= zt - 3) { pts.push(Pm[i], Pm[i + 1]); cy += Pm[i + 1]; }
+  if (pts.length < 20) return (P.jaw === 'upper' ? (p[0] > 0 ? 2 : 1) : (p[0] > 0 ? 3 : 4)) * 10 + 1;
+  cy /= pts.length / 2; const ang = (x, y) => Math.atan2(x, -(y - cy));                 // 0 = straight ahead, + towards the patient's left
+  // the ridge of the crowns as a smooth r(θ): a least-squares quartic through the crown tops
+  const M = Array.from({ length: 5 }, () => new Float64Array(5)), rhs = new Float64Array(5);
+  for (let i = 0; i < pts.length; i += 2) { const th = ang(pts[i], pts[i + 1]), r = Math.hypot(pts[i], pts[i + 1] - cy), f = [1, th, th * th, th ** 3, th ** 4]; for (let a2 = 0; a2 < 5; a2++) { rhs[a2] += f[a2] * r; for (let b2 = 0; b2 < 5; b2++) M[a2][b2] += f[a2] * f[b2]; } }
+  for (let c = 0; c < 5; c++) { let pv = c; for (let r = c + 1; r < 5; r++) if (Math.abs(M[r][c]) > Math.abs(M[pv][c])) pv = r; [M[c], M[pv]] = [M[pv], M[c]]; [rhs[c], rhs[pv]] = [rhs[pv], rhs[c]]; for (let r = 0; r < 5; r++) { if (r === c || !M[c][c]) continue; const f = M[r][c] / M[c][c]; for (let k = c; k < 5; k++) M[r][k] -= f * M[c][k]; rhs[r] -= f * rhs[c]; } }
+  const co = Array.from(rhs, (v, c) => (M[c][c] ? v / M[c][c] : 0)), R = (th) => co[0] + th * (co[1] + th * (co[2] + th * (co[3] + th * co[4]))), dR = (th) => co[1] + th * (2 * co[2] + th * (3 * co[3] + th * 4 * co[4]));
+  const end = ang(p[0], p[1]), n = 200; let s = 0; for (let k = 0; k < n; k++) { const th = end * (k + 0.5) / n; s += Math.abs(end) / n * Math.hypot(R(th), dR(th)); }
+  const W = WIDTHS[P.jaw]; let acc = 0, i = 0; while (i < 7 && acc + W[i] < s) { acc += W[i]; i++; }
+  const left = p[0] > 0, q = P.jaw === 'upper' ? (left ? 2 : 1) : (left ? 3 : 4);
+  return q * 10 + i + 1;
+}
+/**
+ * The tooth round a tap: the crowns seen along the path, cut 3 mm below the top of the tapped crown; the tooth is the part of that
+ * outline round the tap, split from its neighbours at the narrow necks between crowns (a watershed on the distance to the outline's
+ * edge), then widened by up to 2.5 mm over its own undercuts and gum, without crossing into a neighbour.
+ * → { mask (vertex in the tooth), b, m (buccal and mesial directions, path frame), centre (case frame) } | null
+ */
+function toothRegion(S, tap) {
+  const q = new THREE.Vector3(...tap).applyMatrix4(S.Q), hf = S.hf, c = Math.max(1, Math.round(0.2 / hf.cell)), cs = hf.cell * c, W = Math.ceil(9 / cs), n = 2 * W + 1, nn = n * n;
+  const ci = Math.round((q.x - hf.x0) / cs), cj = Math.round((q.y - hf.y0) / cs), G = new Float32Array(nn).fill(-Infinity), h0 = c >> 1;
+  for (let wj = 0; wj < n; wj++) for (let wi = 0; wi < n; wi++) { const gi = (ci - W + wi) * c - h0, gj = (cj - W + wj) * c - h0; let mx = -Infinity; for (let b = 0; b < c; b++) { const j = gj + b; if (j < 0 || j >= hf.ny) continue; for (let a = 0; a < c; a++) { const i = gi + a; if (i < 0 || i >= hf.nx) continue; const z = hf.z[j * hf.nx + i]; if (z > mx) mx = z; } } G[wj * n + wi] = mx; }
+  let top = -Infinity; const r0 = Math.ceil(1.5 / cs); for (let b = -r0; b <= r0; b++) for (let a = -r0; a <= r0; a++) if (a * a + b * b <= r0 * r0) { const z = G[(W + b) * n + W + a]; if (z > top) top = z; }
+  if (!(top > -1e30)) return null;
+  const L = top - 3, Fp = new Uint8Array(nn); for (let w = 0; w < nn; w++) Fp[w] = G[w] >= L ? 1 : 0;
+  // distance to the edge of the outline (chamfer 3-4), mm
+  const D = new Float32Array(nn); for (let w = 0; w < nn; w++) D[w] = Fp[w] ? 1e9 : 0;
+  const a1 = cs, a2 = cs * 1.4142;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const w = j * n + i; if (!D[w]) continue; let v = D[w]; if (i === 0 || j === 0 || i === n - 1 || j === n - 1) v = Math.min(v, a1); if (i > 0) v = Math.min(v, D[w - 1] + a1); if (j > 0) { v = Math.min(v, D[w - n] + a1); if (i > 0) v = Math.min(v, D[w - n - 1] + a2); if (i < n - 1) v = Math.min(v, D[w - n + 1] + a2); } D[w] = v; }
+  for (let j = n - 1; j >= 0; j--) for (let i = n - 1; i >= 0; i--) { const w = j * n + i; if (!D[w]) continue; let v = D[w]; if (i < n - 1) v = Math.min(v, D[w + 1] + a1); if (j < n - 1) { v = Math.min(v, D[w + n] + a1); if (i < n - 1) v = Math.min(v, D[w + n + 1] + a2); if (i > 0) v = Math.min(v, D[w + n - 1] + a2); } D[w] = v; }
+  // climb to the local peak of that distance; peaks joined by a high saddle are one tooth
+  const up = new Int32Array(nn).fill(-1), root = new Int32Array(nn).fill(-1);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const w = j * n + i; if (!Fp[w]) continue; let bw = w; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= n || jj >= n) continue; const u = jj * n + ii; if (Fp[u] && (D[u] > D[bw] || (D[u] === D[bw] && u > bw))) bw = u; } up[w] = bw; }
+  const rootOf = (w) => { let r = w, g = 0; while (up[r] !== r && g++ < nn) r = up[r]; let x = w; while (up[x] !== x && x !== r) { const nx2 = up[x]; up[x] = r; x = nx2; } return r; };
+  for (let w = 0; w < nn; w++) if (Fp[w]) root[w] = rootOf(w);
+  const sad = new Map();
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const w = j * n + i; if (!Fp[w]) continue; for (const u of [i < n - 1 ? w + 1 : -1, j < n - 1 ? w + n : -1]) { if (u < 0 || !Fp[u] || root[u] === root[w]) continue; const ra = Math.min(root[u], root[w]), rb = Math.max(root[u], root[w]), key = ra * nn + rb, v = Math.min(D[u], D[w]); if (!(sad.get(key) >= v)) sad.set(key, v); } }
+  const uf = new Map(), peak = new Map(), fnd = (r) => { while (uf.has(r) && uf.get(r) !== r) r = uf.get(r); return r; };
+  for (let w = 0; w < nn; w++) if (Fp[w] && root[w] === w) { uf.set(w, w); peak.set(w, D[w]); }
+  for (const [key, v] of [...sad.entries()].sort((x, y) => y[1] - x[1])) { const ra = fnd(Math.floor(key / nn)), rb = fnd(key % nn); if (ra === rb) continue; const pa = peak.get(ra), pb = peak.get(rb); if (v >= 0.65 * Math.min(pa, pb)) { uf.set(ra, rb); peak.set(rb, Math.max(pa, pb)); } }
+  let seed = W * n + W; if (!Fp[seed]) { let bd = Infinity; for (let w = 0; w < nn; w++) if (Fp[w]) { const dd = (w % n - W) ** 2 + (Math.floor(w / n) - W) ** 2; if (dd < bd) { bd = dd; seed = w; } } if (bd * cs * cs > 4) return null; }
+  const lab = new Int32Array(nn).fill(-1); for (let w = 0; w < nn; w++) if (Fp[w]) lab[w] = fnd(root[w]);
+  const me = lab[seed];
+  // widen over the undercuts and gum: nearest crown wins, up to 2.5 mm
+  const dist = new Float32Array(nn).fill(Infinity); for (let w = 0; w < nn; w++) if (Fp[w]) dist[w] = 0;
+  for (let pass = 0; pass < 2; pass++) for (let it = 0; it < 2; it++) {                               // two chamfer sweeps each way carry the labels outward
+    const fw = it === 0; for (let jj = 0; jj < n; jj++) for (let ii = 0; ii < n; ii++) { const j = fw ? jj : n - 1 - jj, i = fw ? ii : n - 1 - ii, w = j * n + i; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { if (!a && !b) continue; const i2 = i + a, j2 = j + b; if (i2 < 0 || j2 < 0 || i2 >= n || j2 >= n) continue; const u = j2 * n + i2, dd = dist[u] + (a && b ? a2 : a1); if (dd < dist[w] && dd <= 2.5) { dist[w] = dd; lab[w] = lab[u]; } } }
+  }
+  const mask = new Uint8Array(nn); let sx = 0, sy = 0, sn = 0;
+  for (let w = 0; w < nn; w++) { if (lab[w] !== me) continue; const dx = (w % n - W) * cs, dy = (Math.floor(w / n) - W) * cs; if (dx * dx + dy * dy > 7.5 * 7.5) continue; mask[w] = 1; if (Fp[w]) { sx += dx; sy += dy; sn++; } }
+  const cxD = q.x + (sn ? sx / sn : 0), cyD = q.y + (sn ? sy / sn : 0), Pd = S.Pd, nV = Pd.length / 3, vm = new Uint8Array(nV);
+  const ox = hf.x0 + (ci - W) * cs - cs / 2, oy = hf.y0 + (cj - W) * cs - cs / 2;
+  for (let v = 0; v < nV; v++) { const i = Math.floor((Pd[3 * v] - ox) / cs), j = Math.floor((Pd[3 * v + 1] - oy) / cs); if (i >= 0 && j >= 0 && i < n && j < n && mask[j * n + i] && Pd[3 * v + 2] > L - 10) vm[v] = 1; }
+  // buccal and mesial at this tooth: the line of the arch is the long axis (seen along the path) of the crowns within 11 mm
+  let gx = 0, gy = 0; for (let v = 0; v < nV; v++) { gx += Pd[3 * v] / nV; gy += Pd[3 * v + 1] / nV; }
+  let sxx = 0, sxy = 0, syy = 0, cnt = 0; for (let v = 0; v < nV; v++) { if (Pd[3 * v + 2] < top - 7) continue; const dx = Pd[3 * v] - cxD, dy = Pd[3 * v + 1] - cyD; if (dx * dx + dy * dy > 121) continue; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; cnt++; }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); let m = [Math.cos(th), Math.sin(th)];
+  const front = new THREE.Vector3(0, -1e3, 0).applyMatrix4(S.Q); if (m[0] * (front.x - cxD) + m[1] * (front.y - cyD) < 0) m = [-m[0], -m[1]];
+  let b = [-m[1], m[0]]; if (b[0] * (cxD - gx) + b[1] * (cyD - gy) < 0) b = [-b[0], -b[1]];
+  if (cnt < 30) { const l = Math.hypot(cxD - gx, cyD - gy) || 1; b = [(cxD - gx) / l, (cyD - gy) / l]; m = [-b[1], b[0]]; if (m[0] * (front.x - cxD) + m[1] * (front.y - cyD) < 0) m = [-m[0], -m[1]]; }
+  const centre = new THREE.Vector3(cxD, cyD, top).applyMatrix4(S.Qi).toArray();
+  return { mask: vm, plan: { mask, n, cs, ox, oy }, b, m, centre, cD: [cxD, cyD], top, level: L };
+}
+/** buccal or lingual for a surface facing within about 34° of that way and lying within 45° of that way from the tooth's centre
+ *  (seen along the path); null for the mesial and distal surfaces, line angles and embrasures */
+const sideOf = (S, v, R) => {
+  const nx = S.Nv[3 * v], ny = S.Nv[3 * v + 1], u = nx * R.b[0] + ny * R.b[1], w = nx * R.m[0] + ny * R.m[1]; if (Math.abs(u) < 1.5 * Math.abs(w)) return null;
+  const px = S.Pd[3 * v] - R.cD[0], py = S.Pd[3 * v + 1] - R.cD[1], pu = px * R.b[0] + py * R.b[1], pw = px * R.m[0] + py * R.m[1]; if (Math.abs(pu) < Math.abs(pw) || pu * u < 0) return null;   // …and on that side of the tooth's centre
+  return u >= 0 ? 'buccal' : 'lingual';
+};
+/** Per side (buccal, lingual) of a tooth: the deepest undercut on its surfaces facing away from the path, and for each gauge the
+ *  highest point it touches (found along the mesh edges where the depth passes the gauge) with its height below the survey line
+ *  directly above it. */
+function toothSummary(S, R) {
+  const out = {}; for (const k of SIDES) out[k] = { deep: 0, g: GAUGES.map(() => null) };
+  const I = S.indices, Pd = S.Pd, dep = S.depth, s = S.s, vm = R.mask;
+  for (let v = 0; v < vm.length; v++) if (vm[v] && s[v] < 0 && dep[v] > 0.02) { const k = sideOf(S, v, R); if (k && dep[v] > out[k].deep) out[k].deep = dep[v]; }
+  const big = S.maxD + 0.25, dv = (v) => (dep[v] === Infinity ? big : dep[v]), Qi = S.Qi;
+  for (let f = 0; f < I.length; f += 3) for (let e = 0; e < 3; e++) {
+    const a = I[f + e], b = I[f + (e + 1) % 3]; if (!vm[a] || !vm[b] || a > b) continue; if (!(s[a] < 0 || s[b] < 0)) continue;
+    const da = dv(a), db = dv(b);
+    for (let gi = 0; gi < GAUGES.length; gi++) {
+      const g = GAUGES[gi]; if ((da >= g) === (db >= g)) continue;
+      const t = (g - da) / (db - da), x = Pd[3 * a] + t * (Pd[3 * b] - Pd[3 * a]), y = Pd[3 * a + 1] + t * (Pd[3 * b + 1] - Pd[3 * a + 1]), z = Pd[3 * a + 2] + t * (Pd[3 * b + 2] - Pd[3 * a + 2]);
+      const k = sideOf(S, s[a] < 0 ? a : b, R); if (!k) continue; const hb = S.heightBelow(x, y, z, undefined, true).below; if (!(hb >= 0)) continue;
+      const o = out[k]; if (!o.g[gi] || hb < o.g[gi].below) o.g[gi] = { below: hb, p: new THREE.Vector3(x, y, z).applyMatrix4(Qi).toArray() };
+    }
+  }
+  return out;
+}
+
+// ───────────── running the survey on the chosen arch ─────────────
+const rawIds = new WeakMap(); let rawN = 0; const rawId = (r) => { if (!rawIds.has(r)) rawIds.set(r, ++rawN); return rawIds.get(r); };
+const surveyKey = () => { const sc = P.jaw && scans[P.jaw]; return sc ? [P.jaw, P.ap, P.lat, rawId(sc.raw), sc.matrix.elements.join(',')].join('|') : null; };
+/** what the blocked-out model depends on, in a form that survives a case file (no object identities) */
+function blockSig() {
+  const sc = P.jaw && scans[P.jaw]; if (!sc) return null;
+  return JSON.stringify([1, P.jaw, P.ap, P.lat, P.relief, P.teeth.filter((t) => t.keep).map((t) => [t.fdi, t.keep, t.side, t.at.map((v) => Math.round(v * 100) / 100)]), sc.raw.indices.length, sc.raw.positions.length, Array.from(sc.matrix.elements, (v) => Math.round(v * 1e4) / 1e4)]);
+}
+function dropSurvey() { A = null; regions.clear(); dropBlock(); }
+function dropBlock() { if (B.obj) viewer.remove(B.obj); B = mkBlock(); }
+function survey() {
+  if (!pickJaw()) return null; const key = surveyKey(); if (A && A.key === key) return A;
+  const mesh = scans.framed(P.jaw), r = computeSurvey(mesh, pathDir(), { jaw: P.jaw });
+  A = { ...r, key, mesh, jaw: P.jaw }; regions.clear();
+  A.lineLength = 0; for (let i = 0; i < r.seg.length; i += 6) A.lineLength += Math.hypot(r.seg[i + 3] - r.seg[i], r.seg[i + 4] - r.seg[i + 1], r.seg[i + 5] - r.seg[i + 2]);
+  for (const t of P.teeth) region(t);
+  makeObjects(); return A;
+}
+async function surveyBusy() { if (!pickJaw() || (A && A.key === surveyKey())) return survey(); return shell.busy('Surveying…', async () => { await N.sleep(20); return survey(); }); }
+const regions = new Map();
+function region(t) { if (!A) return null; const k = t.at.join(','); if (!regions.has(k)) { const R = toothRegion(A, t.at); regions.set(k, R ? { R, sum: toothSummary(A, R) } : null); } return regions.get(k); }
+
+// ───────────── what is on screen ─────────────
+let mapObj = null, lineObj = null, rod = null, dots = [], probe = null; const lineMat = new LineMaterial({ color: LINE, linewidth: 2.6, worldUnits: false, depthTest: true, transparent: true });
+viewer.onRender(() => { const s = viewer.size; lineMat.resolution.set(s.w, s.h); });
+function colourOf(dep) { return dep <= 0.02 ? new THREE.Color(NO_UC) : new THREE.Color(BAND[dep < 0.25 ? 0 : dep < 0.5 ? 1 : dep < 0.75 ? 2 : 3]); }
+function makeObjects() {
+  if (mapObj) viewer.remove(mapObj); if (lineObj) { viewer.scene.remove(lineObj); lineObj.geometry.dispose(); } mapObj = lineObj = null; if (!A) return;
+  const m = A.mesh, nV = m.positions.length / 3, col = new Float32Array(nV * 3), base = new THREE.Color(NO_UC), cc = BAND.map((c) => new THREE.Color(c));
+  for (let v = 0; v < nV; v++) { const d = A.depth[v], c = d <= 0.02 ? base : cc[d < 0.25 ? 0 : d < 0.5 ? 1 : d < 0.75 ? 2 : 3]; col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3)); g.setIndex(new THREE.BufferAttribute(m.indices, 1)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.computeVertexNormals(); g.computeBoundsTree({ indirect: true }); g.computeBoundingSphere();
+  mapObj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.02, side: THREE.DoubleSide })); mapObj.name = 'survey-map'; mapObj.userData.map = true; viewer.add(mapObj);
+  // the survey lines, lifted a hair off the surface so they are not lost in it
+  const sg = A.seg, lifted = new Float32Array(sg.length), dWorld = pathDir();
+  for (let i = 0; i < sg.length; i += 3) { lifted[i] = sg[i] + dWorld.x * 0.03; lifted[i + 1] = sg[i + 1] + dWorld.y * 0.03; lifted[i + 2] = sg[i + 2] + dWorld.z * 0.03; }
+  const lg = new LineSegmentsGeometry(); if (lifted.length >= 6) lg.setPositions(lifted);
+  lineObj = new LineSegments2(lg, lineMat); lineObj.userData.noFit = true; lineObj.renderOrder = 997; lineObj.frustumCulled = false; lineObj.visible = lifted.length >= 6; viewer.scene.add(lineObj);
+}
+function makeRod() {
+  if (rod) { viewer.scene.remove(rod); rod.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); rod = null; }
+  const jaw = P.jaw; if (!jaw || !scans.has(jaw)) return;
+  const d = pathDir(), Q = frameOf(d, jaw), Qi = Q.clone().invert(), m = scans.framed(jaw), Pm = m.positions; let zt = -Infinity, sx = 0, sy = 0, n = 0;
+  const e = Q.elements; for (let i = 0; i < Pm.length; i += 30) { const x = Pm[i], y = Pm[i + 1], z = Pm[i + 2], zz = e[2] * x + e[6] * y + e[10] * z; if (zz > zt) zt = zz; sx += e[0] * x + e[4] * y + e[8] * z; sy += e[1] * x + e[5] * y + e[9] * z; n++; }
+  const L = 24, mat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.3, metalness: 0.6 });
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, L, 20), mat); cyl.rotation.x = Math.PI / 2; cyl.position.set(0, 0, 4.5 + L / 2);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(1.1, 2.6, 24), new THREE.MeshStandardMaterial({ color: 0xe879f9, roughness: 0.4 })); tip.rotation.x = -Math.PI / 2; tip.position.set(0, 0, 2.3);
+  rod = new THREE.Group(); rod.add(cyl, tip); rod.userData.noFit = true;
+  rod.matrixAutoUpdate = false; rod.matrix.copy(Qi.clone().multiply(new THREE.Matrix4().makeTranslation(sx / n, sy / n, zt))); rod.updateMatrixWorld(true);
+  cyl.userData.noFit = tip.userData.noFit = true; viewer.scene.add(rod); viewer.invalidate();
+}
+const WAX = new THREE.Color(0x60a5fa), MODEL = new THREE.Color(N.COLORS.model);
+/** the blocked-out model; with "wax" its top is blue (the scan drawn over it shows where the wax is) and its base and sides are model colour */
+function showBlockObj() {
+  if (B.obj) { viewer.remove(B.obj); B.obj = null; } if (!B.mesh) return;
+  const g = N.toGeometry(B.mesh, { crease: 40, bvh: false }), pos = g.attributes.position.array, d = pathDir(), n = pos.length / 3, col = new Float32Array(n * 3), base = new Uint8Array(n / 3);
+  let hmin = Infinity; for (let v = 0; v < n; v++) hmin = Math.min(hmin, pos[3 * v] * d.x + pos[3 * v + 1] * d.y + pos[3 * v + 2] * d.z);
+  for (let t = 0; t < n / 3; t++) for (let c = 0; c < 3; c++) { const v = 3 * t + c; if (pos[3 * v] * d.x + pos[3 * v + 1] * d.y + pos[3 * v + 2] * d.z < hmin + 1e-3) base[t] = 1; }
+  g.userData.base = base; g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  B.obj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide })); B.obj.name = 'blockout'; paintBlock(); viewer.add(B.obj);
+}
+function paintBlock() { if (!B.obj) return; const g = B.obj.geometry, a = g.attributes.color, base = g.userData.base; for (let t = 0; t < base.length; t++) { const c = P.bshow === 'wax' && !base[t] ? WAX : MODEL; for (let k = 0; k < 3; k++) a.setXYZ(3 * t + k, c.r, c.g, c.b); } a.needsUpdate = true; }
+function clearDots() { for (const d of dots) { viewer.scene.remove(d.m); if (d.l) d.l.remove(); } dots = []; }
+function paintDots(id) {
+  clearDots(); if (!A || !['teeth', 'block'].includes(id)) return;
+  P.teeth.forEach((t, i) => {
+    const r = region(t), at = new THREE.Vector3(...((r && r.R && r.R.centre) || t.at));
+    dots.push({ m: viewer.marker(at, { color: i === P.sel ? 0x0f2a44 : 0x334155, px: i === P.sel ? 16 : 12 }), l: viewer.label(label(t.fdi) + (t.keep ? ` · ${SIDE_SHORT[t.side]} ${t.keep}` : ''), at, { dy: -18 }) });
+    if (id === 'teeth' && r && i === P.sel) for (const k of SIDES) r.sum[k].g.forEach((g, gi) => { if (g) dots.push({ m: viewer.marker(new THREE.Vector3(...g.p), { color: new THREE.Color(BAND[gi + 1]).getHex(), px: 11 }) }); });
+  });
+}
+function refreshView() {
+  const id = shell.current >= 0 ? shell.steps[shell.current].id : 'load', jaw = pickJaw(), work = ['path', 'survey', 'teeth', 'block'].includes(id) && jaw && A;
+  const blockOn = id === 'block' && !!B.obj;
+  if (mapObj) { mapObj.visible = !!work && !blockOn; const showMap = P.show === 'map' || id === 'teeth'; const cols = mapObj.geometry.attributes.color; if (mapObj.userData.map !== showMap) { const base = new THREE.Color(NO_UC); for (let v = 0; v < cols.count; v++) { const c = showMap ? colourOf(A.depth[v]) : base; cols.setXYZ(v, c.r, c.g, c.b); } cols.needsUpdate = true; mapObj.userData.map = showMap; } }
+  if (lineObj) lineObj.visible = !!work && A.seg.length >= 6 && !(blockOn && P.bshow === 'model');
+  for (const j of JAWS) if (scans[j]) { const want = !work ? true : (blockOn && P.bshow === 'wax' && j === jaw); if (scans[j].object.visible !== want) scans.setVisible(j, want); const mt = scans[j].object.material; const off = blockOn && P.bshow === 'wax'; if (mt.polygonOffset !== off) { mt.polygonOffset = off; mt.polygonOffsetFactor = off ? -2 : 0; mt.polygonOffsetUnits = off ? -12 : 0; mt.needsUpdate = true; } }
+  if (B.obj) { B.obj.visible = blockOn; if (B.obj.userData.shown !== P.bshow) { paintBlock(); B.obj.userData.shown = P.bshow; } }
+  if (rod) rod.visible = !!(['path', 'survey', 'teeth', 'block'].includes(id) && jaw);
+  paintDots(id);
+  legend.hidden = !(work && (id !== 'block' || P.bshow === 'wax'));
+  if (!legend.hidden) legend.innerHTML = id === 'block' ? `<div><i style="background:#60a5fa"></i>block-out</div><div><i style="background:#${new THREE.Color(LINE).getHexString()}"></i>survey line</div>`
+    : (P.show === 'map' || id === 'teeth' ? `<div><i style="background:#${new THREE.Color(NO_UC).getHexString()}"></i>no undercut</div>${BAND.map((c, i) => `<div><i style="background:${c}"></i>${['under 0.25 mm', '0.25 – 0.5 mm', '0.5 – 0.75 mm', '0.75 mm or more'][i]}</div>`).join('')}` : '') + `<div><i style="background:#${new THREE.Color(LINE).getHexString()}"></i>survey line</div>`;
+  const tool = id === 'survey' ? probeTool : id === 'teeth' ? tapTool : null;
+  if (work && tool) { if (viewer.tool !== tool) viewer.setTool(tool); shell.hint(id === 'survey' ? 'Tap the scan to read the undercut there' : 'Tap a tooth to add it as an abutment'); }
+  else { if (viewer.tool === probeTool || viewer.tool === tapTool) viewer.setTool(null); shell.hint(''); }
+  if (id !== 'survey') probeClear();
+  viewer.invalidate();
+}
+
+// ───────────── tapping ─────────────
+function probeClear() { if (probe) { viewer.scene.remove(probe.m); probe.l.remove(); probe = null; viewer.invalidate(); } }
+function readAt(pCase, nCase) {
+  const q = pCase.clone().applyMatrix4(A.Q), r = A.heightBelow(q.x, q.y, q.z, nCase ? nCase.dot(pathDir()) * A.flip : undefined);
+  if (!(r.depth > 0.02)) return { text: 'no undercut — the rod sees this point', depth: 0, below: 0 };
+  return { text: `${r.depth === Infinity ? 'undercut over 1.5 mm' : r.depth.toFixed(2) + ' mm undercut'}${r.below >= 0 ? ` · ${r.below.toFixed(1)} mm below the survey line` : ''}`, depth: r.depth, below: r.below };
+}
+const probeTool = {
+  cursor: 'crosshair', onDown: () => false, onMove: () => {}, onUp: () => {},
+  onClick: (i) => { if (i.button !== 0 || !mapObj || !A) return; const h = i.pick([mapObj]); if (!h) return; const r = readAt(h.point, h.normal); probeClear(); probe = { m: viewer.marker(h.point, { color: 0x0f2a44, px: 12 }), l: viewer.label(r.text, h.point, { dy: -16 }), r }; },
+};
+const tapTool = {
+  cursor: 'crosshair', onDown: () => false, onMove: () => {}, onUp: () => {},
+  onClick: (i) => {
+    if (i.button !== 0 || !mapObj || !A) return; const h = i.pick([mapObj]); if (!h) return; const at = h.point.toArray();
+    const hit = P.teeth.findIndex((t) => { const r = region(t); if (!r || !r.R) return false; const f = h.faceIndex * 3; return !!r.R.mask[A.mesh.indices[f]]; });
+    if (hit >= 0) { P.sel = hit; syncUI(); refreshView(); return; }
+    addTooth(at);
+  },
+};
+function addTooth(at) {
+  if (!A) return null; const t = { fdi: 0, at: at.map((v) => Math.round(v * 1000) / 1000), keep: 0, side: 'buccal' }, r = region(t);
+  if (!r) { regions.delete(t.at.join(',')); shell.status('No tooth found there — tap the biting surface of a crown', true); return null; }
+  t.fdi = guessTooth(A.mesh, r.R.centre);
+  P.teeth.push(t); P.sel = P.teeth.length - 1; blockStale(); scans.touch(); syncUI(); refreshView(); return t;
+}
+
+// ───────────── the block-out: built when its step is open ─────────────
+function blockStale() { if (B.sig && B.sig !== blockSig()) { if (B.obj) viewer.remove(B.obj); B.obj = null; B.mesh = null; B.info = null; B.sig = null; } }
+async function ensureBlock() {
+  if (!pickJaw()) return null; await surveyBusy(); const sig = blockSig(); if (B.mesh && B.sig === sig) { if (!B.obj) showBlockObj(); return B; }
+  await shell.busy('Blocking out…', async () => {
+    await N.sleep(20); const keeps = keepZones(), r = keeps.length ? await blockOutKeep(A, keeps, { relief: P.relief }) : blockOut(A, { relief: P.relief });
+    if (!r) throw new Error('Nothing to block out'); B.mesh = r.mesh; B.sig = sig; B.info = { tris: r.tris, watertight: r.watertight, relief: P.relief, cell: r.cell, baseZ: r.baseZ, ms: Math.round(r.time), kept: r.kept || [] }; showBlockObj();
+    if (r.kept && r.kept.some((k) => !k.ok)) shell.status('A clasp-tip zone could not be kept and was blocked out — see the summary', true);
+  });
+  scans.touch(); syncUI(); refreshView(); return B;
+}
+function keepZones() { return P.teeth.filter((t) => t.keep > 0).map((t) => { const r = region(t); return r && r.R ? { R: r.R, side: t.side, g: t.keep, fdi: t.fdi } : null; }).filter(Boolean); }
+
+// ───────────── summary ─────────────
+function summaryData() {
+  return P.teeth.map((t) => { const r = region(t); if (!r) return { fdi: t.fdi, found: false }; const o = { fdi: t.fdi, keep: t.keep, side: t.side, sides: {} }; for (const k of SIDES) { const q = r.sum[k]; o.sides[k] = { deepest: q.deep === Infinity ? '>1.5' : +q.deep.toFixed(2), gauges: q.g.map((g) => (g ? +g.below.toFixed(2) : null)) }; } return o; });
+}
+function summaryText() {
+  if (!A) return ''; const L = [`Survey of the ${P.jaw} arch — path of insertion: ${tiltText(P.ap, P.lat)} (model on a surveyor table)`];
+  const rows = P.teeth.map((t) => ({ t, r: region(t) })).filter((x) => x.r);
+  if (!rows.length) L.push('No abutment teeth marked.');
+  else {
+    L.push('Undercut gauges: the height below the survey line where each first touches (mm).');
+    for (const { t, r } of rows) {
+      const parts = [];
+      for (const k of SIDES) { const q = r.sum[k]; if (!(q.deep > 0.02)) continue; parts.push(`${SIDE_NAME[k].toLowerCase()}: ${GAUGES.map((g, gi) => `${g} ${q.g[gi] ? 'at ' + q.g[gi].below.toFixed(1) : '–'}`).join(', ')} (deepest ${q.deep === Infinity ? 'over 1.5' : q.deep.toFixed(2)} mm)`); }
+      L.push(`${label(t.fdi)}: ${parts.length ? parts.join('; ') : 'no undercut on this path'}`);
+    }
+    for (const [gi, g] of GAUGES.entries()) { const has = []; for (const { t, r } of rows) { const s = SIDES.filter((k) => r.sum[k].g[gi]); if (s.length) has.push(`${label(t.fdi)} ${s.map((k) => SIDE_SHORT[k]).join('')}`); } L.push(`${g} mm gauge touches on: ${has.length ? has.join(', ') : 'none'}`); }
+  }
+  const keeps = P.teeth.filter((t) => t.keep); L.push(`Block-out: parallel to the path${P.relief > 0 ? `, relief ${P.relief.toFixed(2)} mm` : ''}${keeps.length ? `; undercut left for clasp tips: ${keeps.map((t) => `${label(t.fdi)} ${SIDE_NAME[t.side].toLowerCase()} ${t.keep} mm`).join(', ')}` : ''}.`);
+  return L.join('\n');
+}
+
+// ───────────── controls ─────────────
+const fmtAp = (v) => (Math.abs(v) < 0.05 ? 'level' : (v > 0 ? 'front ' : 'back ') + Math.abs(v).toFixed(1) + '°'), fmtLat = (v) => (Math.abs(v) < 0.05 ? 'level' : (v > 0 ? 'left ' : 'right ') + Math.abs(v).toFixed(1) + '°');
+const R = {
+  ap: N.rangeBind('pAp', (v, done) => { P.ap = v; tiltChanged(done); }, { fmt: fmtAp }),
+  lat: N.rangeBind('pLat', (v, done) => { P.lat = v; tiltChanged(done); }, { fmt: fmtLat }),
+  relief: N.rangeBind('bRelief', (v, done) => { P.relief = v; if (done) { blockStale(); if (shell.steps[shell.current].id === 'block') ensureBlock(); scans.touch(); syncUI(); } }, { fmt: (v) => (v ? v.toFixed(2) + ' mm' : 'none') }),
+};
+let tiltT = 0;
+function tiltChanged(done) {
+  makeRod(); if (lineObj) lineObj.visible = false;               // (the old map stays until the new survey is ready)
+  clearTimeout(tiltT); if (done) tiltT = setTimeout(async () => { blockStale(); await surveyBusy(); scans.touch(); syncUI(); refreshView(); if (shell.steps[shell.current].id === 'block') ensureBlock(); }, 30);
+  syncTilt();
+}
+const SEG = {
+  jaw: N.segBind($('pJaw'), (v) => { if (!scans.has(v)) return syncUI(); if (v === P.jaw) return; P.jaw = v; P.teeth = []; P.sel = -1; dropSurvey(); makeRod(); surveyBusy().then(() => { syncUI(); refreshView(); }); }),
+  show: N.segBind($('sShow'), (v) => { P.show = v; refreshView(); }, P.show),
+  not: N.segBind($('tNot'), (v) => { P.notation = v; scans.touch(); syncUI(); refreshView(); }, P.notation),
+  bshow: N.segBind($('bShow'), (v) => { P.bshow = v; refreshView(); }, P.bshow),
+  pos: N.segBind($('bPos'), (v) => { P.pos = v; }, P.pos),
+};
+function setTilt(ap, lat) { P.ap = Math.round(N.clamp(ap, -30, 30) * 2) / 2; P.lat = Math.round(N.clamp(lat, -30, 30) * 2) / 2; R.ap.set(P.ap); R.lat.set(P.lat); tiltChanged(true); }
+$('pView').addEventListener('click', () => {
+  if (!pickJaw()) return shell.status('Load a scan first', true);
+  const v = viewer.camera.position.clone().sub(viewer.controls.target).normalize(), up = P.jaw === 'upper' ? -1 : 1, c = v.z * up;
+  if (c < Math.cos(35 * Math.PI / 180)) return shell.status(`Look at the ${P.jaw} teeth from their biting side first (within 35° of square to them)`, true);
+  setTilt(Math.atan2(-v.y, c) * 180 / Math.PI, Math.atan2(v.x, c) * 180 / Math.PI); shell.status('Path set from this view');
+});
+$('pLevel').addEventListener('click', () => { if (!pickJaw()) return; setTilt(0, 0); });
+$('sShot').addEventListener('click', async () => { const url = viewer.snapshot(), bin = atob(url.split(',')[1]), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); const r = await N.saveFile('survey.png', new Blob([u8], { type: 'image/png' })); shell.status(r.message, !r.ok && r.code !== 'declined'); });
+$('tCopy').addEventListener('click', async () => { if (!A) return shell.status('Load a scan first', true); try { await navigator.clipboard.writeText(summaryText()); shell.status('Summary copied'); } catch (_) { shell.status('Copying was not allowed here — select the text in the box and copy it', true); } });
+$('tClear').addEventListener('click', () => { P.teeth = []; P.sel = -1; blockStale(); scans.touch(); syncUI(); refreshView(); });
+$('tList').addEventListener('click', (e) => {
+  const box = e.target.closest('.tooth'); if (!box) return; const i = +box.dataset.i, t = P.teeth[i]; if (!t) return; const b = e.target.closest('button');
+  if (b && b.dataset.a === 'x') { P.teeth.splice(i, 1); P.sel = Math.min(P.sel, P.teeth.length - 1); blockStale(); scans.touch(); syncUI(); refreshView(); return; }
+  if (b && b.dataset.keep !== undefined) { t.keep = +b.dataset.keep; blockStale(); scans.touch(); }
+  else if (b && b.dataset.side) { t.side = b.dataset.side; if (t.keep) blockStale(); scans.touch(); }
+  P.sel = i; syncUI(); refreshView();
+});
+$('tList').addEventListener('change', (e) => { const s = e.target.closest('select'); if (!s) return; const i = +s.closest('.tooth').dataset.i; P.teeth[i].fdi = +s.value; blockStale(); scans.touch(); syncUI(); refreshView(); });
+$('bStl').addEventListener('click', async () => {
+  const b = await ensureBlock(); if (!b || !b.mesh) return shell.status('Load a scan first', true); const sc = scans[P.jaw];
+  const mesh = P.pos === 'path' ? (() => { const md = N.transformMesh(b.mesh, frameOf(pathDir(), P.jaw)), bb = N.meshBounds(md); return N.transformMesh(md, new THREE.Matrix4().makeTranslation(-bb.center[0], -bb.center[1], -bb.min[2])); })() : N.transformMesh(b.mesh, sc.matrix.clone().invert());
+  const r = await shell.busy('Writing STL…', async () => N.saveFile(`blockout-${P.jaw}.stl`, N.stlBinary(mesh, null, `Survey Card ${P.jaw} blocked-out model, mm`)));
+  shell.status(r.message, !r.ok && r.code !== 'declined');
+});
+$('bCase').addEventListener('click', async () => { if (shell.steps[shell.current].id === 'block') await ensureBlock(); scans.saveCase(); });
+function paramsToUI() { R.ap.set(P.ap); R.lat.set(P.lat); R.relief.set(P.relief); SEG.not(P.notation); SEG.show(P.show); SEG.bshow(P.bshow); SEG.pos(P.pos); makeRod(); }
+function syncTilt() {
+  const jaw = P.jaw && scans.has(P.jaw) ? P.jaw : null; if (!jaw) { $('pInfo').innerHTML = '<div class="note warn">Load a scan first.</div>'; return; }
+  const d = pathDir(), occ = new THREE.Vector3(0, 0, jaw === 'upper' ? -1 : 1), ang = Math.acos(N.clamp(d.dot(occ), -1, 1)) * 180 / Math.PI;
+  $('pInfo').innerHTML = `<div class="sum"><h5>Path of insertion<span class="okb">${ang < 0.05 ? 'Level' : ang.toFixed(1) + '° tilt'}</span></h5><div><span>Model on the surveyor table</span><b>${tiltText(P.ap, P.lat)}</b></div><div><span>From square to the biting surfaces</span><b>${ang.toFixed(1)}°</b></div>${A && A.key === surveyKey() ? `<div><span>Survey lines worked out in</span><b>${(A.time / 1000).toFixed(1)} s</b></div>` : ''}</div>`;
+}
+function toothRow(t, i) {
+  const r = region(t), sel = i === P.sel, opts = jawTeeth(P.jaw).map((f) => `<option value="${f}"${f === t.fdi ? ' selected' : ''}>${label(f)}</option>`).join('');
+  let tbl = '<div class="note warn">No tooth found round this tap.</div>';
+  if (r) { const rows = SIDES; tbl = `<table class="uc"><tr><th>Side</th><th>Deepest</th>${GAUGES.map((g) => `<th>${g}</th>`).join('')}</tr>${rows.map((k) => { const q = r.sum[k]; return `<tr><td>${SIDE_NAME[k]}</td><td${q.deep > 0.02 ? '' : ' class="no"'}>${q.deep > 0.02 ? (q.deep === Infinity ? '>1.5' : q.deep.toFixed(2)) : 'none'}</td>${q.g.map((g) => `<td${g ? '' : ' class="no"'}>${g ? g.below.toFixed(1) : '–'}</td>`).join('')}</tr>`; }).join('')}</table>`; }
+  return `<div class="tooth${sel ? ' sel' : ''}" data-i="${i}"><div class="hd"><select aria-label="Tooth number" title="Correct the tooth number if the guess is wrong">${opts}</select><button class="btn x" type="button" data-a="x" title="Remove this tooth">✕</button></div>${tbl}
+    <div class="row"><label>Clasp tip</label><div class="seg">${[0, ...GAUGES].map((g) => `<button type="button" data-keep="${g}" class="${t.keep === g ? 'on' : ''}" title="${g ? `Leave ${g} mm of undercut on this side when blocking out` : 'Block out every undercut on this tooth'}">${g ? g : 'None'}</button>`).join('')}</div></div>
+    ${t.keep ? `<div class="row"><label>On the</label><div class="seg">${['buccal', 'lingual'].map((k) => `<button type="button" data-side="${k}" class="${t.side === k ? 'on' : ''}" title="The clasp tip goes on the ${SIDE_NAME[k].toLowerCase()} side">${SIDE_NAME[k]}</button>`).join('')}</div></div>` : ''}</div>`;
+}
+function syncUI() {
+  const jaw = pickJaw(), both = scans.has('upper') && scans.has('lower');
+  $('pJawRow').hidden = !both; for (const b of $('pJaw').children) b.disabled = !scans.has(b.dataset.v); SEG.jaw(jaw || '');
+  syncTilt();
+  const fresh = A && A.key === surveyKey();
+  if (!jaw) $('sInfo').innerHTML = '<div class="note warn">Load a scan first.</div>';
+  else if (!fresh) $('sInfo').innerHTML = '';
+  else {
+    let n = 0, deep = [0, 0, 0]; const s = A.s, dp = A.depth; for (let v = 0; v < dp.length; v++) if (s[v] < 0 && dp[v] > 0.02) { n++; for (let g = 0; g < 3; g++) if (dp[v] >= GAUGES[g]) deep[g]++; }
+    $('sInfo').innerHTML = `<div class="sum"><h5>${NAME[jaw]} arch<span class="okb">${tiltText(P.ap, P.lat).replace('front / back level, left / right level', 'level')}</span></h5><div><span>Length of survey line</span><b>${Math.round(A.lineLength)} mm</b></div><div><span>Surfaces facing away from the path</span><b>${(n / dp.length * 100).toFixed(1)}% of the scan</b></div>${GAUGES.map((g, i) => `<div><span>…of which ${g} mm or deeper</span><b>${(deep[i] / dp.length * 100).toFixed(1)}%</b></div>`).join('')}</div>`;
+  }
+  $('tList').innerHTML = !jaw ? '<div class="note warn">Load a scan first.</div>' : !P.teeth.length ? '<div class="note">No abutment teeth yet: tap a tooth on the model.</div>' : '<p class="count">Under each gauge: how far below the survey line it first touches, in mm.</p>' + P.teeth.map(toothRow).join('');
+  const txt = fresh ? summaryText() : ''; $('tOut').hidden = !txt || !P.teeth.length; $('tOut').textContent = txt;
+  const bi = B.info; $('bInfo').innerHTML = !jaw ? '<div class="note warn">Load a scan first.</div>' : bi && B.sig === blockSig() ? `<div class="sum"><h5>Blocked-out ${jaw} model<span class="okb${bi.watertight ? '' : ' bad'}">${bi.watertight ? 'Closed solid' : 'Not closed'}</span></h5><div><span>Path</span><b>${tiltText(P.ap, P.lat).replace('front / back level, left / right level', 'level')}</b></div><div><span>Relief</span><b>${bi.relief ? bi.relief.toFixed(2) + ' mm' : 'none'}</b></div><div><span>Grid</span><b>${bi.cell.toFixed(2)} mm</b></div><div><span>Triangles</span><b>${bi.tris.toLocaleString('en-GB')}</b></div>${P.teeth.some((t) => t.keep) ? `<div><span>Undercut left for clasp tips</span><b>${P.teeth.filter((t) => t.keep).map((t) => `${label(t.fdi)} ${SIDE_SHORT[t.side]} ${t.keep}`).join(', ')}</b></div>` : ''}</div>` : '';
+  shell.markDone('load', !!jaw); shell.markDone('path', !!fresh); shell.markDone('survey', !!fresh); shell.markDone('teeth', !!fresh && P.teeth.length > 0); shell.markDone('block', !!(B.mesh && B.sig === blockSig()));
+}
+shell.onStepChange(async () => {
+  const id = shell.steps[shell.current].id;
+  if (['path', 'survey', 'teeth', 'block'].includes(id) && pickJaw()) { if (!rod) makeRod(); try { await surveyBusy(); } catch (_) {} if (id === 'block') { try { await ensureBlock(); } catch (_) {} } }
+  syncUI(); refreshView();
+});
+paramsToUI(); syncUI(); shell.goto(0);
+window.APP = { N, THREE, SOL, guessTooth, blockOutKeep, keepZones, shell, viewer, scans, P, get A() { return A; }, get B() { return B; }, computeSurvey, blockOut, toothRegion, toothSummary, dirOf, frameOf, survey, surveyBusy, ensureBlock, addTooth, region, readAt, summaryText, summaryData, setTilt, refreshView, syncUI, blockSig };
+</script>
+</body>
+</html>

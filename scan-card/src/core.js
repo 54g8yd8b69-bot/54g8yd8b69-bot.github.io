@@ -949,13 +949,113 @@ function planeFit(pts) { // pts: [[x,y,z]…] → { c:[..], n:[..] }
   const m = [0, 0, 0, 0, 0, 0]; for (const p of pts) { const x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2]; m[0] += x * x; m[1] += x * y; m[2] += x * z; m[3] += y * y; m[4] += y * z; m[5] += z * z; }
   return { c, n: eigSym3(m).vectors[2] };
 }
+const angDeg = (a, b) => Math.acos(clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1)) * 180 / Math.PI;
 /**
- * Guess how a raw arch scan sits and return the matrix that moves it into the case frame.
+ * The flat underside of a model with a base (a printed or cast model rather than a raw scan): large flat regions that the
+ * whole mesh sits on one side of. Bases that follow the arch (horseshoe), fill the palate, or are hollow (then only the rim
+ * or the floor is flat) all count; a raw intraoral scan has no such region and gives [].
+ * → [{ n: [x,y,z] (unit, out of the underside, i.e. away from the teeth), h (n·p on the plane), area (mm²), frac (share of
+ *      the whole surface), height (mm from the plane to the far side of the mesh) }, …] largest first.
+ * o.minArea (mm², default 150) · o.minFrac (default 0.015) · o.angle (° a facet may lean and still count as flat, default 4)
+ */
+export function findBasePlanes(mesh, o = {}) {
+  const P = mesh.positions, I = mesh.indices, nT = I.length / 3, st = Math.max(1, Math.floor(nT / 200000)), G = 90;
+  const minArea = o.minArea ?? 150, minFrac = o.minFrac ?? 0.015, cosA = Math.cos((o.angle ?? 4) * Math.PI / 180), BIN = 0.25, TOL = 0.5;
+  const T = new Float32Array(Math.ceil(nT / st) * 7), H = new Float64Array(G * G), HN = new Float64Array(G * G * 3); let nq = 0, At = 0;
+  for (let f = 0; f < nT; f += st) {                             // facets: unit normal, centroid, area; normals binned on an octahedral map
+    const a = I[3 * f] * 3, b = I[3 * f + 1] * 3, d = I[3 * f + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[d] - P[a], vy = P[d + 1] - P[a + 1], vz = P[d + 2] - P[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz); if (!(l > 1e-12)) continue;
+    nx /= l; ny /= l; nz /= l; const ar = l / 2 * st, q = 7 * nq++; At += ar;
+    T[q] = nx; T[q + 1] = ny; T[q + 2] = nz; T[q + 3] = (P[a] + P[b] + P[d]) / 3; T[q + 4] = (P[a + 1] + P[b + 1] + P[d + 1]) / 3; T[q + 5] = (P[a + 2] + P[b + 2] + P[d + 2]) / 3; T[q + 6] = ar;
+    const s = Math.abs(nx) + Math.abs(ny) + Math.abs(nz); let x = nx / s, y = ny / s; if (nz < 0) { const ax = Math.abs(x), ay = Math.abs(y); x = (1 - ay) * (x >= 0 ? 1 : -1); y = (1 - ax) * (y >= 0 ? 1 : -1); }
+    const k = Math.min(G - 1, Math.floor((y + 1) / 2 * G)) * G + Math.min(G - 1, Math.floor((x + 1) / 2 * G));
+    H[k] += ar; HN[3 * k] += ar * nx; HN[3 * k + 1] += ar * ny; HN[3 * k + 2] += ar * nz;
+  }
+  if (!(At > 0)) return [];
+  const near = (k) => { let s = 0; const i0 = k % G, j0 = (k / G) | 0; for (let j = Math.max(0, j0 - 2); j <= Math.min(G - 1, j0 + 2); j++) for (let i = Math.max(0, i0 - 2); i <= Math.min(G - 1, i0 + 2); i++) s += H[j * G + i]; return s; };
+  const order = []; for (let k = 0; k < G * G; k++) if (H[k] > 0) order.push(k); order.sort((p, q) => H[q] - H[p]);
+  const dirs = [];                                               // up to six well-separated directions that many facets share
+  for (const k of order) {
+    if (dirs.length >= 6 || 25 * H[k] < minArea) break;
+    if (near(k) < minArea) continue;
+    const l = Math.hypot(HN[3 * k], HN[3 * k + 1], HN[3 * k + 2]), d = [HN[3 * k] / l, HN[3 * k + 1] / l, HN[3 * k + 2] / l];
+    if (!dirs.some((e) => e[0] * d[0] + e[1] * d[1] + e[2] * d[2] > 0.985)) dirs.push(d);   // 10° apart
+  }
+  const out = [];
+  for (let d of dirs) {
+    let pl = null;
+    for (let pass = 0; pass < 3; pass++) {                       // the outermost offset holding enough flat area (a hollow model has an inner flat too: the cavity roof), refined
+      const hist = new Map();
+      for (let q = 0; q < 7 * nq; q += 7) { if (T[q] * d[0] + T[q + 1] * d[1] + T[q + 2] * d[2] < cosA) continue; const key = Math.round((T[q + 3] * d[0] + T[q + 4] * d[1] + T[q + 5] * d[2]) / BIN); hist.set(key, (hist.get(key) || 0) + T[q + 6]); }
+      let best = null; for (const [key, v] of hist) { if (best !== null && key <= best) continue; if (v + (hist.get(key - 1) || 0) + (hist.get(key + 1) || 0) >= minArea) best = key; }
+      if (best === null) { pl = null; break; }
+      const h0 = best * BIN, sn = [0, 0, 0]; let A = 0, sh = 0;
+      for (let q = 0; q < 7 * nq; q += 7) { if (T[q] * d[0] + T[q + 1] * d[1] + T[q + 2] * d[2] < cosA) continue; const h = T[q + 3] * d[0] + T[q + 4] * d[1] + T[q + 5] * d[2]; if (Math.abs(h - h0) > TOL) continue; const w = T[q + 6]; A += w; sh += w * h; sn[0] += w * T[q]; sn[1] += w * T[q + 1]; sn[2] += w * T[q + 2]; }
+      const l = Math.hypot(...sn); d = sn.map((v) => v / l); pl = { h: sh / A, area: A };
+    }
+    if (!pl || pl.area < minArea || pl.area < minFrac * At) continue;
+    let beyond = 0, hMin = Infinity;                             // nothing of substance may stand proud of the plane (raised label letters, 0.5 mm, are fine)
+    for (let q = 0; q < 7 * nq; q += 7) { const h = T[q + 3] * d[0] + T[q + 4] * d[1] + T[q + 5] * d[2]; if (h > pl.h + 1) beyond += T[q + 6]; if (h < hMin) hMin = h; }
+    if (beyond > 0.02 * At) continue;
+    out.push({ n: d, h: pl.h, area: pl.area, frac: pl.area / At, height: pl.h - hMin });
+  }
+  return out.sort((a, b) => b.area - a.area);
+}
+/** Highest point along nn in each 5 mm cell across the scan, keeping those within 5.5 mm of the top (the cusp tips) — as in autoOrient. */
+function cuspTops(P, c, sv, nn, basis) {
+  const [u, v] = basis(nn), cells = new Map();
+  for (let i = 0; i < P.length; i += 3 * sv) { const x = P[i] - c[0], y = P[i + 1] - c[1], z = P[i + 2] - c[2], h = x * nn[0] + y * nn[1] + z * nn[2], k = Math.floor((x * u[0] + y * u[1] + z * u[2]) / 5) * 4096 + Math.floor((x * v[0] + y * v[1] + z * v[2]) / 5); const e = cells.get(k); if (!e || h > e[3]) cells.set(k, [P[i], P[i + 1], P[i + 2], h]); }
+  const all = [...cells.values()], hTop = quantile(all.map((e) => e[3]), 0.95);
+  return all.filter((e) => e[3] > hTop - 5.5);
+}
+/**
+ * The occlusal axis of a model standing on a base. The teeth are on the side away from the base, so the cusp-tip plane is
+ * fitted starting from straight up off the base (iterated until it settles, at most 8 times; if that does not give a plane
+ * through teeth all round the arch, starting again from `alt`, the scan's flattest direction). Within BASE_TRUST° of each
+ * other the base wins: bases are made parallel to a biting plane someone set (Model Card, model-builder software), and the
+ * flat base is exact where the cusp-tip fit differs by a few degrees with tooth heights and wear. From TEETH_FROM° on the base
+ * is plainly tilted and the teeth decide; in between the two are blended so a small change cannot flip the answer. Beyond
+ * MAX_TILT° the base is not trusted (used 'none': the cusp-tip plane is returned, but autoOrient reports it as unsure).
+ * → null (no plane through the cusp tips found) | { n, tops, tilt, used: 'base' | 'blend' | 'teeth' | 'none' }
+ */
+const BASE_TRUST = 5, TEETH_FROM = 9, MAX_TILT = 25;
+function axisOverBase(P, c, sv, b, basis, alt) {
+  const t0 = b.n.map((x) => -x);
+  const spans = (tops, nn) => {                                  // share of the scan's width and depth that the cusp tips cover
+    const [u, v] = basis(nn), pu = [], pv = []; for (let i = 0; i < P.length; i += 12 * sv) { const x = P[i] - c[0], y = P[i + 1] - c[1], z = P[i + 2] - c[2]; pu.push(x * u[0] + y * u[1] + z * u[2]); pv.push(x * v[0] + y * v[1] + z * v[2]); }
+    const tu = tops.map((e) => (e[0] - c[0]) * u[0] + (e[1] - c[1]) * u[1] + (e[2] - c[2]) * u[2]), tv = tops.map((e) => (e[0] - c[0]) * v[0] + (e[1] - c[1]) * v[1] + (e[2] - c[2]) * v[2]);
+    const r = (a) => quantile(a, 0.99) - quantile(a, 0.01) || 1;
+    return Math.min((Math.max(...tu) - Math.min(...tu)) / r(pu), (Math.max(...tv) - Math.min(...tv)) / r(pv));
+  };
+  let far = null;
+  for (const start of [t0, alt]) {
+    if (!start) continue;
+    let t = start, run = true;
+    for (let it = 0; it < 8; it++) {
+      const tp = cuspTops(P, c, sv, t, basis); if (tp.length < 6) break;
+      let pn = planeFit(tp).n; if (pn[0] * t[0] + pn[1] * t[1] + pn[2] * t[2] < 0) pn = pn.map((x) => -x);
+      if (angDeg(pn, t0) > 45) { run = false; break; }            // running away from the base: these are not teeth standing on it
+      const ch = angDeg(pn, t); t = pn; if (ch < 0.05) break;
+    }
+    const tilt = angDeg(t, t0), tp = cuspTops(P, c, sv, t, basis);
+    if (!run || tp.length < 6 || spans(tp, t) < 0.65) continue;   // a plane through a few teeth at one end of a steeply tilted arch is not the biting plane
+    if (tilt > MAX_TILT) { if (!far || tilt < far.tilt) far = { n: t, tops: tp, tilt, used: 'none' }; continue; }   // of two such planes, the one nearer the base
+    const w = clamp((tilt - BASE_TRUST) / (TEETH_FROM - BASE_TRUST), 0, 1), n = t0.map((x, k) => x * (1 - w) + t[k] * w), l = Math.hypot(...n);
+    for (let k = 0; k < 3; k++) n[k] /= l;
+    return { n, tops: w === 1 ? tp : cuspTops(P, c, sv, n, basis), tilt, used: w === 0 ? 'base' : w === 1 ? 'teeth' : 'blend' };
+  }
+  return far;
+}
+/**
+ * Guess how a raw arch scan (or a model with a base) sits and return the matrix that moves it into the case frame.
  *   jaw 'lower': teeth end up pointing +Z.   jaw 'upper': teeth end up pointing −Z.
  * Occlusal plane → z = 0, arch centred on x = 0, front of the arch towards −Y.
  * Uses: the scan's flattest direction and its surface normals (which way is occlusal), a plane fitted to the
- * cusp tips, and the fact an arch is narrow at the front and wide at the back. Good for full arches; a
- * quadrant or a very partial scan needs the manual tools. → { matrix: THREE.Matrix4, ok: boolean, note }
+ * cusp tips, and the fact an arch is narrow at the front and wide at the back. A model with a flat base (findBasePlanes)
+ * stands on it: the teeth face away from the base, and the base sets the vertical unless it is tilted against the cusp
+ * tips (see axisOverBase). Good for full arches; a quadrant or a very partial scan needs the manual tools.
+ * → { matrix: THREE.Matrix4, ok: boolean, note, base: null | { area (mm²), tilt (° between base and cusp-tip plane), used } }
  */
 export function autoOrient(mesh, jaw = 'lower') {
   const P = mesh.positions, I = mesh.indices, nT = I.length / 3, st = Math.max(1, Math.floor(nT / 150000));
@@ -975,6 +1075,18 @@ export function autoOrient(mesh, jaw = 'lower') {
   if (agree < 0) { n = n.map((v) => -v); agree = -agree; }
   let ok = agree > 0.5, tops = [];
   const basis = (nn) => { const t = Math.abs(nn[0]) < 0.8 ? [1, 0, 0] : [0, 1, 0]; let u = [nn[1] * t[2] - nn[2] * t[1], nn[2] * t[0] - nn[0] * t[2], nn[0] * t[1] - nn[1] * t[0]]; const l = Math.hypot(...u); u = u.map((x) => x / l); return [u, [nn[1] * u[2] - nn[2] * u[1], nn[2] * u[0] - nn[0] * u[2], nn[0] * u[1] - nn[1] * u[0]]]; };
+  const inPlane = (nn) => {                                     // like basis(), but turned onto the scan's own long and short axes, so the cusp-tip grid does not depend on how the file was posed
+    const [u0, v0] = basis(nn), q = (a, b) => a[0] * (m[0] * b[0] + m[1] * b[1] + m[2] * b[2]) + a[1] * (m[1] * b[0] + m[3] * b[1] + m[4] * b[2]) + a[2] * (m[2] * b[0] + m[4] * b[1] + m[5] * b[2]);
+    const th = 0.5 * Math.atan2(2 * q(u0, v0), q(u0, u0) - q(v0, v0)), cs = Math.cos(th), sn = Math.sin(th), uu = [0, 1, 2].map((k) => u0[k] * cs + v0[k] * sn);
+    return [uu, [nn[1] * uu[2] - nn[2] * uu[1], nn[2] * uu[0] - nn[0] * uu[2], nn[0] * uu[1] - nn[1] * uu[0]]];
+  };
+  let bp = findBasePlanes(mesh)[0] || null;                    // a model with a flat base stands on it …
+  if (bp && Math.hypot(...mn) >= 0.1 * A && bp.n[0] * mn[0] + bp.n[1] * mn[1] + bp.n[2] * mn[2] > 0) bp = null;   // … but on an open scan whose surface faces the same way as the flat, the flat is on the biting side (a wax rim, a bite block), not a base
+  const onBase = bp ? axisOverBase(P, c, sv, bp, inPlane, n[0] * bp.n[0] + n[1] * bp.n[1] + n[2] * bp.n[2] > 0 ? n.map((x) => -x) : n) : null;
+  let base = null;
+  if (onBase) { n = onBase.n; tops = onBase.tops; ok = onBase.used !== 'none'; base = { area: bp.area, tilt: onBase.tilt, used: onBase.used }; }
+  else {                                                       // no base (every raw scan), or none the cusp tips agree with: the original method
+  if (bp && Math.hypot(...mn) < 0.1 * A && n[0] * bp.n[0] + n[1] * bp.n[1] + n[2] * bp.n[2] > 0) n = n.map((v) => -v);   // a base the cusp tips do not agree with: on a closed model (normals cancel out) it is still the best guess at which side is up
   for (let iter = 0; iter < 3; iter++) {                       // plane through the cusp tips
     const [u, v] = basis(n), cells = new Map();
     for (let i = 0; i < P.length; i += 3 * sv) { const x = P[i] - c[0], y = P[i + 1] - c[1], z = P[i + 2] - c[2], h = x * n[0] + y * n[1] + z * n[2], k = Math.floor((x * u[0] + y * u[1] + z * u[2]) / 5) * 4096 + Math.floor((x * v[0] + y * v[1] + z * v[2]) / 5); const e = cells.get(k); if (!e || h > e[3]) cells.set(k, [P[i], P[i + 1], P[i + 2], h]); }
@@ -983,6 +1095,8 @@ export function autoOrient(mesh, jaw = 'lower') {
     if (tops.length < 6) break;
     let pn = planeFit(tops).n; if (pn[0] * n[0] + pn[1] * n[1] + pn[2] * n[2] < 0) pn = pn.map((x) => -x);
     if (pn[0] * n[0] + pn[1] * n[1] + pn[2] * n[2] > 0.9) n = pn; else break;
+  }
+  if (bp) { base = { area: bp.area, tilt: angDeg(n, bp.n.map((x) => -x)), used: 'none' }; ok = false; }
   }
   // which in-plane direction is front-to-back: the arch widens towards the back
   const [u, v] = basis(n), aa = [], bb = [];
@@ -1002,7 +1116,8 @@ export function autoOrient(mesh, jaw = 'lower') {
   const x0 = (quantile(xs, 0.01) + quantile(xs, 0.99)) / 2, y0 = (quantile(ys, 0.01) + quantile(ys, 0.99)) / 2;
   let z0 = 0; if (tops.length) { for (const t of tops) z0 += t[0] * Z[0] + t[1] * Z[1] + t[2] * Z[2]; z0 /= tops.length; }
   const matrix = new THREE.Matrix4().set(X[0], X[1], X[2], -x0, Y[0], Y[1], Y[2], -y0, Z[0], Z[1], Z[2], -z0, 0, 0, 0, 1);
-  return { matrix, ok, note: ok ? '' : 'Could not be sure of the orientation — check it and adjust by hand.' };
+  const note = ok ? '' : base && base.used === 'none' ? 'The model’s flat base does not line up with the biting surfaces, so the orientation may be off — check it and adjust by hand.' : 'Could not be sure of the orientation — check it and adjust by hand.';
+  return { matrix, ok, note, base };
 }
 /** Matrix (in the case frame) that lays the plane through three picked points flat at z = 0 with the least turning. `up` = +1 keeps the side now facing +Z facing +Z. */
 export function alignPlaneToZ0(p1, p2, p3) {
@@ -1123,6 +1238,9 @@ function surfaceNets(F, nx, ny, nz) {                           // F < 0 inside;
  *     crown: walls round its long axis (radius R0 at the margin) converging at `taper`° each (buccal, mesial, distal) and at
  *     `taperLingual`° on the lingual / palatal (negative = an undercut; blended over ±8° at the corners), flat occlusal surface at
  *     zTop, a shoulder `shoulder` mm wide at zMargin. Heights in the case frame. For testing preparation measurements.
+ *     prep.kind 'onlay' or 'inlay' builds a partial-coverage preparation instead (see demoPartialF for the options); the result then
+ *     also carries prepField(x, y, z) and toothField(x, y, z) — the prepared and the original tooth alone, as distance-like fields in
+ *     the case frame (negative inside) — and prepFrame { centre, mesial, buccal } (unit vectors in the case frame), for exact truths.
  * → { mesh, truth:{ jaw, teeth:[{ fdi, type, width, mesial:[x,y,z], distal:[x,y,z], tip:[x,y,z], centre:[x,y,z] }], gaps:[{fdi,width,a,b}] } }
  *   tip = incisal edge midpoint, canine cusp, or the mesiobuccal cusp. gaps[].width = the slot left along the arch line (not the
  *   distance between the neighbours' contact points, which sit labial of that line on the front teeth).
@@ -1157,6 +1275,7 @@ export function makeDemoArch(o = {}) {
   const zw = (z) => (upper ? D.ref - z : z + D.ref);                 // case-frame height → this generator's height
   const toothF = (t, u, v, w) => {
     if (!pr || t.fdi !== pr.fdi) return demoToothF(t, u, v, w);
+    if (pr.kind === 'onlay' || pr.kind === 'inlay') return demoPartialF(t, u, v, w, pr, zw);
     const wMg = zw(pr.zMargin), vl = pr.lean ? v - Math.max(0, w - wMg) * Math.tan(pr.lean * Math.PI / 180) : v;   // lean: the stump tipped this many degrees towards the buccal (its axis, not the margin)
     const r = Math.hypot(u, vl), lingual = r > 1e-6 ? -vl / r : 0, ang = Math.acos(clamp(lingual, -1, 1)) * 180 / Math.PI, f = clamp((ang - 37) / 16, 0, 1);
     const tau = (pr.taperLingual + (pr.taper - pr.taperLingual) * f) * Math.PI / 180, wTop = zw(pr.zTop), R = pr.R0 - (w - wMg) * Math.tan(tau);
@@ -1197,8 +1316,52 @@ export function makeDemoArch(o = {}) {
     const bvh = new MeshBVH(toGeometry(mesh, { bvh: false })), ray = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, 0, upper ? 1 : -1));
     for (const t of truth.teeth) for (const k of ['mesial', 'distal']) { ray.origin.set(t[k][0], t[k][1], upper ? -60 : 60); const hit = bvh.raycastFirst(ray, THREE.DoubleSide); if (hit && Math.abs(hit.point.z - t[k][2]) < 2.5) t[k + 'Pick'] = hit.point.toArray(); else { const near = {}; bvh.closestPointToPoint(new THREE.Vector3(...t[k]), near); t[k + 'Pick'] = near.point ? near.point.toArray() : t[k].slice(); } }
   }
-  return { mesh, truth };
+  const out = { mesh, truth }, pt = pr && (pr.kind === 'onlay' || pr.kind === 'inlay') && teeth.find((q) => q.fdi === pr.fdi);
+  if (pt) Object.assign(out, demoPartialTruth(pt, upper, D.ref, (u, v, w) => toothF(pt, u, v, w), (u, v, w) => demoToothF(demoPartialBase(pt, pr), u, v, w)));
+  return out;
 }
+
+// ─────────── demo partial-coverage preparations (onlay, inlay): used by makeDemoArch's prep option ───────────
+/**
+ * The prepared tooth's own field (negative inside) for prep.kind 'onlay' or 'inlay'. u runs along the arch (mesialU = its mesial sign),
+ * v across it (+ buccal), w up out of the tooth; zw turns a case-frame height into w. Heights in the options are case-frame z.
+ *   onlay: { reduce, zMargin, R0, taper=6 } — the whole occlusal surface lowered by exactly `reduce` mm (every cusp, fossa and
+ *     ridge: the tooth's own anatomy moved down), inside a round core whose walls stand R0 from the tooth's axis at the margin and
+ *     converge `taper`° each; below zMargin the tooth is untouched (a flat margin all round, a shoulder where the tooth is wider).
+ *   inlay: { isthmus, diverge=6, zFloor, zGing, boxWidth, axialAt, axial=6, mesial=true, distal=true, endAt=2, open=0 } — an occlusal box
+ *     `isthmus` mm wide at its flat floor (zFloor), each buccal / lingual wall flaring `diverge`° from the tooth's axis towards the
+ *     occlusal; a proximal box on each side asked for (mesial, distal): `boxWidth` wide at its flat gingival floor (zGing), walls
+ *     flaring `diverge`°, axial wall `axialAt` mm from the tooth's centre at the gingival floor, leaning `axial`° towards the
+ *     centre going up. A side without a box ends in a wall `endAt` mm from the centre at the floor, flaring `diverge`°.
+ *     open: the tooth itself built that much narrower at each proximal surface than its place in the arch (open contacts of known width).
+ */
+const demoPartialNarrow = new WeakMap();
+function demoPartialBase(T, pr) { if (!(pr.kind === 'inlay' && pr.open)) return T; let x = demoPartialNarrow.get(T); if (!x || x.open !== pr.open) demoPartialNarrow.set(T, (x = { ...T, md: T.md - 2 * pr.open, open: pr.open })); return x; }
+function demoPartialF(T, u, v, w, pr, zw) {
+  const fo = demoToothF(demoPartialBase(T, pr), u, v, w), rad = Math.PI / 180;
+  if (pr.kind === 'onlay') {
+    const wMg = zw(pr.zMargin), R = pr.R0 - (w - wMg) * Math.tan((pr.taper ?? 6) * rad);
+    return Math.min(Math.max(Math.hypot(u, v) - R, demoToothF(T, u, v, w + pr.reduce), wMg - w), Math.max(fo, w - wMg));
+  }
+  const ta = Math.tan((pr.diverge ?? 6) * rad), wF = zw(pr.zFloor), wG = zw(pr.zGing), um = u * T.mesialU, av = Math.abs(v);
+  const uEnd = (pr.endAt ?? 2) + (w - wF) * ta, uAx = pr.axialAt - (w - wG) * Math.tan((pr.axial ?? 6) * rad), hwB = (pr.boxWidth ?? pr.isthmus) / 2 + (w - wG) * ta;
+  let cav = Math.max(av - (pr.isthmus / 2 + (w - wF) * ta), wF - w);
+  if (pr.mesial === false) cav = Math.max(cav, um - uEnd); if (pr.distal === false) cav = Math.max(cav, -um - uEnd);
+  if (pr.mesial !== false) cav = Math.min(cav, Math.max(uAx - um, av - hwB, wG - w));
+  if (pr.distal !== false) cav = Math.min(cav, Math.max(uAx + um, av - hwB, wG - w));
+  return Math.max(fo, -cav);
+}
+/** prepField / toothField in the case frame and the tooth's frame, for makeDemoArch's partial preparations. */
+function demoPartialTruth(t, upper, ref, prepF, toothF0) {
+  const toGen = (x, y, z) => { const xg = upper ? -x : x, dx = xg - t.cx, dy = y - t.cy; return [dx * t.tx + dy * t.ty, dx * t.nx + dy * t.ny, upper ? ref - z : z + ref]; };
+  const caseDir = (x, y) => [upper ? -x : x, y, 0];
+  return {
+    prepField: (x, y, z) => { const q = toGen(x, y, z); return prepF(q[0], q[1], q[2]); },
+    toothField: (x, y, z) => { const q = toGen(x, y, z); return toothF0(q[0], q[1], q[2]); },
+    prepFrame: { centre: [upper ? -t.cx : t.cx, t.cy], mesial: caseDir(t.tx * t.mesialU, t.ty * t.mesialU), buccal: caseDir(t.nx, t.ny), up: [0, 0, upper ? -1 : 1], md: t.md, bl: t.bl, h: t.h },
+  };
+}
+// ─────────── end of demo partial-coverage preparations ───────────
 /**
  * Upper and lower demo arches closed into light contact. Options as makeDemoArch (missing/spacing apply to the jaw the
  * FDI numbers belong to) plus scannerFrame:true to tilt and shift both as a scanner export might (to exercise auto-orient).

@@ -73,12 +73,12 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
     ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
   }
-  for (const [id, test] of [['compare', () => window.__SUITE_APP === 'scan-compare' && !!window.APP && APP.scans.has('lower')], ['prep', () => window.__SUITE_APP === 'scan-prep' && !!window.APP && APP.scans.has('lower')]]) {
+  for (const [id, test] of [['compare', () => window.__SUITE_APP === 'scan-compare' && !!window.APP && APP.scans.has('lower')], ['prep', () => window.__SUITE_APP === 'scan-prep' && !!window.APP && APP.scans.has('lower')], ['survey', () => window.__SUITE_APP === 'scan-survey' && !!window.APP && APP.scans.has('lower')]]) {
     await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
     ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
   }
   await hub.click('#tabs [data-tab=scans]'); await settle();
-  ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Trays,Wax-up', 'scan-card: all seven tools are working on the one pair of scans');
+  ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Survey,Trays,Wax-up', 'scan-card: all eight tools are working on the one pair of scans');
   const [dc] = await Promise.all([p.waitForEvent('download'), hub.click('#topBtns button:nth-child(2)')]);
   ok(/^case-.*\.zip$/.test(dc.suggestedFilename()), 'scan-card: Save case works from inside the file (' + dc.suggestedFilename() + ')');
   await hub.click('#top a.brand'); await p.waitForTimeout(400);

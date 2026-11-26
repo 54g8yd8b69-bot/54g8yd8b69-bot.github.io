@@ -50,6 +50,11 @@ or FAIL, or a non-empty `errors`, mean it failed.
 | `tests/hub/h11-models.cjs` | designing on the model: models built, “Use the models in the other tools”, Analysis and Tray Card given the models (same vertices, same place, 5 mm of base past the scans), a tray generated on the model, back to the scans, the choice saved and reopened |
 | `tests/hub/h12-prep-on-model.cjs` | Prep check on a model with a base: the same figures as on the scan, and a margin drawn 4× too wide does not run down the base (it did before: 2,405 mm², a −90° wall) |
 | `tests/prep-card/p2-lean.cjs` | a preparation that leans (the 46 stump tipped 25°, `LEAN=25 node tests/prep-card/mkprep.mjs`): the tooth's own axis found as on the upright one, the whole stump counted, convergence as built (MD 12°, BL 0°). The old straight-down rule gives an axis 25° out and MD 21° |
+| `tests/prep-card/mkpartial.mjs`, `p3-onlay.cjs`, `p4-inlay.cjs` | onlay and MOD inlay preparations of exactly known shape on 46 (`KIND=onlay` / `KIND=inlay`): occlusal room per quarter, wall angles and taper, isthmus, remaining wall thickness, gap from the margin to the neighbours, occlusal contacts near the margin, saved and reopened |
+| `tests/hub/h14-inlay-on-model.cjs` | the inlay checks on a model with a base give the same figures as on the scan |
+| `tests/core-orient/mkbased.mjs`, `o1-orient.test.mjs`, `o2-model-card.cjs` | orientation of models with a base (solid, hollow, tall, tilted 3–30°) in random poses, and raw scans unchanged; Models' own file input and Auto-orient with no warning |
+| `tests/survey-card/t1-shapes.cjs`, `t2-demo.cjs` | Survey on an ellipsoid with exact answers (survey line, gauge depths, tilt, block-out walls, clasp tip kept) and on the demo arches (taps, tooth numbers, block-out closed, relief, STL positions, case round trip, phone layout) |
+| `tests/hub/h13-survey.cjs` | the Survey tab inside Scan Card: the hub's scans, abutment taps, block-out with a clasp tip, STL, case saved and reopened |
 | `tests/hub/` | Scan Card itself, below |
 
 | hub test | what it proves |
