@@ -1,7 +1,7 @@
 {
   "name": "Snip Card",
   "short_name": "Snip Card",
-  "description": "Capture text from the screen or an image, read on this device.",
+  "description": "Snip part of the screen and the text is read and copied, on this device.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

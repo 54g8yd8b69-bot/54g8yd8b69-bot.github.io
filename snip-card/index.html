@@ -6,7 +6,7 @@
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Snip Card</title>
-<meta name="description" content="Snip Card: capture text from the screen or an image. The text is read in your browser and the image is never sent anywhere.">
+<meta name="description" content="Snip Card: snip part of the screen and the text is read and copied. It is read in your browser and the image is never sent anywhere.">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0B2E4A">
 <link rel="icon" href="/icons/icon-192.png">
@@ -14,11 +14,12 @@
 <meta name="apple-mobile-web-app-title" content="Snip Card">
 <link rel="stylesheet" href="/fonts/fonts.css">
 <style>
-/* Snip Card: get an image (screen capture, paste, drop or file), drag over the text, and it is read on this device and copied.
+/* Snip Card: snip part of the screen with the computer's own tool, come back here, and the text is read on this device and copied.
+   A snip (paste or clipboard) is read whole straight away; screen captures and image files are read by dragging over the text.
    The OCR engine and English model are ImplantRef's (/implantref/src/vendor/tesseract, /implantref/data/ocr), shared so they download once. */
 :root{
   --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0; --warn:#8A5A00;
-  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4; --stage:#E3EAEE;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4; --stage:#E3EAEE; --live:#B3261E;
   --f-display:"Caladea", Cambria, Georgia, serif;
   --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, sans-serif;
   --f-mono:ui-monospace, "SF Mono", Consolas, Menlo, monospace;
@@ -26,7 +27,7 @@
 }
 @media (prefers-color-scheme: dark){:root{
   --navy:#CFE2EE; --teal:#4FB3C9; --mint:#5CC3B7; --warn:#F3D9A4;
-  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836; --stage:#0A1118; color-scheme:dark }}
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#8FA3B3; --line:#223442; --chip:#182836; --stage:#0A1118; --live:#F2B8B5; color-scheme:dark }}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--f-body);min-height:100vh}
@@ -44,25 +45,32 @@ main{max-width:1120px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-le
 .sp{flex:1}
 button.btn,label.btn{font:600 15px var(--f-body);border:1px solid transparent;border-radius:9px;padding:9px 14px;min-height:42px;cursor:pointer;background:var(--teal);color:#fff;display:inline-flex;align-items:center;gap:8px}
 button.btn.ghost,label.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
-button.btn:focus-visible,label.btn:focus-within{outline:3px solid var(--mint);outline-offset:2px}
+button.btn:focus-visible,label.btn:focus-within,button.link:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
 button.btn:disabled{opacity:.5;cursor:not-allowed}
 .btn svg{width:18px;height:18px;flex:none}
+button.link{font:inherit;font-weight:600;background:none;border:0;padding:0;color:var(--teal);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 #status{font-weight:600;color:var(--navy)}
 .bar{height:6px;background:var(--chip);border-radius:99px;overflow:hidden}
 .bar>div{height:100%;width:0;background:var(--mint);transition:width .2s}
 .hint{font-size:.9rem;color:var(--muted);margin:0}
-kbd{font:12px var(--f-mono);background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+kbd{font:12px var(--f-mono);background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;white-space:nowrap}
+.note{background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.93rem}
+.note .row{gap:8px 12px}
+.note b{color:var(--navy)}
+.note .tick{color:var(--mint);font-weight:700}
+.live{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--live);margin-right:6px;vertical-align:1px}
 .stagecard{display:grid;gap:12px}
 .stage{background:var(--stage);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center;overflow:hidden}
 .pick{position:relative;display:inline-block;line-height:0;max-width:100%;cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none}
 #view{display:block;max-width:100%;max-height:76vh;width:auto;height:auto;border-radius:4px}
+.stagecard.snip #view{max-height:34vh}
 #sel{position:absolute;border:2px solid var(--mint);background:rgba(63,169,160,.18);box-shadow:0 0 0 9999px rgba(11,46,74,.28);pointer-events:none;border-radius:2px}
 .pick.busy{cursor:progress}
 textarea{width:100%;min-height:220px;resize:vertical;font:17px/1.6 var(--f-body);color:var(--fg);background:var(--panel);padding:14px;border:1px solid var(--line);border-radius:10px}
 textarea:focus{outline:2px solid var(--teal);outline-offset:0}
 label.sw{display:flex;gap:6px;align-items:center;font-size:.92rem;color:var(--fg)}
-label.sw input{width:17px;height:17px;accent-color:var(--teal);margin:0}
+label.sw input{width:17px;height:17px;accent-color:var(--teal);margin:0;flex:none}
 #count,#conf{font-size:.85rem;color:var(--muted)}
 #conf.low{color:var(--warn);font-weight:600}
 .drop{outline:3px dashed var(--mint);outline-offset:-8px}
@@ -70,6 +78,10 @@ details summary{cursor:pointer;font-weight:600;color:var(--navy)}
 details[open] summary{margin-bottom:8px}
 details ul{margin:0;padding-left:20px;font-size:.95rem}
 details li{margin:4px 0}
+.os{margin:0 0 10px}
+.os h3{font:700 1rem var(--f-body);color:var(--navy);margin:0 0 4px}
+.os h3 small{font-weight:600;color:var(--mint);margin-left:6px}
+.os p{margin:0 0 6px;font-size:.95rem}
 footer{font-size:.85rem;color:var(--muted);max-width:75ch}
 #toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0B2E4A;color:#fff;padding:8px 14px;border-radius:9px;font-size:.92rem;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 32px);z-index:5}
 #toast.show{opacity:1}
@@ -83,15 +95,24 @@ footer{font-size:.85rem;color:var(--muted);max-width:75ch}
   <span class="pill">On-device · images never leave this computer</span>
 </header>
 <main>
-  <section class="card src" aria-label="Get an image">
+  <section class="card src" aria-label="Get a snip">
+    <p class="hint" id="howto" style="font-size:1rem;color:var(--fg)">Snip part of the screen with <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>, then press <kbd>Ctrl</kbd> + <kbd>V</kbd> here. The text is read and copied, ready to paste into your notes.</p>
+    <div class="note" id="auto" hidden>
+      <div class="row" id="auto-off"><span class="sp"><b>Auto-read snips.</b> Come back to this page after a snip and the text is read and copied for you, with no pasting. The browser asks once to let this site see the clipboard.</span><button class="btn" id="arOn" type="button">Turn on auto-read</button></div>
+      <div class="row" id="auto-on" hidden><span class="sp"><span class="tick" aria-hidden="true">✓</span> <b>Auto-read is on.</b> When you come back to this page, a new snip on the clipboard is read and copied.</span><button class="link" id="arOff" type="button">Turn off</button></div>
+      <div id="auto-blocked" hidden><b>Auto-read is blocked.</b> This site is not allowed to see the clipboard. Allow it in the site settings (the icon to the left of the address), or paste each snip here instead.</div>
+    </div>
     <div class="row">
-      <button class="btn" id="cap" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Capture screen</button>
-      <button class="btn ghost" id="paste" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/></svg>Paste image</button>
+      <button class="btn" id="paste" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/></svg>Read snip from clipboard</button>
+      <button class="btn ghost" id="pop" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg><span>Pop out mini window</span></button>
+      <span class="sp"></span>
+      <button class="btn ghost" id="cap" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Capture screen</button>
       <label class="btn ghost" for="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Choose image<input class="vh" id="file" type="file" accept="image/*"></label>
     </div>
-    <div><span id="status" role="status" aria-live="polite">Paste a screenshot, or choose an image.</span></div>
+    <div class="note row" id="sharebar" hidden><span class="sp"><span class="live" aria-hidden="true"></span>Sharing <b id="sharename">a window</b>. Press <kbd>Alt</kbd> + <kbd>S</kbd> on this page, or New picture, to take a fresh picture of it.</span><button class="btn ghost" id="shot" type="button">New picture</button><button class="btn ghost" id="stopshare" type="button">Stop sharing</button></div>
+    <div><span id="status" role="status" aria-live="polite">Ready for a snip.</span></div>
     <div class="bar" id="bar" hidden><div></div></div>
-    <p class="hint" id="howto">On this computer: press <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> to snip part of the screen, then <kbd>Ctrl</kbd> + <kbd>V</kbd> here. The text is read and copied, ready to paste into your notes.</p>
+    <label class="sw" id="keepwrap" hidden><input type="checkbox" id="keepshare"> Keep sharing after Capture screen, for more pictures without being asked again (handy on a second monitor)</label>
   </section>
 
   <section class="card stagecard" id="stagecard" aria-label="Image" hidden>
@@ -101,7 +122,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:75ch}
       <button class="btn ghost" id="all" type="button">Read whole image</button>
       <button class="btn ghost" id="drop" type="button">Remove image</button>
     </div>
-    <div class="stage"><div class="pick" id="pick"><canvas id="view" aria-label="The captured image. Drag over an area to read its text."></canvas><div id="sel" hidden></div></div></div>
+    <div class="stage"><div class="pick" id="pick"><canvas id="view" aria-label="The image. Drag over an area to read its text."></canvas><div id="sel" hidden></div></div></div>
   </section>
 
   <section class="card" style="display:grid;gap:10px" aria-label="Captured text">
@@ -119,18 +140,36 @@ footer{font-size:.85rem;color:var(--muted);max-width:75ch}
 
   <section class="card" style="display:grid;gap:12px">
     <details>
-      <summary>Ways to get an image in</summary>
+      <summary>Ways to get text in</summary>
       <ul>
-        <li id="li-cap"><b>Capture screen</b>: choose a window or screen to take one still picture of. Sharing stops straight away.</li>
-        <li><b>Paste</b>: snip with <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> (Windows) or <kbd>Ctrl</kbd> + <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>4</kbd> (Mac), then <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>V</kbd> on this page.</li>
-        <li><b>Drop or choose</b> an image file. On a phone, Choose image also offers the camera.</li>
+        <li id="li-auto" hidden><b>Snip and come back</b>: turn on auto-read, snip with <span class="k-snip"></span>, then switch back to this page. The text is read and copied.</li>
+        <li><b>Paste</b>: snip with <span class="k-snip"></span>, then <span class="k-paste"></span> on this page. The whole snip is read straight away.</li>
+        <li id="li-pop" hidden><b>Mini window</b>: Pop out keeps a small Snip Card window on top of your other apps. Snip, then click <b>Read snip</b> in it, and paste where you need the text.</li>
+        <li id="li-cap"><b>Capture screen</b>: choose a window or screen to take one still picture of, then drag over the text. Sharing stops straight away unless you tick <b>Keep sharing</b>: then press <kbd>Alt</kbd> + <kbd>S</kbd> on this page for a fresh picture, and press Stop sharing when you are done.</li>
+        <li><b>Drop or choose</b> an image file, then drag over the text. On a phone, Choose image also offers the camera.</li>
+        <li>To read just part of a snip again, drag over that part of the picture.</li>
       </ul>
+    </details>
+    <details id="keys">
+      <summary>A real keyboard shortcut, in any app</summary>
+      <p class="hint" style="margin-bottom:10px">A web page cannot hear keys pressed in other apps, and cannot look at the screen without asking each time. For one key press that works anywhere, like TextSniper, use what your computer already has:</p>
+      <div id="oslist">
+        <div class="os" data-os="win"><h3>Windows</h3>
+          <p><b>PowerToys Text Extractor</b> is the closest match: press <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd>, drag over any text and it is on the clipboard. PowerToys is a free Microsoft download, so on a trust computer you may need IT to install it.</p>
+          <p><b>Snipping Tool</b>: on recent Windows 11 updates, press <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> and choose <b>Text extractor</b> on the snipping bar. On older versions, open the snip and use <b>Text actions</b>, then <b>Copy all text</b>.</p>
+          <p><b>Or Snip Card</b>: press <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>, then come back to this page with auto-read on.</p></div>
+        <div class="os" data-os="mac"><h3>Mac</h3>
+          <p><b>Make your own in Shortcuts</b> (free, built in): make a new shortcut with the actions <b>Take Screenshot</b> (set to Interactive, and to a custom selection under Show More), <b>Extract Text from Image</b>, <b>Combine Text</b> (with New Lines) and <b>Copy to Clipboard</b>. Then open the shortcut’s details and choose <b>Add Keyboard Shortcut</b>. macOS may ask for permission the first time it runs.</p>
+          <p><b>Live Text</b>: open a screenshot or photo in Preview or Photos and select the text as if it were typed.</p></div>
+        <div class="os" data-os="ios"><h3>iPhone and iPad</h3>
+          <p><b>Live Text</b>: in Photos or the Camera, tap the Live Text button, then Copy. Turn it on in Settings, General, Language &amp; Region.</p></div>
+      </div>
     </details>
     <details>
       <summary>Getting a clean read</summary>
       <ul>
-        <li>Drag a box that holds only the text you want, with a little space around it.</li>
-        <li>Small text reads better if you zoom in on it before taking the screenshot.</li>
+        <li>Snip only the text you want, with a little space around it.</li>
+        <li>Small text reads better if you zoom in on it before you snip.</li>
         <li>Printed and on-screen text reads well. Handwriting does not.</li>
         <li>Turn off <b>Keep line breaks</b> to join wrapped lines into paragraphs.</li>
       </ul>
@@ -138,7 +177,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:75ch}
     <p class="hint">The reading engine (about 7 MB) downloads the first time and is then kept by the browser. English only.</p>
   </section>
 
-  <footer>Snip Card is a copying aid. Check the text against the original before it goes into the notes: letters and numbers can be misread (0 and O, 1 and l, 5 and S). The image and the text are held only while this page is open, and nothing is sent anywhere. Follow your organisation’s policy on capturing patient information.</footer>
+  <footer>Snip Card is a copying aid. Check the text against the original before it goes into the notes: letters and numbers can be misread (0 and O, 1 and l, 5 and S). The image and the text are held only while this page is open, and nothing is sent anywhere. Auto-read looks at the clipboard only when you come back to this page, and only reads pictures. Follow your organisation’s policy on capturing patient information.</footer>
 </main>
 <video id="vid" muted playsinline hidden></video>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -150,21 +189,50 @@ const $=id=>document.getElementById(id);
 const TESS='/implantref/src/vendor/tesseract/',LANG='/implantref/data/ocr';
 const statusEl=$('status'),bar=$('bar'),barFill=bar.firstElementChild,out=$('out'),view=$('view'),pick=$('pick'),sel=$('sel');
 const store={get(k,d){try{const v=localStorage.getItem('snip.'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('snip.'+k,JSON.stringify(v))}catch(e){}}};
-function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),ms||2000)}
-function setStatus(s){statusEl.textContent=s}
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),ms||2000);mini.note(m,ms)}
+function setStatus(s){statusEl.textContent=s;mini.sync()}
 function progress(p){if(p==null){bar.hidden=true;return}bar.hidden=false;barFill.style.width=Math.round(Math.max(0,Math.min(1,p))*100)+'%'}
 
-const S={img:null,busy:false,worker:null,loading:null,drag:null,psm:''};
+const S={img:null,snip:false,busy:false,worker:null,loading:null,drag:null,psm:'',reads:0};
 const served=/^https?:$/.test(location.protocol);
+// the mini window (filled in by Pop out, further down)
+const mini={win:null,
+  open:()=>!!(mini.win&&!mini.win.closed),
+  focused(){try{return mini.open()&&mini.win.document.hasFocus()}catch(e){return false}},
+  el(id){return mini.open()?mini.win.document.getElementById(id):null},
+  sync(){if(!mini.open())return;const s=mini.el('mstatus'),t=mini.el('mtext');if(s)s.textContent=statusEl.textContent;if(t&&t.textContent!==out.value){t.textContent=out.value;t.scrollTop=t.scrollHeight}},
+  note(m,ms){const n=mini.el('mnote');if(!n)return;n.textContent=m;clearTimeout(mini.t);mini.t=setTimeout(()=>{if(mini.el('mnote'))mini.el('mnote').textContent=mini.hint},ms||2600)},
+  hint:''};
 
-/* ------------------------------------------------------------ settings */
-['autocopy','breaks','append'].forEach(id=>{const el=$(id);el.checked=store.get(id,el.checked);el.addEventListener('change',()=>store.set(id,el.checked))});
-const isMac=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent),touchOnly=matchMedia('(hover:none) and (pointer:coarse)').matches;
-if(touchOnly)$('howto').textContent='Choose a photo or take one, then drag over the text you want. It is read and copied, ready to paste.';
-else if(isMac)$('howto').innerHTML='On this Mac: press <kbd>Ctrl</kbd> + <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>4</kbd> to snip part of the screen to the clipboard, then <kbd>Cmd</kbd> + <kbd>V</kbd> here. The text is read and copied, ready to paste into your notes.';
+/* ------------------------------------------------------------ settings and platform */
+['autocopy','breaks','append','keepshare'].forEach(id=>{const el=$(id);el.checked=store.get(id,el.checked);el.addEventListener('change',()=>store.set(id,el.checked))});
+const ua=navigator.userAgent,plat=navigator.platform||'';
+const OS=/iPhone|iPad|iPod/.test(ua)||(/Mac/.test(plat)&&navigator.maxTouchPoints>1)?'ios':/Mac/.test(plat)?'mac':/Win/.test(plat)?'win':'other';
+const isMac=OS==='mac'||OS==='ios',touchOnly=matchMedia('(hover:none) and (pointer:coarse)').matches;
+const k=(...keys)=>keys.map(x=>'<kbd>'+x+'</kbd>').join(' + ');
+const K=isMac?{snip:k('Ctrl','Cmd','Shift','4'),paste:k('Cmd','V'),pasteText:'Cmd + V'}:{snip:k('Win','Shift','S'),paste:k('Ctrl','V'),pasteText:'Ctrl + V'};
+document.querySelectorAll('.k-snip').forEach(e=>e.innerHTML=K.snip+(isMac?'':' (Windows) or '+k('Ctrl','Cmd','Shift','4')+' (Mac)'));
+document.querySelectorAll('.k-paste').forEach(e=>e.innerHTML=isMac?K.paste:k('Ctrl','V')+' / '+k('Cmd','V'));
+// the help panel lists this computer's own way first
+(function(){const list=$('oslist'),mine=list.querySelector('[data-os="'+OS+'"]');if(mine){list.prepend(mine);mine.querySelector('h3').insertAdjacentHTML('beforeend','<small>this device</small>')}})();
+if(touchOnly){$('paste').classList.add('ghost');document.querySelector('label[for=file]').classList.remove('ghost')} // on a phone a photo is the usual way in
 const canCapture=!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!touchOnly;
-$('cap').hidden=!canCapture;$('li-cap').hidden=!canCapture;
-const IDLE=touchOnly?'Choose a photo, or paste an image.':canCapture?'Capture the screen, paste a screenshot, or drop an image here.':'Paste a screenshot, or drop an image here.';setStatus(IDLE);
+$('cap').hidden=$('keepwrap').hidden=$('li-cap').hidden=!canCapture;
+
+// Auto-read: Chrome and Edge only (they are the browsers that let a site read the clipboard when it comes back into focus, once allowed)
+const AR={ok:false,on:store.get('autoread',false),status:null,reading:false,last:null,lastAt:0};
+const arLive=()=>AR.ok&&AR.on&&AR.status&&AR.status.state==='granted';
+function idle(){return touchOnly?'Ready for a photo.':arLive()?'Waiting for a snip.':'Ready for a snip.'}
+function renderHowto(){const h=$('howto');
+  if(touchOnly){h.textContent='Choose a photo or take one, then drag over the text you want. It is read and copied, ready to paste.';return}
+  h.innerHTML='Snip part of the screen with '+K.snip+', then '+(arLive()?'come back to this page':'press '+K.paste+' here')+'. The text is read and copied, ready to paste into your notes.'}
+function renderAR(){
+  $('auto').hidden=$('li-auto').hidden=!AR.ok;
+  if(AR.ok){const st=AR.status.state;$('auto-on').hidden=!arLive();$('auto-blocked').hidden=st!=='denied';$('auto-off').hidden=arLive()||st==='denied'}
+  renderHowto();if(!S.busy&&!S.img)setStatus(idle());
+}
+renderHowto();setStatus(idle());
 
 /* ------------------------------------------------------------ text clean-up */
 // Tidy OCR output. With keepBreaks off, wrapped lines are joined into paragraphs (list items and blank lines are kept).
@@ -180,71 +248,208 @@ function tidy(raw,keepBreaks){
     return acc}).join('\n\n');
 }
 function words(t){const m=String(t).trim().match(/\S+/g);return m?m.length:0}
-function updateCount(){const n=words(out.value);$('count').textContent=n?n+(n===1?' word':' words'):''}
+function updateCount(){const n=words(out.value);$('count').textContent=n?n+(n===1?' word':' words'):'';mini.sync()}
 out.addEventListener('input',updateCount);
 
-/* ------------------------------------------------------------ clipboard */
+/* ------------------------------------------------------------ copying */
+// Copy through whichever window has focus (this page or the mini window): browsers only let a focused page write to the clipboard.
 async function copyText(t,quiet){
   if(!t)return false;
-  try{await navigator.clipboard.writeText(t);if(!quiet)toast('Copied '+words(t)+(words(t)===1?' word':' words'));return true}
-  catch(e){ // older browsers, or the page is not focused
+  const wins=mini.focused()?[mini.win,window]:[window,mini.win].filter(Boolean);
+  for(const w of wins){try{await w.navigator.clipboard.writeText(t);AR.last=null; // the snip on the clipboard has been replaced by its text
+    if(!quiet)toast('Copied '+words(t)+(words(t)===1?' word':' words'));return true}catch(e){}}
+  if(document.hasFocus()){ // older browsers
     try{const a=document.activeElement;out.focus();out.select();const ok=document.execCommand('copy');out.setSelectionRange(out.value.length,out.value.length);if(a&&a!==out&&a.focus)a.focus();
-      if(ok&&t===out.value){if(!quiet)toast('Copied');return true}}catch(_){}
-    if(!quiet)toast('Could not copy by itself. Press Copy all.',3200);return false}
+      if(ok&&t===out.value){AR.last=null;if(!quiet)toast('Copied');return true}}catch(_){}}
+  if(!quiet)toast('Could not copy by itself. Press Copy all.',3200);return false
 }
 $('copy').addEventListener('click',()=>{if(!out.value.trim())return toast('Nothing to copy yet');copyText(out.value)});
 $('clear').addEventListener('click',()=>{out.value='';$('conf').textContent='';$('conf').className='';updateCount();out.focus()});
 
 /* ------------------------------------------------------------ image in */
-function showImage(src,w,h,what){
+function showImage(src,w,h,what,snip){
   const MAX=6000,k=Math.min(1,MAX/Math.max(w,h));
   view.width=Math.max(1,Math.round(w*k));view.height=Math.max(1,Math.round(h*k));
   const ctx=view.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingQuality='high';ctx.drawImage(src,0,0,view.width,view.height);
-  S.img={w:view.width,h:view.height};sel.hidden=true;$('stagecard').hidden=false;
-  setStatus((what||'Image')+' ready. Drag over the text you want, or read the whole image.');
-  $('stagecard').scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});
+  S.img={w:view.width,h:view.height};S.snip=!!snip;sel.hidden=true;$('stagecard').hidden=false;$('stagecard').classList.toggle('snip',S.snip);
+  $('stagehint').textContent=snip?'The whole snip is read. Drag over part of it to read just that part.':'Drag over the text you want.';
+  if(!snip){setStatus((what||'Image')+' ready. Drag over the text you want, or read the whole image.');
+    $('stagecard').scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'})}
   ensureOcr().catch(()=>{}); // start loading the engine while the user is choosing an area
 }
-async function loadBlob(blob,what){
-  if(!blob||!/^image\//.test(blob.type||''))return toast('That is not an image. Use a screenshot, photo or picture file.',3200);
+// Decode an image file or clipboard picture. Returns {src,w,h,close} or null.
+async function decode(blob){
+  if(!blob||!/^image\//.test(blob.type||'')){toast('That is not an image. Use a screenshot, photo or picture file.',3200);return null}
   try{
     if(window.createImageBitmap){let bm;try{bm=await createImageBitmap(blob,{imageOrientation:'from-image'})}catch(e){bm=await createImageBitmap(blob)}
-      showImage(bm,bm.width,bm.height,what);if(bm.close)bm.close();return}
-    await new Promise((res,rej)=>{const url=URL.createObjectURL(blob),im=new Image();im.onload=()=>{showImage(im,im.naturalWidth,im.naturalHeight,what);URL.revokeObjectURL(url);res()};im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('decode'))};im.src=url});
-  }catch(e){toast('Could not open that image.',3000)}
+      return{src:bm,w:bm.width,h:bm.height,close:()=>{if(bm.close)bm.close()}}}
+    const url=URL.createObjectURL(blob),im=new Image();
+    await new Promise((res,rej)=>{im.onload=res;im.onerror=()=>rej(new Error('decode'));im.src=url});
+    return{src:im,w:im.naturalWidth,h:im.naturalHeight,close:()=>URL.revokeObjectURL(url)};
+  }catch(e){toast('Could not open that image.',3000);return null}
 }
+async function loadBlob(blob,what){const d=await decode(blob);if(!d)return;showImage(d.src,d.w,d.h,what,false);d.close()}
+// A fingerprint of the picture itself (size and a hash of its pixels), so the same snip is not read twice however the clipboard re-encodes it.
+// It is kept in memory only, and forgotten once the snip's text has replaced it on the clipboard.
+async function fingerprint(d){
+  try{const c=document.createElement('canvas'),s=Math.min(1,4000/Math.max(d.w,d.h));c.width=Math.max(1,Math.round(d.w*s));c.height=Math.max(1,Math.round(d.h*s));
+    const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(d.src,0,0,c.width,c.height);const px=x.getImageData(0,0,c.width,c.height).data;
+    let h;if(window.crypto&&crypto.subtle){h=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',px)),b=>b.toString(16).padStart(2,'0')).join('')}
+    else{let a=0x811c9dc5;for(let i=0;i<px.length;i+=3){a^=px[i];a=Math.imul(a,16777619)>>>0}h=a.toString(16)}
+    return d.w+'x'+d.h+':'+h}catch(e){return null}
+}
+// A snip is already cropped by the computer's snipping tool, so it is read whole straight away. opts.auto: came from auto-read.
+async function takeSnip(blob,opts){opts=opts||{};
+  if(S.busy){toast('Still reading the last snip…');return 'busy'}
+  const d=await decode(blob);if(!d)return 'bad';
+  const fp=await fingerprint(d);
+  if(fp&&fp===AR.last&&(opts.auto||Date.now()-AR.lastAt<5000)){d.close();if(!opts.auto)toast('That snip has just been read.');return 'seen'}
+  AR.last=fp;AR.lastAt=Date.now();
+  showImage(d.src,d.w,d.h,'Snip',true);d.close();
+  const text=await readArea({x:0,y:0,w:S.img.w,h:S.img.h},true);
+  if(text)out.scrollIntoView({block:'nearest',behavior:'auto'});
+  return text?'read':'empty';
+}
+// One snip at a time: the clipboard lock is held from reading the clipboard until the text is in.
+async function locked(fn){if(S.busy||AR.reading){toast('Still reading the last snip…');return 'busy'}AR.reading=true;try{return await fn()}finally{AR.reading=false}}
+function hasImageFile(dt){return Array.from((dt&&dt.items)||[]).find(it=>it.kind==='file'&&/^image\//.test(it.type))||null}
+function onPaste(e){const dt=e.clipboardData,it=hasImageFile(dt);if(!it)return;
+  // pasting text and a picture together (for example from Word) into the text box: paste the text as usual
+  if(e.target===out&&Array.from(dt.types||[]).includes('text/plain'))return;
+  const f=it.getAsFile();if(!f)return;e.preventDefault();
+  locked(()=>takeSnip(f,{}))}
+addEventListener('paste',onPaste);
 $('file').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)loadBlob(f,'Image')});
-$('drop').addEventListener('click',()=>{S.img=null;view.width=view.height=1;sel.hidden=true;$('stagecard').hidden=true;setStatus('Image removed. '+IDLE)});
-
-addEventListener('paste',e=>{const items=(e.clipboardData&&e.clipboardData.items)||[];
-  for(const it of items){if(it.kind==='file'&&/^image\//.test(it.type)){const f=it.getAsFile();if(f){e.preventDefault();loadBlob(f,'Pasted image');return}}}});
-$('paste').addEventListener('click',async()=>{
-  const tip=()=>toast('Press '+(isMac?'Cmd':'Ctrl')+' + V to paste the image.',3200);
-  if(!(navigator.clipboard&&navigator.clipboard.read))return tip();
-  try{const items=await navigator.clipboard.read();
-    for(const it of items){const type=it.types.find(t=>/^image\//.test(t));if(type)return loadBlob(await it.getType(type),'Pasted image')}
-    toast('There is no image on the clipboard. Take a screenshot first.',3200)}
-  catch(e){tip()}
-});
+$('drop').addEventListener('click',()=>{S.img=null;view.width=view.height=1;sel.hidden=true;$('stagecard').hidden=true;setStatus('Image removed. '+idle())});
 let dragDepth=0;
 addEventListener('dragenter',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){dragDepth++;document.body.classList.add('drop')}});
 addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;document.body.classList.remove('drop')}});
 addEventListener('dragover',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files'))e.preventDefault()});
 addEventListener('drop',e=>{dragDepth=0;document.body.classList.remove('drop');const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f){e.preventDefault();loadBlob(f,'Image')}});
 
-/* ------------------------------------------------------------ screen capture: one still frame, then sharing stops */
+/* ------------------------------------------------------------ reading the clipboard */
+// The first picture on the clipboard. imageOnly: skip when the clipboard also holds text, which means something was copied
+// from a document (Word and Excel add a picture of what was copied), not snipped from the screen.
+async function clipImage(items,imageOnly){
+  for(const it of items){const type=it.types.find(t=>/^image\//.test(t));if(!type)continue;
+    if(imageOnly&&it.types.includes('text/plain'))return null;return it.getType(type)}
+  return null}
+// The button (here or in the mini window): reads whatever picture is there now. A click lets the browser show its permission prompt.
+function readClipboard(w){w=w||window;
+  const tip=()=>toast('Press '+K.pasteText+' to paste the snip.',3200);
+  if(!(w.navigator.clipboard&&w.navigator.clipboard.read))return tip();
+  return locked(async()=>{let blob;
+    try{let items;try{items=await w.navigator.clipboard.read()}catch(e){if(w===window)throw e;items=await navigator.clipboard.read()}
+      blob=await clipImage(items,false)}
+    catch(e){return tip()}
+    if(!blob){AR.last=null;toast('There is no snip on the clipboard. Snip part of the screen first.',3200);return 'none'}
+    return takeSnip(blob,{})});
+}
+$('paste').addEventListener('click',()=>readClipboard(window));
+// Auto-read: when this page (or the mini window) comes back into focus, read a new snip if there is one.
+async function checkClip(why){
+  if(!arLive()||AR.reading||S.busy)return 'skip';
+  const w=why==='mini'?mini.win:window;if(!w||!w.document.hasFocus())return 'not focused';
+  AR.reading=true;
+  try{const blob=await clipImage(await w.navigator.clipboard.read(),true);
+    if(!blob){AR.last=null;return 'none'}  // the snip has gone from the clipboard, so the same picture snipped again is a new snip
+    return await takeSnip(blob,{auto:true});
+  }catch(e){return 'error'}finally{AR.reading=false}
+}
+let focusT=0;
+function onBack(why){clearTimeout(focusT);focusT=setTimeout(()=>checkClip(why),60)}  // focus and visibilitychange often arrive together
+addEventListener('focus',()=>onBack('focus'));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')onBack('focus')});
+async function initAR(){
+  if(!served||touchOnly||!(navigator.clipboard&&navigator.clipboard.read&&window.ClipboardItem&&navigator.permissions))return;
+  try{AR.status=await navigator.permissions.query({name:'clipboard-read'})}catch(e){return} // Safari and Firefox have no such permission: paste instead
+  AR.ok=true;AR.status.addEventListener('change',renderAR);renderAR();
+  if(arLive()){ensureOcr().catch(()=>{});if(document.hasFocus())checkClip('load')}
+}
+$('arOn').addEventListener('click',async()=>{
+  let items;
+  try{items=await navigator.clipboard.read()}
+  catch(e){renderAR();toast(AR.status&&AR.status.state==='denied'?'The browser blocked clipboard access for this site.':'Auto-read was not turned on. Press the button again and choose Allow.',3600);return}
+  AR.on=true;store.set('autoread',true);renderAR();ensureOcr().catch(()=>{});
+  const blob=await clipImage(items,false);
+  if(blob)locked(()=>takeSnip(blob,{}));else{AR.last=null;setStatus('Auto-read is on. Snip part of the screen, then come back to this page.')}
+});
+$('arOff').addEventListener('click',()=>{AR.on=false;AR.last=null;store.set('autoread',false);renderAR();toast('Auto-read is off')});
+
+/* ------------------------------------------------------------ mini window (Document Picture-in-Picture, Chrome and Edge) */
+const MINI_CSS=`body.mini{min-height:0;padding:10px 12px;display:grid;gap:8px;align-content:start}
+.mini .mhead{display:flex;align-items:center;gap:8px;font:700 1.05rem var(--f-display);color:var(--navy)}
+.mini .brand-dot{width:24px;height:24px;border-radius:7px}.mini .brand-dot svg{width:15px;height:15px}
+#mstatus{font-weight:600;color:var(--navy);font-size:.9rem;line-height:1.35}
+#mtext{font:.9rem/1.4 var(--f-body);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;height:84px;overflow:auto;white-space:pre-wrap;color:var(--fg);margin:0}
+#mtext:empty::before{content:'The text shows here.';color:var(--muted)}
+.mini .row{flex-wrap:nowrap}.mini .btn.big{flex:1;justify-content:center;font-size:16px;min-height:46px}
+#mnote{font-size:.82rem;color:var(--muted);margin:0;min-height:1.2em}`;
+
+const canMini=!!window.documentPictureInPicture&&!touchOnly&&served;
+$('pop').hidden=$('li-pop').hidden=!canMini;
+$('pop').addEventListener('click',async()=>{
+  if(mini.open()){mini.win.close();return}
+  let w;try{w=await documentPictureInPicture.requestWindow({width:340,height:270})}catch(e){toast('Could not open the mini window.',3000);return}
+  mini.win=w;const d=w.document;
+  const st=d.createElement('style');st.textContent=document.querySelector('style').textContent+MINI_CSS;d.head.appendChild(st);
+  const fl=d.createElement('link');fl.rel='stylesheet';fl.href=new URL('/fonts/fonts.css',location.href).href;d.head.appendChild(fl);
+  mini.hint=(arLive()?'Snip, then click here: auto-read is on.':'Snip, then click Read snip.')+' Text is copied, ready to paste.';
+  d.body.className='mini';
+  d.body.innerHTML='<div class="mhead">'+document.querySelector('.brand-dot').outerHTML+'<span>Snip Card</span></div>'
+    +'<div id="mstatus" role="status" aria-live="polite"></div><pre id="mtext" tabindex="0" aria-label="Last text read"></pre>'
+    +'<div class="row"><button class="btn big" id="mread" type="button">Read snip</button><button class="btn ghost" id="mcopy" type="button">Copy</button></div>'
+    +'<p id="mnote"></p>';
+  d.getElementById('mnote').textContent=mini.hint;
+  d.getElementById('mread').addEventListener('click',()=>readClipboard(w));
+  d.getElementById('mcopy').addEventListener('click',()=>{if(!out.value.trim())return toast('Nothing to copy yet');copyText(out.value)});
+  d.addEventListener('paste',onPaste);
+  w.addEventListener('focus',()=>onBack('mini'));
+  w.addEventListener('pagehide',()=>{mini.win=null;$('pop').lastElementChild.textContent='Pop out mini window'});
+  $('pop').lastElementChild.textContent='Close mini window';
+  mini.sync();ensureOcr().catch(()=>{});
+});
+
+/* ------------------------------------------------------------ screen capture: one still picture, or keep sharing for more */
+const share={stream:null,track:null};
+async function grabFrame(what){
+  const v=$('vid');let bm=null;
+  if(window.ImageCapture){try{bm=await new ImageCapture(share.track).grabFrame()}catch(e){}}
+  if(bm){showImage(bm,bm.width,bm.height,what,false);if(bm.close)bm.close();return true}
+  if(!v.videoWidth)return false;showImage(v,v.videoWidth,v.videoHeight,what,false);return true;
+}
+function stopShare(){
+  if(share.stream)share.stream.getTracks().forEach(t=>t.stop());
+  const was=!!share.track;share.stream=share.track=null;$('vid').srcObject=null;
+  $('sharebar').hidden=true;$('cap').hidden=!canCapture;
+  if(was&&!S.busy)setStatus('Sharing stopped. '+(S.img?'Drag over the text you want.':idle()));
+}
+async function newPicture(){
+  if(!share.track||S.busy)return;
+  if(!(await grabFrame('Picture of the shared '+(share.kind||'window'))))toast('Could not take the picture.',3000);
+}
 $('cap').addEventListener('click',async()=>{
   let stream;
   try{stream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'window'},audio:false,selfBrowserSurface:'exclude',surfaceSwitching:'exclude',monitorTypeSurfaces:'include'})}
-  catch(e){if(e&&e.name!=='NotAllowedError'&&e.name!=='AbortError')toast('This browser could not capture the screen. Paste a screenshot instead.',3600);return}
-  const v=$('vid');
+  catch(e){if(e&&e.name!=='NotAllowedError'&&e.name!=='AbortError')toast('This browser could not capture the screen. Paste a snip instead.',3600);return}
+  const v=$('vid');let keep=$('keepshare').checked;
+  share.stream=stream;share.track=stream.getVideoTracks()[0];
   try{v.srcObject=stream;await v.play();
-    await new Promise(r=>setTimeout(r,450)); // let the browser's own chooser close and a full frame arrive
-    if(!v.videoWidth)throw new Error('no frame');
-    showImage(v,v.videoWidth,v.videoHeight,'Screen capture')}
-  catch(e){toast('Could not take the picture. Paste a screenshot instead.',3600)}
-  finally{stream.getTracks().forEach(t=>t.stop());v.srcObject=null;try{window.focus()}catch(_){}}
+    await wait(450); // let the browser's own chooser close and a full frame arrive
+    if(!(await grabFrame('Screen capture')))throw new Error('no frame')}
+  catch(e){toast('Could not take the picture. Paste a snip instead.',3600);keep=false}
+  if(keep&&share.track&&share.track.readyState==='live'){
+    const surf=(share.track.getSettings&&share.track.getSettings().displaySurface)||'window';
+    share.kind=surf==='monitor'?'screen':surf==='browser'?'tab':'window';
+    $('sharename').textContent=share.kind==='screen'?'your screen':'a '+share.kind;
+    share.track.addEventListener('ended',stopShare);$('sharebar').hidden=false;$('cap').hidden=true;
+    setStatus('Screen capture ready. Drag over the text you want. Press Alt + S for a fresh picture.');
+  }else{stream.getTracks().forEach(t=>t.stop());share.stream=share.track=null;v.srcObject=null}
+  try{window.focus()}catch(_){}
 });
+$('shot').addEventListener('click',newPicture);
+$('stopshare').addEventListener('click',stopShare);
+addEventListener('pagehide',stopShare);
 
 /* ------------------------------------------------------------ area selection */
 function pt(e){const r=view.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top)),r}}
@@ -258,7 +463,10 @@ function endDrag(e){if(!S.drag)return;const d=S.drag;S.drag=null;try{pick.releas
   readArea({x:Math.round(b.x*k),y:Math.round(b.y*k),w:Math.round(b.w*k),h:Math.round(b.h*k)},false)}
 pick.addEventListener('pointerup',endDrag);pick.addEventListener('pointercancel',e=>{S.drag=null;sel.hidden=true});
 $('all').addEventListener('click',()=>{if(S.img){sel.hidden=true;readArea({x:0,y:0,w:S.img.w,h:S.img.h},true)}});
-addEventListener('keydown',e=>{if(e.key==='Escape'&&!sel.hidden&&!S.busy)sel.hidden=true});
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&!sel.hidden&&!S.busy)sel.hidden=true;
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&e.code==='KeyS'&&share.track){e.preventDefault();newPicture()}
+});
 
 /* ------------------------------------------------------------ OCR */
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('load '+src));document.head.appendChild(s)})}
@@ -288,9 +496,10 @@ function prep(a,scale){
   if(n&&sum/n<110){for(let i=0;i<d.length;i+=4){d[i]=255-d[i];d[i+1]=255-d[i+1];d[i+2]=255-d[i+2]}ctx.putImageData(img,0,0)}
   return c;
 }
+function busyUi(on){S.busy=on;pick.classList.toggle('busy',on);['all','cap','shot','paste'].forEach(id=>$(id).disabled=on);const m=mini.el('mread');if(m)m.disabled=on}
 async function readArea(a,whole){
   if(S.busy||!S.img||a.w<2||a.h<2)return null;
-  S.busy=true;pick.classList.add('busy');$('all').disabled=true;$('cap').disabled=true;progress(0);setStatus('Reading the text…');
+  busyUi(true);progress(0);setStatus('Reading the text…');
   try{
     const w=await ensureOcr();
     const psm=whole?'3':'6';if(S.psm!==psm){await w.setParameters({tessedit_pageseg_mode:psm});S.psm=psm}
@@ -300,7 +509,8 @@ async function readArea(a,whole){
     if((data.confidence||0)<85){const s1=autoScale(a),alt=(await w.recognize(prep(a,s1>1.5?1:2))).data||{};
       if((alt.confidence||0)>(data.confidence||0)&&String(alt.text||'').trim())data=alt}
     const text=tidy(data.text,$('breaks').checked);
-    if(!text){setStatus('No text found there. Try a slightly larger box, or zoom in before taking the screenshot.');return ''}
+    if(!text){setStatus('No text found there. '+(S.snip&&whole?'Try snipping a slightly larger area, or zoom in before you snip.':'Try a slightly larger box, or zoom in before taking the screenshot.'));return ''}
+    S.reads++;
     const add=$('append').checked&&out.value.trim();
     out.value=add?out.value.replace(/\s+$/,'')+'\n'+text:text;updateCount();out.scrollTop=out.scrollHeight;
     const conf=Math.round(data.confidence||0),low=conf<75,cf=$('conf');
@@ -311,13 +521,15 @@ async function readArea(a,whole){
     return text;
   }catch(e){
     setStatus(served?'The reading engine could not start. Check the connection and try again.':'Snip Card needs to be opened from the Notile site to read text.');return null;
-  }finally{S.busy=false;pick.classList.remove('busy');$('all').disabled=false;$('cap').disabled=false;progress(null)}
+  }finally{busyUi(false);progress(null)}
 }
 
 if(!served)setStatus('Snip Card needs to be opened from the Notile site to read text.');
-updateCount();
+updateCount();initAR();
 // for tests and for other Notile apps
-window.snipCard={tidy,load:loadBlob,readAll:()=>S.img?readArea({x:0,y:0,w:S.img.w,h:S.img.h},true):Promise.resolve(null),readArea:(x,y,w,h)=>readArea({x,y,w,h},false),ready:()=>!!S.worker};
+window.snipCard={tidy,load:loadBlob,snip:b=>locked(()=>takeSnip(b,{})),readAll:()=>S.img?readArea({x:0,y:0,w:S.img.w,h:S.img.h},true):Promise.resolve(null),readArea:(x,y,w,h)=>readArea({x,y,w,h},false),ready:()=>!!S.worker,
+  autoRead:{check:why=>checkClip(why||'focus'),state:()=>({supported:AR.ok,on:AR.on,live:arLive(),permission:AR.status&&AR.status.state,reads:S.reads,remembered:!!AR.last})},
+  sharing:()=>!!share.track};
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 })();
 </script>

@@ -29,6 +29,48 @@ run({name:'Landing page',fn:async()=>{
     const box=await pg.locator('#view').boundingBox(),k=box.width/900;await pg.mouse.move(box.x+20*k,box.y+130*k);await pg.mouse.down();await pg.mouse.move(box.x+700*k,box.y+215*k,{steps:6});await pg.mouse.up();
     await pg.waitForFunction(()=>/crown/.test(document.getElementById('out').value)&&!/Review/.test(document.getElementById('out').value),null,{timeout:60000});
     expect(/Tooth 26 crown fitted/.test(await pg.inputValue('#out')),'dragged area misread: '+await pg.inputValue('#out'));await noErrors(pg)});
+  // Snip Card: a picture of some lines of text, and a helper that puts one on the clipboard (as a snipping tool would)
+  const SNIP_PNG=`window._png=async lines=>{const c=document.createElement('canvas');c.width=640;c.height=60+lines.length*70;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#111';x.font='28px Arial, sans-serif';lines.forEach((l,i)=>x.fillText(l,30,70+i*70));return new Promise(r=>c.toBlob(r,'image/png'))};
+    window._clip=async lines=>navigator.clipboard.write([new ClipboardItem({'image/png':await _png(lines)})]);`;
+  const outHas=(pg,re)=>pg.waitForFunction(s=>new RegExp(s).test(document.getElementById('out').value),re,{timeout:60000});
+  await test('Snip Card reads a pasted snip whole straight away and copies the text, with no dragging',async()=>{const pg=await page('/snip-card/',{permissions:['clipboard-read','clipboard-write']});await pg.evaluate(SNIP_PNG);
+    await pg.evaluate(async()=>{const dt=new DataTransfer();dt.items.add(new File([await _png(['Review in three months'])],'snip.png',{type:'image/png'}));
+      document.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}))});
+    await outHas(pg,'Review in three months');
+    expect(await pg.evaluate(()=>navigator.clipboard.readText())===await pg.inputValue('#out'),'text not copied');
+    expect(await pg.evaluate(()=>document.getElementById('stagecard').classList.contains('snip')),'snip not shown as a snip');
+    expect(/^Copied 4 words/.test(await pg.textContent('#status')),'status: '+await pg.textContent('#status'));await noErrors(pg)});
+  await test('Snip Card auto-read: once turned on, coming back to the page reads a new snip from the clipboard, and never the same one twice',async()=>{const pg=await page('/snip-card/',{permissions:['clipboard-read','clipboard-write']});await pg.evaluate(SNIP_PNG);
+    expect(await pg.isVisible('#auto-off')&&!(await pg.isVisible('#auto-on')),'auto-read offer not shown');
+    await pg.click('#arOn');await pg.waitForSelector('#auto-on:not([hidden])');expect(await pg.evaluate(()=>localStorage.getItem('snip.autoread'))==='true','choice not remembered');
+    expect(/come back to this page/.test(await pg.textContent('#howto')),'how-to not updated');
+    await pg.evaluate(()=>_clip(['Tooth 26 crown fitted']));await pg.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await outHas(pg,'Tooth 26 crown fitted');expect(await pg.evaluate(()=>navigator.clipboard.readText())===await pg.inputValue('#out'),'auto-read text not copied');
+    // with copying off the snip stays on the clipboard: it is read once only
+    await pg.uncheck('#autocopy');await pg.evaluate(()=>_clip(['Floss once a day']));await pg.evaluate(()=>window.dispatchEvent(new Event('focus')));await outHas(pg,'Floss once a day');
+    const reads=(await pg.evaluate(()=>snipCard.autoRead.state())).reads;await pg.click('#clear');
+    await pg.evaluate(()=>window.dispatchEvent(new Event('focus')));await pg.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await pg.waitForTimeout(900);
+    expect(await pg.inputValue('#out')===''&&(await pg.evaluate(()=>snipCard.autoRead.state())).reads===reads,'the same snip was read twice');
+    expect(await pg.evaluate(()=>snipCard.autoRead.check())==='seen','same snip not recognised');
+    // a new snip is read when the page becomes visible again
+    await pg.evaluate(()=>_clip(['Recall in six months']));await pg.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await outHas(pg,'Recall in six months');
+    // text copied from a document (a picture plus its text) is left alone
+    await pg.evaluate(async()=>navigator.clipboard.write([new ClipboardItem({'image/png':await _png(['From a letter']),'text/plain':new Blob(['From a letter'],{type:'text/plain'})})]));
+    expect(await pg.evaluate(()=>snipCard.autoRead.check())==='none','copied document text was read as a snip');
+    await pg.click('#arOff');expect(await pg.isVisible('#auto-off')&&!(await pg.evaluate(()=>snipCard.autoRead.state())).live,'auto-read did not turn off');await noErrors(pg)});
+  await test('Snip Card mini window reads a snip, and a kept screen share gives fresh pictures until Stop sharing',async()=>{const pg=await page('/snip-card/',{permissions:['clipboard-read','clipboard-write']});await pg.evaluate(SNIP_PNG);
+    expect(await pg.isVisible('#pop'),'Pop out missing in Chromium');
+    const [mini]=await Promise.all([pg.context().waitForEvent('page'),pg.click('#pop')]);await mini.waitForSelector('#mread');
+    await pg.evaluate(()=>_clip(['Mini window works']));await mini.click('#mread');await outHas(pg,'Mini window works');
+    await mini.waitForFunction(()=>/Mini window works/.test(document.getElementById('mtext').textContent));
+    expect(await pg.evaluate(()=>navigator.clipboard.readText())===await pg.inputValue('#out'),'mini window text not copied');
+    await pg.click('#pop');await pg.waitForFunction(()=>/Pop out/.test(document.getElementById('pop').textContent));
+    await pg.check('#keepshare');await pg.click('#cap');await pg.waitForSelector('#sharebar:not([hidden])',{timeout:10000});
+    expect(await pg.evaluate(()=>snipCard.sharing())&&!(await pg.isVisible('#cap')),'share not kept');
+    const before=await pg.evaluate(()=>document.getElementById('view').toDataURL());await pg.waitForTimeout(300);
+    await pg.keyboard.press('Alt+s');await pg.waitForFunction(b=>document.getElementById('view').toDataURL()!==b,before,{timeout:5000});
+    await pg.click('#stopshare');expect(!(await pg.evaluate(()=>snipCard.sharing()))&&!(await pg.isVisible('#sharebar'))&&await pg.isVisible('#cap'),'sharing did not stop');
+    await pg.uncheck('#keepshare');await pg.click('#cap');await pg.waitForTimeout(1000);expect(!(await pg.evaluate(()=>snipCard.sharing())),'one-off capture kept sharing');await noErrors(pg)});
   await test('Task Card keeps letters tied to the clinic rota and a misc list on this device only, and its tile shows only where it has been used',async()=>{
     const lp=await page('/');expect(!(await lp.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')))).includes('/task-card/'),'Task Card tile should not show on a device that has not used it');
     const pg=await lp.context().newPage();pg._errors=[];pg.on('pageerror',e=>pg._errors.push(e.message));await pg.goto(BASE+'/task-card/');await pg.waitForTimeout(500);
