@@ -1906,3 +1906,67 @@ export function createTrimStep(o) {
   sync();
   return { get jaw() { return jaw; }, setJaw: (j) => { clearPaint(); jaw = j; setSeg(j); update(); sync(); }, doTrim, setPaint, paintAt, showPaint, clearPaint, get painted() { return painted; }, get painting() { return paintOn; }, canUndo, undo: undoLast, sync, update };
 }
+
+// ───────────────────────────── shells: fields to closed meshes, distances along a surface ─────────────────────────────
+/**
+ * isoMesh(F, nx, ny, nz, origin, h) → { positions, indices }: the closed surface F = 0 of a sampled field (F < 0 inside),
+ * F[i + nx*(j + ny*k)] at origin + (i, j, k)·h. The outer layer of the grid is treated as outside, so the result is always
+ * closed. Triangles face outwards. Pieces smaller than minVolume mm³ (specks) are dropped.
+ */
+export function isoMesh(F, nx, ny, nz, origin, h, o = {}) {
+  const G = Float32Array.from(F);
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) G[i + nx * (j + ny * k)] = Math.max(G[i + nx * (j + ny * k)], 1e-3);
+  // two inside cells that touch only along an edge (a checkerboard in a 2×2 block) would give an edge shared by four triangles:
+  // join them by counting one of the other two cells as just inside (it moves the surface by at most one cell, only there)
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = 0;
+    for (const [du, dv] of [[1, nx], [1, nx * ny], [nx, nx * ny]]) for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+      const a = i + nx * (j + ny * k), b = a + du, c = a + dv, d = a + du + dv; if (b >= G.length || d >= G.length) continue;
+      const ia = G[a] < 0, ib = G[b] < 0, ic = G[c] < 0, id = G[d] < 0;
+      if (ia === id && ib === ic && ia !== ib) { const e = ia ? (G[b] <= G[c] ? b : c) : (G[a] <= G[d] ? a : d); G[e] = -1e-4; changed++; }
+    }
+    if (!changed) break;
+  }
+  const { V, T } = surfaceNets(G, nx, ny, nz), positions = new Float32Array(V.length);
+  for (let v = 0; v < V.length; v += 3) { positions[v] = origin[0] + V[v] * h; positions[v + 1] = origin[1] + V[v + 1] * h; positions[v + 2] = origin[2] + V[v + 2] * h; }
+  let mesh = { positions, indices: Uint32Array.from(T) };
+  if (meshVolume(mesh) < 0) { const I = mesh.indices; for (let t = 0; t < I.length; t += 3) { const s = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = s; } }
+  return dropSpecks(mesh, o.minVolume ?? 0.3);
+}
+/** Keep only the connected pieces of a mesh whose volume is at least minVolume (mm³). */
+export function dropSpecks(mesh, minVolume = 0.3) {
+  const I = mesh.indices, nV = mesh.positions.length / 3, par = new Int32Array(nV); for (let v = 0; v < nV; v++) par[v] = v;
+  const find = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+  for (let t = 0; t < I.length; t += 3) { const a = find(I[t]), b = find(I[t + 1]), c = find(I[t + 2]); par[b] = a; par[find(c)] = a; }
+  const vol = new Map(), P = mesh.positions;
+  for (let t = 0; t < I.length; t += 3) { const r = find(I[t]), a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+    const v6 = P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c]); vol.set(r, (vol.get(r) || 0) + v6 / 6); }
+  const keepT = []; for (let t = 0; t < I.length; t += 3) if ((vol.get(find(I[t])) || 0) >= minVolume) keepT.push(I[t], I[t + 1], I[t + 2]);
+  if (keepT.length === I.length) return mesh;
+  return compact({ positions: P, indices: Uint32Array.from(keepT) });
+}
+/** Vertex neighbours of a mesh (compressed rows): { start, list } with list[start[v] .. start[v+1]) the neighbours of v. */
+export function vertexGraph(mesh) {
+  const I = mesh.indices, nV = mesh.positions.length / 3, deg = new Int32Array(nV + 1);
+  for (let t = 0; t < I.length; t += 3) for (let k = 0; k < 3; k++) { deg[I[t + k] + 1] += 2; }
+  for (let v = 0; v < nV; v++) deg[v + 1] += deg[v];
+  const fill = deg.slice(0, nV), list = new Int32Array(deg[nV]);
+  for (let t = 0; t < I.length; t += 3) for (let k = 0; k < 3; k++) { const a = I[t + k], b = I[t + (k + 1) % 3]; list[fill[a]++] = b; list[fill[b]++] = a; }
+  return { start: deg, list };
+}
+/**
+ * Distances along a surface from source vertices (Dijkstra over the mesh edges), up to maxDist; vertices further away (or
+ * excluded by allow(v) → false) stay Infinity. prev[v] gives the path back to a source. sources: [[vertex, startDistance], …].
+ */
+export function surfaceDistances(mesh, graph, sources, o = {}) {
+  const P = mesh.positions, nV = P.length / 3, dist = new Float64Array(nV).fill(Infinity), prev = new Int32Array(nV).fill(-1), maxD = o.maxDist ?? Infinity, allow = o.allow || null, stopAt = o.stopAt ?? -1;
+  const hv = [], hd = [];                                        // a binary heap of (distance, vertex)
+  const push = (d, v) => { let i = hd.length; hd.push(d); hv.push(v); while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hd[i] = hd[p]; hv[i] = hv[p]; i = p; } hd[i] = d; hv[i] = v; };
+  const pop = () => { const d = hd[0], v = hv[0], ld = hd.pop(), lv = hv.pop(); if (hd.length) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= hd.length) break; if (c + 1 < hd.length && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hd[i] = hd[c]; hv[i] = hv[c]; i = c; } hd[i] = ld; hv[i] = lv; } return [d, v]; };
+  for (const [v, d0] of sources) if (d0 < dist[v]) { dist[v] = d0; push(d0, v); }
+  while (hd.length) {
+    const [d, v] = pop(); if (d > dist[v]) continue; if (v === stopAt) break; if (d > maxD) break;
+    for (let e = graph.start[v]; e < graph.start[v + 1]; e++) { const w = graph.list[e]; if (allow && !allow(w)) continue; const nd = d + Math.hypot(P[3 * w] - P[3 * v], P[3 * w + 1] - P[3 * v + 1], P[3 * w + 2] - P[3 * v + 2]); if (nd < dist[w]) { dist[w] = nd; prev[w] = v; push(nd, w); } }
+  }
+  return { dist, prev };
+}

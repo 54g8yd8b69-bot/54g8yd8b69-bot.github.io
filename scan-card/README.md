@@ -40,6 +40,16 @@ bands (0.25 / 0.5 / 0.75 mm), tap abutment teeth for their buccal and lingual re
 (a closed solid, optional relief, optional clasp-tip undercut kept on chosen teeth) to download as STL or keep in the
 case file (`survey-blockout`, `data.survey`).
 
+**Shells.** A provisional crown, a shell to reline, or a matrix, from a second scan of the arch. Load a scan taken before
+the preparation (or a wax-up): it is lined up on the unchanged teeth. For a crown or shell, mark the prepared tooth and
+its margin (or use Prep check's marking). The crown is the material inside the "before" surface and outside the
+preparation plus a cement space, up to the margin, worked out on a 0.1 mm grid. The margin is followed along the tooth's
+surface between the tapped points, so a leaning incisor needs no axis. The shell keeps only a set thickness under the
+outside. A thickness map flags anything under 0.5 mm. For a matrix, tap the teeth to cover: it is a slab over the wax-up
+as seen from the biting side (no undercuts, so it prints rigid), with a space over the teeth, a set thickness, a reach
+and height, and an optional injection hole over each tap. STL downloads in the scan's position; the case file keeps the
+second scan and the result (`shell-shape`, `shell-part`, `data.shell`).
+
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
 hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
 the cusp tips decide instead, and beyond 25° it warns. Raw scans are oriented exactly as before.

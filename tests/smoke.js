@@ -95,7 +95,7 @@ run({name:'Landing page',fn:async()=>{
   await test('Scan Card opens under the site CSP: scans loaded once feed Models, Analysis and Splint, and their work comes back as one case',async()=>{const pg=await page('/scan-card/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect((await pg.request.get(BASE+'/scan-card/manifest.webmanifest')).ok(),'Scan Card manifest missing');
-    expect(await pg.locator('#tabs button').count()===9,'expected the Scans tab and eight tools');
+    expect(await pg.locator('#tabs button').count()===10,'expected the Scans tab and nine tools');
     const tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/')),settle=()=>pg.evaluate(()=>APP.H.q);
     const sig=fr=>fr.evaluate(()=>['upper','lower'].map(j=>APP.scans[j]?[APP.scans[j].raw.positions.length,APP.N.crc32(new Uint8Array(APP.scans[j].raw.positions.buffer)),APP.N.crc32(new Uint8Array(APP.scans[j].raw.indices.buffer)),Array.from(APP.scans[j].matrix.elements).join()].join(':'):'-').join('|'));
     await pg.click('[data-ss=demo]');await pg.waitForFunction(()=>APP.scans.has('upper')&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
@@ -144,7 +144,7 @@ run({name:'Landing page',fn:async()=>{
     expect(await pg.evaluate(()=>APP.users().join())==='Trays,Wax-up','the Scans tab does not show Trays and Wax-up as using the scans');
     expect(await t.evaluate(()=>new Promise(res=>{let n=0;for(const P of [WebGLRenderingContext.prototype,WebGL2RenderingContext.prototype]){const o=P.drawElements;P.drawElements=function(...a){n++;return o.apply(this,a)}}setTimeout(()=>res(n),700)}))===0,'Tray Card keeps drawing while its tab is hidden');
     await noErrors(pg)});
-  await test('Scan Card’s Prep check, Compare, Survey and Splint guidance work under the site CSP',async()=>{const pg=await page('/scan-card/');
+  await test('Scan Card’s Prep check, Compare, Survey, Shells and Splint guidance work under the site CSP',async()=>{const pg=await page('/scan-card/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});const settle=()=>pg.evaluate(()=>APP.H.q),tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/'));
     const idle=fr=>fr.waitForFunction(()=>!document.querySelector('#busy').classList.contains('show'),null,{timeout:240000});
     // a lower arch whose 46 is a preparation of known shape (walls 6°, lingual −6°), made by the demo generator, and the upper
@@ -161,6 +161,9 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#tabs [data-tab=survey]');await settle();const sv=tool('survey');expect(!!sv,'Survey did not open');await sv.waitForFunction(()=>window.APP&&APP.scans.has('lower'),null,{timeout:60000});
     await sv.evaluate(()=>APP.shell.goto('block'));await idle(sv);await sv.waitForFunction(()=>APP.B&&APP.B.mesh,null,{timeout:120000});
     const bo=await sv.evaluate(()=>APP.B.info);expect(bo.watertight&&bo.tris>1000,'Survey block-out '+JSON.stringify(bo));
+    await pg.click('#tabs [data-tab=shell]');await settle();const sl=tool('shell');expect(!!sl,'Shells did not open');await sl.waitForFunction(()=>window.APP&&APP.scans.has('lower'),null,{timeout:60000});
+    await sl.evaluate(T=>{APP.shell.goto('make');},T);await sl.click('#mkMode [data-v=matrix]');await sl.click('#mkJaw [data-v=lower]');await sl.evaluate(()=>APP.shell.goto('shape'));await sl.click('#shSelf');
+    await sl.evaluate(T=>{APP.P.taps=[T.seed];APP.shell.goto('design');},T);await sl.click('#dBuild');await idle(sl);const mi=await sl.evaluate(()=>APP.B&&APP.B.info);expect(mi&&mi.closed&&mi.holes===1,'Shells matrix '+JSON.stringify(mi));
     await pg.click('#tabs [data-tab=splint]');await settle();const sp=tool('splint');expect(!!sp,'Splint did not open');await sp.waitForFunction(()=>window.APP&&APP.scans.has('upper'),null,{timeout:60000});
     await sp.evaluate(()=>APP.shell.goto('appliance'));await sp.click('#apJaw [data-v=upper]');await sp.click('#apType [data-v=flat]');await sp.evaluate(()=>APP.shell.goto('shell'));await idle(sp);
     await sp.check('#shUse');await idle(sp);await sp.click('#shAuto');await idle(sp);await sp.check('#gdOn');await idle(sp);await sp.waitForFunction(()=>APP.D.res&&!APP.D.dirty,null,{timeout:300000});

@@ -6,7 +6,7 @@ const fs = require('fs');
 (async () => {
   const a = await openHub(), { page } = a;
   const tabs = await page.evaluate(() => [...document.querySelectorAll('#tabs button')].map((b) => b.textContent.trim()).join(','));
-  ok(/Prep check,Survey,Trays/.test(tabs), 'the Survey tab sits between Prep check and Trays: ' + tabs);
+  ok(/Prep check,Survey,Shells,Trays/.test(tabs), 'the Survey tab sits after Prep check, then Shells and Trays: ' + tabs);
   ok(await page.evaluate(() => !!document.querySelector('.tool[data-tool=survey]')), 'and has its card on “Choose a tool”');
   await a.demo();
   const sv = await a.go('survey');

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shell Card — shell temporaries and matrices</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+button{touch-action:manipulation}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum h5 .okb.warn{background:#fef3c7;color:#92400e}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+.count{font-size:12px;color:var(--muted);margin:4px 0 8px}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0}
+</style>
+</head>
+<body>
+<script type="module">
+// Shell Card — a provisional crown, a shell to reline, or a matrix, made from a second scan of the same arch.
+//  • Provisional crown: the tooth's shape from a scan taken before the preparation (or a wax-up), hollowed to fit the
+//    preparation with a cement space. It is the material that lies inside the "before" surface and outside the
+//    preparation (plus the space), up to the margin.
+//  • Shell to reline: the same outside shape, only a set thickness deep — an eggshell temporary relined in the mouth.
+//  • Matrix: a clear shell over the wax-up for an injected or pressed mock-up or a chairside provisional, with optional
+//    injection holes. It is made as seen from the biting side, so it has no undercuts and can be printed rigid.
+// The crown and shell are worked out on a 0.1 mm grid as signed distances to the two scans; the margin is followed along
+// the tooth's surface (shortest paths between the tapped points), so a proclined incisor needs no axis.
+import * as N from './core.js';
+const THREE = N.THREE, $ = N.$, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' }, mm = (v) => v.toFixed(2) + ' mm';
+const MODES = { crown: 'Provisional crown', shell: 'Shell to reline', matrix: 'Matrix' };
+const P = { jaw: null, mode: 'crown', gap: 0.08, wall: 1.0, thick: 2.0, mgap: 0.05, reach: 9, height: 11, holes: true, holeD: 1.6, seed: null, loop: [], taps: [] };   // points in the scan's own file coordinates
+let S = mkS(), B = null, PREP = null;                            // S: the second scan; B: the result; PREP: Prep check's marking, if the case has one
+function mkS() { return { shape: null, rel: null, fit: null, self: false }; }   // rel: the second scan's file → the main scan's file coordinates
+
+const shell = N.createShell({
+  name: 'Shell Card', tagline: 'Shell temporaries and matrices', title: document.title,
+  emptyHtml: '<div><b>Load the scan of the prepared arch</b>Drop it here, or use the demo.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'make', title: 'What to make', html: `
+      <div class="seg" id="mkMode"><button data-v="crown" type="button" title="A fitted provisional crown: the shape before the preparation, hollowed to fit it">Provisional crown</button><button data-v="shell" type="button" title="A thin shell of the same shape, relined in the mouth">Shell to reline</button><button data-v="matrix" type="button" title="A clear shell over a wax-up for a mock-up or a chairside provisional">Matrix</button></div>
+      <p class="lead" id="mkLead"></p>
+      <div class="row" id="mkJawRow"><label>Arch</label><div class="seg" id="mkJaw"><button data-v="upper" type="button">Upper</button><button data-v="lower" type="button">Lower</button></div></div>
+      <p class="tip">A design aid. Check the result on the model and in the mouth before relying on it.</p>` },
+    { id: 'shape', title: 'Shape to copy', html: `
+      <p class="lead" id="shLead"></p>
+      <div class="btns"><button class="btn pri" id="shFile" type="button" title="Choose the scan whose shape you want (STL, PLY or OBJ)">Load the scan</button><button class="btn" id="shSelf" type="button" title="The scan already loaded is the wax-up: make the matrix over it">This scan is the wax-up</button></div>
+      <input type="file" id="shIn" accept=".stl,.ply,.obj" hidden>
+      <div id="shFit"></div>
+      <div class="btns"><button class="btn" id="shAgain" type="button" title="Line the two scans up again">Line up again</button></div>
+      <p class="tip">The two scans are lined up on the parts that did not change (the other teeth), so the prepared tooth or the waxed teeth do not pull the fit. The second scan shows in pink.</p>` },
+    { id: 'teeth', title: 'Teeth', html: `
+      <p class="lead" id="tLead"></p>
+      <div class="count" id="tCount"></div>
+      <div class="btns"><button class="btn" id="tUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="tClear" type="button" title="Start marking again">Start again</button><button class="btn" id="tPrep" type="button" title="Use the tooth and margin already marked on the Prep check tab" hidden>Use Prep check’s margin</button></div>
+      <p class="tip" id="tTip"></p>` },
+    { id: 'design', title: 'Design', html: `
+      <p class="lead" id="dLead"></p>
+      <div class="row" id="dGapRow"><label>Cement space</label><input type="range" id="dGap" min="0" max="0.3" step="0.01" value="0.08"><span class="val"></span></div>
+      <div class="row" id="dWallRow"><label>Shell thickness</label><input type="range" id="dWall" min="0.5" max="2.5" step="0.1" value="1"><span class="val"></span></div>
+      <div class="row" id="dThickRow"><label>Matrix thickness</label><input type="range" id="dThick" min="1" max="4" step="0.25" value="2"><span class="val"></span></div>
+      <div class="row" id="dMGapRow"><label>Space over the teeth</label><input type="range" id="dMGap" min="0" max="0.3" step="0.01" value="0.05"><span class="val"></span></div>
+      <div class="row" id="dReachRow"><label>Reach from each tap</label><input type="range" id="dReach" min="5" max="16" step="0.5" value="9"><span class="val"></span></div>
+      <div class="row" id="dHeightRow"><label>Down from the tips</label><input type="range" id="dHeight" min="5" max="16" step="0.5" value="11"><span class="val"></span></div>
+      <label class="check" id="dHolesRow"><input type="checkbox" id="dHoles" checked> Injection hole over each tapped tooth</label>
+      <div class="row" id="dHoleDRow"><label>Hole diameter</label><input type="range" id="dHoleD" min="1" max="3" step="0.1" value="1.6"><span class="val"></span></div>
+      <div class="btns"><button class="btn pri" id="dBuild" type="button" title="Work out the shape">Make it</button></div>
+      <div id="dOut"></div>` },
+    { id: 'export', title: 'Download', html: `
+      <p class="lead">Download the result as an STL for printing, in the same position as the scan, or keep it in the case file.</p>
+      <div class="btns"><button class="btn pri" id="xStl" type="button" title="Download the shape as an STL file">Download STL</button><button class="btn" id="xCase" type="button" title="Save the scans, the second scan and the result as one case file">Save case</button></div>
+      <p class="tip" id="xTip"></p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const legend = shell.panel('', 'legend'); legend.hidden = true;
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Shell Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility' || what === 'case') return; if (B && B.key !== mainKey()) clearResult(); syncUI(); refreshView(); },
+  extendCase: (c) => {
+    c.remove('shell-shape'); c.remove('shell-part');
+    const jaw = pickJaw(), M = jaw && scans[jaw].matrix;
+    if (S.shape && S.rel && M) c.add({ role: 'shell-shape', name: S.shape.name || 'shape', mesh: S.shape, matrix: M.clone().multiply(S.rel), meta: { jaw, fit: S.fit } });
+    if (B && B.mesh && M) c.add({ role: 'shell-part', name: `${P.mode}-${jaw}`, mesh: N.transformMesh(B.mesh, M.clone().invert()), matrix: M.clone(), meta: { jaw, mode: P.mode } });
+    c.data.shell = { version: 1, jaw, mode: P.mode, self: S.self, gap: P.gap, wall: P.wall, thick: P.thick, mgap: P.mgap, reach: P.reach, height: P.height, holes: P.holes, holeD: P.holeD, seed: P.seed, loop: P.loop, taps: P.taps, info: B ? B.info : null };
+  },
+  readCase: (c) => {
+    S = mkS(); B = null; const d = c.data.shell;
+    PREP = c.data.prep && c.data.prep.seed && c.data.prep.loop && c.data.prep.loop.length >= 3 ? c.data.prep : null;
+    if (d) Object.assign(P, { jaw: d.jaw ?? P.jaw, mode: MODES[d.mode] ? d.mode : 'crown', gap: d.gap ?? P.gap, wall: d.wall ?? P.wall, thick: d.thick ?? P.thick, mgap: d.mgap ?? P.mgap, reach: d.reach ?? P.reach, height: d.height ?? P.height, holes: d.holes ?? P.holes, holeD: d.holeD ?? P.holeD, seed: d.seed || null, loop: d.loop || [], taps: d.taps || [] });
+    S.self = !!(d && d.self);
+    const jaw = pickJaw(), sh = c.get('shell-shape'); if (sh && jaw) { S.shape = sh.mesh; S.rel = scans[jaw].matrix.clone().invert().multiply(sh.matrix); S.fit = (sh.meta && sh.meta.fit) || null; }
+    const part = c.get('shell-part'); if (part && jaw) { B = { mesh: N.transformMesh(part.mesh, part.matrix), info: d && d.info, key: mainKey() }; thicknessOf(B); }
+    for (const [k, rb] of Object.entries(RB)) rb.set(P[k]); SEG.mode(P.mode); $('dHoles').checked = P.holes;
+  },
+});
+function pickJaw() { if (P.jaw && scans.has(P.jaw)) return P.jaw; P.jaw = scans.has('lower') && !scans.has('upper') ? 'lower' : scans.has('upper') && !scans.has('lower') ? 'upper' : scans.has('lower') ? 'lower' : null; return P.jaw; }
+const mainKey = () => { const j = pickJaw(), sc = j && scans[j]; return sc ? j + ':' + sc.raw.positions.length + ':' + N.crc32(new Uint8Array(sc.raw.positions.buffer, sc.raw.positions.byteOffset, Math.min(sc.raw.positions.byteLength, 120000))) + ':' + sc.matrix.elements.join(',') : null; };
+const toCase = (p) => new THREE.Vector3(...p).applyMatrix4(scans[pickJaw()].matrix);
+const toFile = (v) => v.clone().applyMatrix4(scans[pickJaw()].matrix.clone().invert()).toArray();
+const shapeMatrix = () => scans[pickJaw()].matrix.clone().multiply(S.rel);
+function clearResult() { B = null; }
+
+// ───────────── surfaces: closest points, which side, distances ─────────────
+const Q = new Map();                                             // cache: key → { bvh, idx, fn, or, mesh }
+function surf(mesh, key) {
+  if (Q.has(key)) return Q.get(key);
+  const g = new THREE.BufferGeometry(), idx = Uint32Array.from(mesh.indices); g.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));   // the BVH reorders the list it is given: a copy
+  const bvh = new N.MeshBVH(g), Pm = mesh.positions, nF = idx.length / 3, fn = new Float32Array(nF * 3);
+  for (let f = 0; f < nF; f++) { const a = idx[3 * f] * 3, b = idx[3 * f + 1] * 3, c = idx[3 * f + 2] * 3, ux = Pm[b] - Pm[a], uy = Pm[b + 1] - Pm[a + 1], uz = Pm[b + 2] - Pm[a + 2], wx = Pm[c] - Pm[a], wy = Pm[c + 1] - Pm[a + 1], wz = Pm[c + 2] - Pm[a + 2]; fn[3 * f] = uy * wz - uz * wy; fn[3 * f + 1] = uz * wx - ux * wz; fn[3 * f + 2] = ux * wy - uy * wx; }
+  // which way the triangles face (+1 out of the teeth, as scanners write them; −1 if this file has them the other way round)
+  const up = pickJaw() === 'upper' ? -1 : 1; let zt = -Infinity; for (let i = 2; i < Pm.length; i += 3) if (up * Pm[i] > zt) zt = up * Pm[i];
+  let s = 0; for (let f = 0; f < nF; f++) { const a = idx[3 * f] * 3, b = idx[3 * f + 1] * 3, c = idx[3 * f + 2] * 3; if (up * (Pm[a + 2] + Pm[b + 2] + Pm[c + 2]) / 3 < zt - 2.5) continue; s += up * fn[3 * f + 2]; }
+  const o = { bvh, idx, fn, or: s >= 0 ? 1 : -1, mesh }; if (Q.size > 6) Q.clear(); Q.set(key, o); return o;
+}
+const mainSurf = () => surf(scans.framed(pickJaw()), 'main|' + mainKey());
+const shapeMesh = () => (S.self ? scans.framed(pickJaw()) : N.transformMesh(S.shape, shapeMatrix()));
+const shapeSurf = () => (S.self ? mainSurf() : surf(shapeMesh(), 'shape|' + mainKey() + '|' + S.rel.elements.join(',') + '|' + S.shape.positions.length));
+/** signed distance to a surface: + outside the teeth, − inside; hit gets the closest point and triangle */
+function sd(o, q, hit) {
+  o.bvh.closestPointToPoint(q, hit); const f = hit.faceIndex;
+  const side = ((q.x - hit.point.x) * o.fn[3 * f] + (q.y - hit.point.y) * o.fn[3 * f + 1] + (q.z - hit.point.z) * o.fn[3 * f + 2]) * o.or;
+  return side >= 0 ? hit.distance : -hit.distance;
+}
+
+// ───────────── the second scan ─────────────
+async function lineUp() {
+  const jaw = pickJaw(); if (!S.shape || !jaw) return;
+  await shell.busy('Lining the scans up…', async () => {
+    await N.sleep(30); const ref = mainSurf(), start = N.autoOrient(S.shape, jaw).matrix, r = N.alignScans(S.shape, scans.framed(jaw), { start, bvh: ref.bvh });
+    S.rel = scans[jaw].matrix.clone().invert().multiply(r.matrix); S.fit = { rms: r.rms, kept: r.kept };
+  });
+  B = null; scans.touch(); syncUI(); refreshView();
+}
+
+// ───────────── the margin, followed along the tooth's surface ─────────────
+let GR = null;                                                   // { key, graph }
+function graphOf(M, key) { if (!GR || GR.key !== key) GR = { key, graph: N.vertexGraph(M) }; return GR.graph; }
+function nearestVertex(o, p) { const hit = {}; o.bvh.closestPointToPoint(p, hit); const f = hit.faceIndex, P0 = o.mesh.positions; let best = -1, bd = Infinity; for (let k = 0; k < 3; k++) { const v = o.idx[3 * f + k], d = Math.hypot(P0[3 * v] - p.x, P0[3 * v + 1] - p.y, P0[3 * v + 2] - p.z); if (d < bd) { bd = d; best = v; } } return best; }
+/** per vertex of the prepared scan: distance along the surface from the margin, negative inside it (on the preparation), up to ±6 mm */
+function marginField() {
+  const jaw = pickJaw(), o = mainSurf(), M = o.mesh, P0 = M.positions, nV = P0.length / 3, g = graphOf(M, mainKey());
+  const seed = toCase(P.seed), loop = P.loop.map(toCase), sv = nearestVertex(o, seed), lv = loop.map((p) => nearestVertex(o, p));
+  const R2 = 15 * 15, allow = (v) => (P0[3 * v] - seed.x) ** 2 + (P0[3 * v + 1] - seed.y) ** 2 + (P0[3 * v + 2] - seed.z) ** 2 < R2;
+  const wall = new Uint8Array(nV);
+  for (let i = 0; i < lv.length; i++) {                            // the shortest path along the surface from each margin point to the next
+    const a = lv[i], b = lv[(i + 1) % lv.length]; if (a === b) { wall[a] = 1; continue; }
+    const r = N.surfaceDistances(M, g, [[a, 0]], { allow, stopAt: b }); if (r.prev[b] < 0 && a !== b) return { error: 'The margin points could not be joined along the tooth. Tap them closer together, in order round the tooth.' };
+    for (let v = b; v >= 0; v = r.prev[v]) { wall[v] = 1; if (v === a) break; }
+  }
+  if (wall[sv]) return { error: 'The tooth tap lies on the margin: tap the middle of the prepared tooth first.' };
+  const inside = new Uint8Array(nV), stack = [sv]; inside[sv] = 1; let leak = false;
+  while (stack.length) { const v = stack.pop(); for (let e = g.start[v]; e < g.start[v + 1]; e++) { const w = g.list[e]; if (inside[w] || wall[w]) continue; if (!allow(w)) { leak = true; continue; } inside[w] = 1; stack.push(w); } }
+  if (leak) return { error: 'The margin does not close round the tooth: add points where it has a gap, all the way round.' };
+  const src = []; for (let v = 0; v < nV; v++) if (wall[v]) src.push([v, 0]);
+  const dd = N.surfaceDistances(M, g, src, { allow, maxDist: 6 }).dist, s = new Float32Array(nV);
+  for (let v = 0; v < nV; v++) { const d = Math.min(6, dd[v]); s[v] = inside[v] ? -d : d; }
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], n = 0;
+  for (let v = 0; v < nV; v++) if (inside[v] || wall[v]) { n++; for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], P0[3 * v + k]); hi[k] = Math.max(hi[k], P0[3 * v + k]); } }
+  return { s, lo, hi, n };
+}
+function interpAt(o, hit, val) {                                   // a per-vertex value at the closest point, by barycentric weights
+  const f = hit.faceIndex, P0 = o.mesh.positions, a = o.idx[3 * f], b = o.idx[3 * f + 1], c = o.idx[3 * f + 2], p = hit.point;
+  const ax = P0[3 * a], ay = P0[3 * a + 1], az = P0[3 * a + 2], v0x = P0[3 * b] - ax, v0y = P0[3 * b + 1] - ay, v0z = P0[3 * b + 2] - az, v1x = P0[3 * c] - ax, v1y = P0[3 * c + 1] - ay, v1z = P0[3 * c + 2] - az, v2x = p.x - ax, v2y = p.y - ay, v2z = p.z - az;
+  const d00 = v0x * v0x + v0y * v0y + v0z * v0z, d01 = v0x * v1x + v0y * v1y + v0z * v1z, d11 = v1x * v1x + v1y * v1y + v1z * v1z, d20 = v2x * v0x + v2y * v0y + v2z * v0z, d21 = v2x * v1x + v2y * v1y + v2z * v1z, den = d00 * d11 - d01 * d01;
+  if (Math.abs(den) < 1e-12) return val[a]; const w1 = (d11 * d20 - d01 * d21) / den, w2 = (d00 * d21 - d01 * d20) / den, w0 = 1 - w1 - w2;
+  return w0 * val[a] + w1 * val[b] + w2 * val[c];
+}
+
+// ───────────── making it ─────────────
+/** a field sampled on a fine grid, worked out exactly only near its surface (a coarse grid says where that is) */
+async function sampleBand(lo, hi, h, f) {
+  const hc = 0.4, cn = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / hc) + 1), C = new Float32Array(cn[0] * cn[1] * cn[2]), q = new THREE.Vector3();
+  for (let k = 0; k < cn[2]; k++) { for (let j = 0; j < cn[1]; j++) for (let i = 0; i < cn[0]; i++) C[i + cn[0] * (j + cn[1] * k)] = f(q.set(lo[0] + i * hc, lo[1] + j * hc, lo[2] + k * hc)); if (k % 8 === 0) await N.sleep(0); }
+  const n = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / h) + 1), F = new Float32Array(n[0] * n[1] * n[2]); let exact = 0;
+  for (let k = 0; k < n[2]; k++) {
+    const z = lo[2] + k * h, fz = Math.min(cn[2] - 1.001, (z - lo[2]) / hc), kz = Math.floor(fz), tz = fz - kz;
+    for (let j = 0; j < n[1]; j++) {
+      const y = lo[1] + j * h, fy = Math.min(cn[1] - 1.001, (y - lo[1]) / hc), jy = Math.floor(fy), ty = fy - jy;
+      for (let i = 0; i < n[0]; i++) {
+        const x = lo[0] + i * h, fx = Math.min(cn[0] - 1.001, (x - lo[0]) / hc), ix = Math.floor(fx), tx = fx - ix, b = ix + cn[0] * (jy + cn[1] * kz), X = 1, Y = cn[0], Z = cn[0] * cn[1];
+        const c = (C[b] * (1 - tx) + C[b + X] * tx) * (1 - ty) * (1 - tz) + (C[b + Y] * (1 - tx) + C[b + Y + X] * tx) * ty * (1 - tz) + (C[b + Z] * (1 - tx) + C[b + Z + X] * tx) * (1 - ty) * tz + (C[b + Z + Y] * (1 - tx) + C[b + Z + Y + X] * tx) * ty * tz;
+        F[i + n[0] * (j + n[1] * k)] = Math.abs(c) > 0.45 ? c : (exact++, f(q.set(x, y, z)));
+      }
+    }
+    if (k % 6 === 0) { shell.setBusyText(`Working out the shape… ${Math.round(100 * k / n[2])}%`); await N.sleep(0); }
+  }
+  return { F, n, exact };
+}
+async function buildCrown() {
+  const mf = marginField(); if (mf.error) throw new Error(mf.error);
+  const om = mainSurf(), os = shapeSurf(), gap = P.gap, T = P.wall, shellMode = P.mode === 'shell', hm = {}, hs = {};
+  const f = (q) => { const dS = sd(os, q, hs), dM = sd(om, q, hm), clip = interpAt(om, hm, mf.s); let v = Math.max(dS, gap - dM, clip); if (shellMode) v = Math.max(v, -(dS + T)); return v; };
+  const lo = mf.lo.map((v) => v - 3), hi = mf.hi.map((v) => v + 3), vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), h = Math.max(0.08, Math.cbrt(vol / 3.5e6));
+  const { F, n } = await sampleBand(lo, hi, h, f);
+  shell.setBusyText('Building the surface…'); await N.sleep(0);
+  const mesh = N.isoMesh(F, n[0], n[1], n[2], lo, h, { minVolume: 1 });
+  if (!mesh.indices.length) throw new Error(S.self ? 'Nothing to make: load the scan from before the preparation (or the wax-up) on the Shape step.' : 'Nothing found between the two scans inside the margin: check the second scan is the same arch before the preparation, and that it lines up.');
+  const R = { mesh, key: mainKey(), mf, h }; thicknessOf(R); R.info = infoOf(R); return R;
+}
+async function buildMatrix() {
+  const jaw = pickJaw(), up = jaw === 'upper' ? -1 : 1, base = shapeMesh(), taps = P.taps.map(toCase); if (!taps.length) throw new Error('Tap the teeth the matrix should cover first (Teeth step).');
+  const cell = 0.15, R = P.reach + 0.5, gap = P.mgap, T = P.thick, rH = P.holeD / 2, bb = N.meshBounds(base);
+  const bounds = { min: [Math.min(...taps.map((p) => p.x)) - R, Math.min(...taps.map((p) => p.y)) - R, bb.min[2]], max: [Math.max(...taps.map((p) => p.x)) + R, Math.max(...taps.map((p) => p.y)) + R, bb.max[2]] };
+  const hf = N.rasterHeightfield(base, { cell, mode: up > 0 ? 'max' : 'min', bounds, pad: T + gap + 1 }), Hin = N.morphField(hf, gap), Hout = N.morphField(hf, gap + T), { nx, ny, x0, y0 } = hf;
+  const near = new Float32Array(nx * ny), tipZ = new Float32Array(nx * ny);   // plan distance to the nearest tap, and that tap's height
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const x = x0 + i * cell, y = y0 + j * cell; let bd = Infinity, bz = 0; for (const t of taps) { const d = Math.hypot(x - t.x, y - t.y); if (d < bd) { bd = d; bz = t.z; } } near[j * nx + i] = bd; tipZ[j * nx + i] = bz; }
+  let zlo = Infinity, zhi = -Infinity;
+  for (let c = 0; c < nx * ny; c++) { if (near[c] > R || !Number.isFinite(Hin.z[c]) || !Number.isFinite(Hout.z[c])) continue; zlo = Math.min(zlo, Hin.z[c], Hout.z[c]); zhi = Math.max(zhi, Hin.z[c], Hout.z[c]); }
+  if (!Number.isFinite(zlo)) throw new Error('The taps are not over the scan.');
+  zlo -= 0.6; zhi += 0.6; const h = cell, nz = Math.ceil((zhi - zlo) / h) + 1, F = new Float32Array(nx * ny * nz);
+  for (let k = 0; k < nz; k++) { const z = zlo + k * h; for (let c = 0; c < nx * ny; c++) {
+    const hi = Hin.z[c], ho = Hout.z[c]; let v;
+    if (!Number.isFinite(hi) || !Number.isFinite(ho)) v = 1; else {
+      v = up > 0 ? Math.max(hi - z, z - ho) : Math.max(z - hi, ho - z);
+      v = Math.max(v, near[c] - P.reach, up * (tipZ[c] - up * P.height - z));            // within reach of a tap, and not further down than the height asked for
+      if (P.holes) v = Math.max(v, rH - near[c]);                                          // an injection hole over each tap
+    }
+    F[c + nx * ny * k] = v;
+  } if (k % 10 === 0) { shell.setBusyText(`Working out the matrix… ${Math.round(100 * k / nz)}%`); await N.sleep(0); } }
+  shell.setBusyText('Building the surface…'); await N.sleep(0);
+  const mesh = N.isoMesh(F, nx, ny, nz, [x0, y0, zlo], h, { minVolume: 2 });
+  if (!mesh.indices.length) throw new Error('Nothing to make: check the taps are on the teeth.');
+  const out = { mesh, key: mainKey(), h }; out.info = infoOf(out); return out;
+}
+/** thickness at each vertex of a crown or shell: on the outside, how far in the preparation (plus space) is; on the inside, how far out the outer surface is */
+function thicknessOf(R) {
+  if (P.mode === 'matrix' || !S.shape && !S.self) { R.thick = null; return; }
+  const om = mainSurf(), os = S.shape || S.self ? shapeSurf() : null; if (!os) { R.thick = null; return; }
+  const Pm = R.mesh.positions, nV = Pm.length / 3, t = new Float32Array(nV), edge = new Uint8Array(nV), q = new THREE.Vector3(), hm = {}, hs = {}, mf = R.mf || (P.seed && P.loop.length >= 3 ? marginField() : null);
+  for (let v = 0; v < nV; v++) {
+    q.set(Pm[3 * v], Pm[3 * v + 1], Pm[3 * v + 2]); const a = sd(om, q, hm) - P.gap, b = -sd(os, q, hs);
+    t[v] = Math.abs(b) < Math.abs(a) ? (P.mode === 'shell' ? Math.min(a, P.wall) : a) : b;
+    if (mf && !mf.error && interpAt(om, hm, mf.s) > -0.6) edge[v] = 1;                     // within 0.6 mm of the margin: the edge thins to nothing there by design
+  }
+  R.thick = t; R.edge = edge;
+}
+function infoOf(R) {
+  const m = R.mesh, info = { mode: P.mode, volume: N.meshVolume(m), tris: m.indices.length / 3, closed: N.isWatertight(m), grid: R.h };
+  if (R.thick) {
+    const I = m.indices, Pm = m.positions, va = new Float32Array(Pm.length / 3);
+    for (let f = 0; f < I.length; f += 3) { const a = I[f] * 3, b = I[f + 1] * 3, c = I[f + 2] * 3, ux = Pm[b] - Pm[a], uy = Pm[b + 1] - Pm[a + 1], uz = Pm[b + 2] - Pm[a + 2], wx = Pm[c] - Pm[a], wy = Pm[c + 1] - Pm[a + 1], wz = Pm[c + 2] - Pm[a + 2], ar = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 6; va[I[f]] += ar; va[I[f + 1]] += ar; va[I[f + 2]] += ar; }
+    const ord = []; for (let v = 0; v < va.length; v++) if (!R.edge[v]) ord.push(v); ord.sort((a, b) => R.thick[a] - R.thick[b]);
+    let acc = 0, thin = 0, minV = -1; for (const v of ord) { acc += va[v]; if (minV < 0 && acc >= 0.5) minV = v; if (R.thick[v] < 0.5) thin += va[v]; }   // the thinnest value reached over at least 0.5 mm²
+    info.thinnest = minV >= 0 ? R.thick[minV] : null; info.thinAt = minV >= 0 ? [Pm[3 * minV], Pm[3 * minV + 1], Pm[3 * minV + 2]] : null; info.thinArea = thin;
+    const nrm = N.vertexNormals(m), up = pickJaw() === 'upper' ? -1 : 1, occ = [];       // the occlusal (incisal) thickness: outer surface facing the biting side
+    for (let v = 0; v < va.length; v++) if (!R.edge[v] && up * nrm[3 * v + 2] > 0.7 && R.thick[v] > 0) occ.push(R.thick[v]);
+    occ.sort((a, b) => a - b); info.occlusal = occ.length ? occ[occ.length >> 1] : null;
+  }
+  if (P.mode === 'matrix') info.holes = P.holes ? P.taps.length : 0;
+  return info;
+}
+$('dBuild').addEventListener('click', async () => {
+  const jaw = pickJaw(); if (!jaw) return shell.status('Load a scan first', true);
+  if (P.mode !== 'matrix' && !S.shape) return shell.status('Load the scan from before the preparation first (Shape step)', true);
+  if (P.mode !== 'matrix' && (!P.seed || P.loop.length < 3)) return shell.status('Mark the prepared tooth and its margin first (Teeth step)', true);
+  if (P.mode === 'matrix' && !S.shape && !S.self) return shell.status('Load the wax-up, or say this scan is the wax-up (Shape step)', true);
+  try {
+    const t0 = performance.now(); B = await shell.busy('Working out the shape…', () => (P.mode === 'matrix' ? buildMatrix() : buildCrown()));
+    B.info.seconds = (performance.now() - t0) / 1000; B.focus = P.mode !== 'matrix'; scans.touch(); shell.status(`${MODES[P.mode]} made: ${B.info.volume.toFixed(0)} mm³, ${B.info.closed ? 'closed' : 'not closed'}`);
+  } catch (err) { B = null; shell.status(String((err && err.message) || err), true); }
+  syncUI(); refreshView();
+});
+
+// ───────────── marking ─────────────
+const tapTool = {
+  cursor: 'crosshair', onDown: () => false,
+  onClick: (i) => {
+    if (i.button !== 0 || !pickJaw()) return; const h = i.pick([scans[P.jaw].object]); if (!h) return; const p = toFile(h.point);
+    if (P.mode === 'matrix') P.taps.push(p); else if (!P.seed) P.seed = p; else P.loop.push(p);
+    B = null; scans.touch(); syncUI(); refreshView();
+  },
+  onMove: () => {}, onUp: () => {},
+};
+$('tUndo').addEventListener('click', () => { if (P.mode === 'matrix') P.taps.pop(); else if (P.loop.length) P.loop.pop(); else P.seed = null; B = null; syncUI(); refreshView(); });
+$('tClear').addEventListener('click', () => { if (P.mode === 'matrix') P.taps = []; else { P.seed = null; P.loop = []; } B = null; syncUI(); refreshView(); });
+$('tPrep').addEventListener('click', () => {
+  if (!PREP) return; if (PREP.jaw && scans.has(PREP.jaw)) P.jaw = PREP.jaw; const inv = scans[pickJaw()].matrix.clone().invert(), F = (p) => new THREE.Vector3(...p).applyMatrix4(inv).toArray();
+  P.seed = F(PREP.seed); P.loop = PREP.loop.map(F); B = null; scans.touch(); syncUI(); refreshView(); shell.status(`Prep check’s tooth and ${P.loop.length} margin points used`);
+});
+
+// ───────────── the second scan: loading ─────────────
+$('shFile').addEventListener('click', () => $('shIn').click());
+$('shIn').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return; if (!pickJaw()) return shell.status('Load the prepared arch first', true);
+  try { const m = await shell.busy('Reading the scan…', async () => N.cleanMesh(await N.readMeshFile(f)).mesh); m.name = f.name; S = { shape: m, rel: null, fit: null, self: false }; await lineUp(); }
+  catch (err) { shell.status(String((err && err.message) || err), true); }
+});
+$('shSelf').addEventListener('click', () => { S = { shape: null, rel: null, fit: null, self: true }; B = null; scans.touch(); syncUI(); refreshView(); shell.status('The matrix will be made over the scan already loaded'); });
+$('shAgain').addEventListener('click', () => lineUp());
+
+// ───────────── controls ─────────────
+const ch = (k) => (v, done) => { P[k] = v; if (done) { B = null; scans.touch(); syncUI(); refreshView(); } };
+const RB = {
+  gap: N.rangeBind('dGap', ch('gap'), { fmt: (v) => v.toFixed(2) + ' mm' }), wall: N.rangeBind('dWall', ch('wall'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+  thick: N.rangeBind('dThick', ch('thick'), { fmt: (v) => v.toFixed(2) + ' mm' }), mgap: N.rangeBind('dMGap', ch('mgap'), { fmt: (v) => v.toFixed(2) + ' mm' }),
+  reach: N.rangeBind('dReach', ch('reach'), { fmt: (v) => v.toFixed(1) + ' mm' }), height: N.rangeBind('dHeight', ch('height'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+  holeD: N.rangeBind('dHoleD', ch('holeD'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+};
+$('dHoles').addEventListener('change', (e) => { P.holes = e.target.checked; B = null; scans.touch(); syncUI(); refreshView(); });
+const SEG = {
+  mode: N.segBind($('mkMode'), (v) => { const was = P.mode; P.mode = v; if ((was === 'matrix') !== (v === 'matrix')) B = null; else if (was !== v) B = null; scans.touch(); syncUI(); refreshView(); }, P.mode),
+  jaw: N.segBind($('mkJaw'), (v) => { if (!scans.has(v)) return syncUI(); if (v !== P.jaw) { P.jaw = v; P.seed = null; P.loop = []; P.taps = []; S = mkS(); B = null; } syncUI(); refreshView(); }),
+};
+$('xStl').addEventListener('click', async () => {
+  if (!B) return shell.status('Make it first (Design step)', true);
+  const jaw = pickJaw(), m = N.transformMesh(B.mesh, scans[jaw].matrix.clone().invert());
+  await N.saveFile(`${P.mode === 'crown' ? 'provisional' : P.mode === 'shell' ? 'shell' : 'matrix'}-${jaw}.stl`, N.stlBinary(m, null, `Shell Card ${MODES[P.mode].toLowerCase()}, mm`));
+});
+$('xCase').addEventListener('click', () => scans.saveCase());
+
+// ───────────── what is shown ─────────────
+function syncUI() {
+  const jaw = pickJaw(), mx = P.mode === 'matrix', shown = (id, on) => { const e = $(id); if (e) e.hidden = !on; };
+  SEG.mode(P.mode); SEG.jaw(jaw); for (const b of $('mkJaw').children) b.disabled = !scans.has(b.dataset.v);
+  shown('mkJawRow', scans.has('upper') && scans.has('lower'));
+  $('mkLead').textContent = P.mode === 'crown' ? 'A provisional crown that fits the preparation: its outside is the tooth as it was before (or as waxed up), its inside the preparation plus a cement space. You need a scan of the arch before the preparation, or a wax-up.'
+    : P.mode === 'shell' ? 'A thin shell of the tooth’s shape before the preparation (or as waxed up), to reline in the mouth with a provisional material. You need a scan of the arch before the preparation, or a wax-up.'
+    : 'A clear matrix over a wax-up, for an injected or pressed mock-up or a chairside provisional. It covers the teeth you tap and reaches onto their neighbours to seat; it has no undercuts, so it can be printed in a rigid clear resin.';
+  $('shLead').textContent = mx ? 'Load the wax-up of this arch (it is lined up on the teeth that were not changed), or use the scan already loaded if that is the wax-up.' : 'Load a scan of this arch taken before the preparation, or a wax-up of it. It is lined up on the other teeth.';
+  shown('shSelf', mx); shown('shAgain', !!S.shape);
+  const fit = S.fit;
+  $('shFit').innerHTML = S.self ? '<div class="sum"><h5>The scan already loaded is the wax-up</h5></div>' : S.shape ? `<div class="sum"><h5>${N.esc(S.shape.name || 'second scan')}<span class="okb${fit && fit.rms > 0.12 ? ' warn' : ''}">${fit && fit.rms > 0.12 ? 'check the fit' : 'lined up'}</span></h5>${fit ? `<div><span>Fit on the unchanged parts (rms)</span><b>${mm(fit.rms)}</b></div>` : ''}</div>` : '';
+  if (mx) { $('tLead').textContent = P.taps.length ? 'Tap the next tooth, or go on to Design.' : 'Tap each tooth the matrix should cover, on its incisal edge or the middle of its biting surface. An injection hole goes there if you want one.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The matrix reaches the distance set on the Design step from each tap, so a tooth either side is covered too, which helps it seat.'; }
+  else { $('tLead').textContent = !P.seed ? 'Tap the middle of the prepared tooth.' : P.loop.length < 3 ? 'Now tap round the margin, in order, all the way round (8 or more points; more where it curves).' : 'Add points where the line leaves the margin, or go on to Design.'; $('tCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}` : ''; $('tTip').textContent = 'The margin is followed along the tooth’s surface between your points, so the provisional ends exactly there.'; }
+  shown('tPrep', !mx && !!PREP && (!PREP.jaw || PREP.jaw === jaw));
+  $('dLead').textContent = P.mode === 'crown' ? 'Set the cement space, then make it. Thin areas show in red (under 0.5 mm).' : P.mode === 'shell' ? 'Set the shell’s thickness and the space it keeps from the preparation, then make it.' : 'Set the matrix’s thickness and how far it reaches, then make it.';
+  for (const [id, on] of [['dGapRow', !mx], ['dWallRow', P.mode === 'shell'], ['dThickRow', mx], ['dMGapRow', mx], ['dReachRow', mx], ['dHeightRow', mx], ['dHolesRow', mx], ['dHoleDRow', mx && P.holes]]) shown(id, on);
+  const i = B && B.info; let out = '';
+  if (i) {
+    const thinBad = i.thinnest != null && i.thinnest < 0.5;
+    out = `<div class="sum"><h5>${MODES[i.mode] || 'Result'}<span class="okb${!i.closed ? ' bad' : thinBad ? ' warn' : ''}">${!i.closed ? 'not closed' : thinBad ? 'thin areas' : 'closed solid'}</span></h5>`
+      + `<div><span>Volume</span><b>${i.volume.toFixed(0)} mm³</b></div>`
+      + (i.thinnest != null ? `<div><span>Thinnest (away from the margin)</span><b>${mm(i.thinnest)}</b></div>` : '')
+      + (i.occlusal != null ? `<div><span>Typical occlusal / incisal thickness</span><b>${mm(i.occlusal)}</b></div>` : '')
+      + (i.thinArea != null ? `<div><span>Area under 0.5 mm</span><b>${i.thinArea.toFixed(1)} mm²</b></div>` : '')
+      + (i.holes != null ? `<div><span>Injection holes</span><b>${i.holes}</b></div>` : '')
+      + `<div><span>Triangles</span><b>${i.tris.toLocaleString('en-GB')}</b></div>` + (i.seconds ? `<div><span>Made in</span><b>${i.seconds.toFixed(1)} s</b></div>` : '') + '</div>';
+    if (thinBad) out += '<p class="note">Some of it is under 0.5 mm thick: printed provisional resins usually need more there. Check your resin’s minimum, or reduce the preparation further.</p>';
+  }
+  $('dOut').innerHTML = out;
+  $('xTip').textContent = P.mode === 'matrix' ? 'Print in a clear resin. Check it seats on the model before injecting.' : P.mode === 'crown' ? 'Print in a provisional crown resin following its maker’s instructions; the margin is left exactly at the line you marked, so check it on the model.' : 'Print in a provisional resin, then reline in the mouth.';
+  shell.markDone('make', !!jaw); shell.markDone('shape', !!(S.shape || S.self)); shell.markDone('teeth', mx ? P.taps.length > 0 : !!(P.seed && P.loop.length >= 3)); shell.markDone('design', !!B);
+}
+let extra = [], marks = [];
+const thickColour = (t) => (t < 0.5 ? new THREE.Color(0xdc2626) : t < 1.0 ? new THREE.Color(0xf59e0b) : new THREE.Color(0x14b8a6));
+function refreshView() {
+  for (const o of extra) viewer.remove(o); extra = []; for (const m of marks) { if (m.m.dispose) m.m.dispose(); else viewer.scene.remove(m.m); if (m.l) m.l.remove(); } marks = [];
+  const id = shell.current >= 0 ? shell.steps[shell.current].id : 'load', jaw = pickJaw();
+  if (jaw && ['shape', 'teeth', 'design', 'export'].includes(id)) { for (const j of JAWS) if (scans[j] && scans[j].object.visible !== (j === jaw)) scans.setVisible(j, j === jaw); }
+  else for (const j of JAWS) if (scans[j] && !scans[j].object.visible) scans.setVisible(j, true);
+  if (jaw && id === 'shape' && S.shape && S.rel) {                 // the second scan, in pink
+    const o = new THREE.Mesh(N.toGeometry(shapeMesh()), new THREE.MeshStandardMaterial({ color: 0xe879f9, transparent: true, opacity: 0.45, roughness: 0.6, side: THREE.DoubleSide, depthWrite: false })); o.userData.noFit = true; viewer.add(o); extra.push(o);
+  }
+  if (jaw && ['teeth', 'design', 'export'].includes(id)) {
+    if (P.mode === 'matrix') for (const p of P.taps) marks.push({ m: viewer.marker(toCase(p), { color: 0xa21caf, px: 13 }) });
+    else { const pts = P.loop.map(toCase); if (pts.length >= 2) marks.push({ m: viewer.line(pts, { color: 0xe879f9, width: 3, closed: pts.length >= 3, depthTest: false }) }); if (id === 'teeth') { for (const p of pts) marks.push({ m: viewer.marker(p, { color: 0xa21caf, px: 12 }) }); if (P.seed) marks.push({ m: viewer.marker(toCase(P.seed), { color: 0x0f2a44, px: 16 }) }); } }
+  }
+  legend.hidden = true;
+  if (B && ['design', 'export'].includes(id)) {
+    const g = N.toGeometry(B.mesh); let mat;
+    if (B.thick) { const col = new Float32Array(B.mesh.positions.length); for (let v = 0; v < B.thick.length; v++) { const c = B.edge && B.edge[v] ? new THREE.Color(0x94a3b8) : thickColour(B.thick[v]); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; } const ng = new THREE.BufferGeometry(); ng.setAttribute('position', new THREE.BufferAttribute(B.mesh.positions, 3)); ng.setIndex(new THREE.BufferAttribute(B.mesh.indices, 1)); ng.setAttribute('color', new THREE.BufferAttribute(col, 3)); ng.computeVertexNormals(); mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }); const o = new THREE.Mesh(ng, mat); o.userData.noFit = true; viewer.add(o); extra.push(o);
+      legend.hidden = false; legend.innerHTML = '<div><i style="background:#dc2626"></i>under 0.5 mm</div><div><i style="background:#f59e0b"></i>0.5 – 1.0 mm</div><div><i style="background:#14b8a6"></i>1.0 mm or more</div><div><i style="background:#94a3b8"></i>the edge at the margin</div>';
+      if (B.info && B.info.thinAt) { const v = new THREE.Vector3(...B.info.thinAt); marks.push({ m: viewer.marker(v, { color: 0x0f2a44, px: 11 }), l: viewer.label(`thinnest ${mm(B.info.thinnest)}`, v, { dy: -16 }) }); } }
+    else { const o = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.6, roughness: 0.3, side: THREE.DoubleSide, depthWrite: false })); o.userData.noFit = true; viewer.add(o); extra.push(o); }
+  }
+  if (B && B.focus && ['design', 'export'].includes(id)) {           // a single crown is small: frame it, seen from the cheek side and a little above, once
+    B.focus = false; const bb = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(B.mesh.positions, 3)), c = bb.getCenter(new THREE.Vector3()), up = jaw === 'upper' ? -1 : 1, out = new THREE.Vector3(c.x, c.y + 8, 0).normalize();
+    viewer.fit(bb.expandByScalar(4), { dir: [out.x, out.y, up * 0.9] });
+  }
+  if (id === 'teeth' && jaw) { if (viewer.tool !== tapTool) viewer.setTool(tapTool); shell.hint(P.mode === 'matrix' ? 'Tap each tooth to cover' : !P.seed ? 'Tap the prepared tooth' : 'Tap round the margin'); } else if (viewer.tool === tapTool) { viewer.setTool(null); shell.hint(''); }
+  viewer.invalidate();
+}
+shell.onStepChange(() => { syncUI(); refreshView(); });
+syncUI(); shell.goto(0);
+window.APP = { N, THREE, shell, viewer, scans, P, get S() { return S; }, get B() { return B; }, get PREP() { return PREP; }, lineUp, marginField, buildCrown, buildMatrix, refreshView, syncUI, RB, SEG, sd, mainSurf, shapeSurf, shapeMesh };
+</script>
+</body>
+</html>

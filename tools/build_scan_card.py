@@ -15,6 +15,7 @@ Scan Card is one app made of four pages that share scan-card/src/core.js (and so
     scan-card/src/compare.html   Compare  (Compare Card)    ->  /scan-card/compare/
     scan-card/src/prep.html      Prep check (Prep Card)     ->  /scan-card/prep/
     scan-card/src/survey.html    Survey   (Survey Card)     ->  /scan-card/survey/
+    scan-card/src/shell.html     Shells   (Shell Card)      ->  /scan-card/shell/
 
 The hub shows each tool in a frame; a tool page that finds the hub above it takes its scans from there (see "inside
 Scan Card" in core.js). Opened on its own address, each tool page is still the complete stand-alone app. The hub's
@@ -60,8 +61,8 @@ PAGES = [
     # source, output, uses the solid engine, settings for core.js / the hub, description
     ('index.html', 'index.html', False,
      {'NOTILE': {'fonts': False, 'family': FONT},
-      'SCAN_CARD': {'home': '/', 'urls': {'model': 'model/', 'analysis': 'analysis/', 'splint': 'splint/', 'compare': 'compare/', 'prep': 'prep/', 'survey': 'survey/', 'tray': '/tray-card/', 'wax': '/wax-card/'}}},
-     'Scan Card: study models, model analysis, splints, scan comparison, preparation checks, surveying and block-out, special trays and wax-ups from one patient scan. Runs on your own device.'),
+      'SCAN_CARD': {'home': '/', 'urls': {'model': 'model/', 'analysis': 'analysis/', 'splint': 'splint/', 'compare': 'compare/', 'prep': 'prep/', 'survey': 'survey/', 'shell': 'shell/', 'tray': '/tray-card/', 'wax': '/wax-card/'}}},
+     'Scan Card: study models, model analysis, splints, scan comparison, preparation checks, surveying and block-out, shell temporaries and matrices, special trays and wax-ups from one patient scan. Runs on your own device.'),
     ('model.html', 'model/index.html', True, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
      'Model Card, part of Scan Card: turn a scan into a printable study or working model. Runs on your own device.'),
     ('analysis.html', 'analysis/index.html', False, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
@@ -74,6 +75,8 @@ PAGES = [
      'Prep Card, part of Scan Card: undercuts, wall angles, convergence and clearance of a tooth preparation on a scan. Runs on your own device.'),
     ('survey.html', 'survey/index.html', True, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
      'Survey Card, part of Scan Card: survey lines, undercut depths and a blocked-out model for a path of insertion on a scan. Runs on your own device.'),
+    ('shell.html', 'shell/index.html', False, {'NOTILE': {'fonts': False, 'family': FONT, 'home': '../', 'homeTitle': 'Scan Card'}},
+     'Shell Card, part of Scan Card: a provisional crown or shell to reline from a scan before the preparation, or a clear matrix over a wax-up. Runs on your own device.'),
 ]
 wasm_js = 'window.MANIFOLD_WASM_B64="' + base64.b64encode((deps / 'node_modules/manifold-3d/manifold.wasm').read_bytes()).decode() + '";\n'
 
@@ -135,7 +138,7 @@ shutil.rmtree(work)
 
 (out / 'manifest.webmanifest').write_text(json.dumps({
     "name": "Scan Card", "short_name": "Scan Card",
-    "description": "Study models, model analysis, splints, scan comparison, preparation checks, surveying and block-out, special trays and wax-ups from one patient scan.",
+    "description": "Study models, model analysis, splints, scan comparison, preparation checks, surveying and block-out, shell temporaries and matrices, special trays and wax-ups from one patient scan.",
     "start_url": "./", "scope": "./", "display": "standalone",
     "background_color": "#0B2E4A", "theme_color": "#0B2E4A",
     "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
@@ -144,7 +147,7 @@ shutil.rmtree(work)
 if a.artifact:
     art = Path(a.artifact)
     art.mkdir(parents=True, exist_ok=True)
-    for f in ['model.html', 'analysis.html', 'splint.html', 'compare.html', 'prep.html', 'survey.html', 'core.js', 'solid.js']:
+    for f in ['model.html', 'analysis.html', 'splint.html', 'compare.html', 'prep.html', 'survey.html', 'shell.html', 'core.js', 'solid.js']:
         shutil.copy(src / f, art / f)
     (art / 'manifold-wasm.js').write_text(wasm_js)
     doc = (src / 'index.html').read_text(encoding='utf-8')

@@ -16,7 +16,7 @@ const { openHub, ok, OUT } = require('./lib.cjs');
     ok(vis, `${name}: the tool's own button (Measure) floats inside its view`);
     for (const id of ['tray', 'wax']) { await page.click(`#tabs [data-tab=${id}]`); await a.settle(); await page.waitForTimeout(1200); await over(null, id + ' tab (hub)'); await a.shot(OUT + `h3-${name}-${id}.png`); }
     await a.go('scans'); await a.shot(OUT + `h3-${name}-locked.png`);
-    ok(a.errors.length === 0, `${name}: no page errors ` + a.errors.slice(0, 2).join(' | '));
+    { const e = a.errors.filter((x) => !/font-src/.test(x)); ok(e.length === 0, `${name}: no page errors ` + e.slice(0, 2).join(' | ')); }   // (the site's Tray Card asks for the site's /fonts/, refused only by this harness)
     await a.close();
   }
 })().catch((e) => { console.error('FAILED', e); process.exit(1); });

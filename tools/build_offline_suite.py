@@ -53,6 +53,7 @@ APPS = [
     ('scan-compare', 'Scan Card: Compare', '/scan-card/compare/', (None, 'scan-card/compare/index.html'), {'hidden': True}),
     ('scan-prep', 'Scan Card: Prep check', '/scan-card/prep/', (None, 'scan-card/prep/index.html'), {'hidden': True}),
     ('scan-survey', 'Scan Card: Survey', '/scan-card/survey/', (None, 'scan-card/survey/index.html'), {'hidden': True}),
+    ('scan-shell', 'Scan Card: Shells', '/scan-card/shell/', (None, 'scan-card/shell/index.html'), {'hidden': True}),
     ('dentmat', 'DentMat', '/dentmat/', (None, 'dentmat/index.html'), {}),
     ('dentalaudit', 'DentalAudit', '/dentalaudit/', (None, 'dentalaudit/index.html'),
      {'lazy': ['js/vendor/jspdf.umd.min.js', 'js/vendor/jspdf.plugin.autotable.min.js', 'js/vendor/docx.iife.min.js']}),
