@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Articulator Card — virtual articulator</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+button{touch-action:manipulation}
+.check{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:6px 0;color:#334155}
+.check input{accent-color:var(--teal2)}
+.mnt{border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin:6px 0}
+.mnt b{display:block;color:var(--navy);font-size:12px;margin-bottom:4px}
+.mnt .seg{flex-wrap:wrap}
+.mnt small{display:block;color:var(--muted);margin-top:4px;font-size:11.5px}
+#mvSeg{display:flex;width:100%}
+#mvSeg button{flex:1;padding:6px 4px}
+#ptSeg button{padding:5px 7px}
+.read{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:12px;margin:8px 0;border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+.read span{color:var(--muted)}
+.read b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600;text-align:right}
+.verdict{border-radius:8px;padding:7px 9px;margin:8px 0;font-size:12.5px;line-height:1.45;background:#f0fdfa;border:1px solid #99f6e4;color:#115e59}
+.verdict.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+.verdict b{display:block;color:inherit}
+svg.ch{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff;margin:6px 0}
+svg.ch text{font:10px Inter,system-ui,sans-serif;fill:#64748b}
+table.tbl td.dot i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.panel.art [data-vis]{display:none!important}
+#playRow{display:flex;gap:6px;align-items:center;margin:8px 0}
+#playRow input{flex:1;min-width:0;accent-color:var(--teal2)}
+#playRow .val{width:58px;text-align:right;font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+#rText{white-space:pre-wrap;font-size:12px;line-height:1.45;border:1px solid var(--line);border-radius:8px;padding:8px 9px;background:#f8fafc;color:#0f172a;margin:6px 0;user-select:text}
+.offerBox .btn{margin-top:5px}
+.row .val.wide{width:66px;white-space:nowrap}
+</style>
+</head>
+<body>
+<script type="module">
+// Articulator Card — an average-value / semi-adjustable virtual articulator.
+//  • The upper and lower arches are mounted in the bite they were scanned in (or as Scan Card has them: scans or models with
+//    base). The hinge axis comes from average values: the Bonwill triangle (condyle – condyle – lower incisal point) tilted up
+//    from the biting plane by the Balkwill angle. Defaults are those Splint Card uses for its hinge opening (101.6 mm, 26°), so a
+//    splint designed there with a hinge opening seats here on the same arc.
+//  • The lower jaw is one rigid body. Its two condyles run down straight condylar paths (sagittal condylar guidance; on the
+//    non-working side also inwards by the Bennett angle, after an immediate side shift; the working condyle only shifts outwards
+//    by what keeps the two the same distance apart). That leaves one freedom: turning about the line through the two condyles.
+//    It is settled by contact — the jaw closes about that line until the teeth (or an appliance) first touch — so the front and
+//    canine guidance come from the surfaces themselves (an incisal table can be added).
+//  • At every position: a contact map (distance to the opposing surface), the contacts by region and side (working / non-working),
+//    the guidance (canine guidance, group function, …), the paths of the incisal point and the lower canine tips, and the opening.
+//  • Either arch can be replaced (or covered) by an appliance: the splint from the Splint tab, the wax-up from the Shells tab, or an
+//    STL in the scan's own coordinates (a wax-up, a model, a splint from elsewhere).
+// Collision: three-mesh-bvh triangle–triangle intersection between the two surfaces (each with its own search tree), bisected on
+// the hinge angle to 0.002 mm at the incisal point; the open end is kept, so the surfaces never cross. Distances for the contact
+// map: closest point on the other surface for every vertex within 0.5 mm.
+// Nothing here is a recorded movement of the patient: see MOVES below for where a jaw-tracker recording would go.
+import * as N from './core.js';
+const THREE = N.THREE, $ = N.$, V3 = THREE.Vector3, M4 = THREE.Matrix4, D2R = Math.PI / 180, JAWS = ['upper', 'lower'], NAME = { upper: 'Upper', lower: 'Lower' };
+const STEP = 0.5, CONTACT = 0.1, NEAR = 0.5;                     // mm: spacing of the worked-out positions; "in contact" under 0.1 mm; "near" up to 0.5 mm
+const DEF = () => ({ icw: 101.6, side: 101.6, balk: 26, sci: [30, 30], ben: [15, 15], iss: [0, 0], apart: false, guide: 'teeth', table: 0, tol: 0, travel: 8,
+  pts: {},                                                        // points moved by hand (case frame): inc, lcL, lcR, ucL, ucR
+  src: { upper: 'scan', lower: 'scan' }, keep: { upper: true, lower: true } });   // [left, right] for sci / ben / iss
+const P = DEF();
+const A = { upper: null, lower: null };                           // an STL loaded in place of an arch: { mesh (in the scan's own file coordinates), name, sig }
+// What else can stand in for an arch: work from the other tools, found in the case (or asked of Scan Card). keep: the default for
+// "keep the scan's teeth too" — a splint sits on the teeth; a wax-up or the scan before preparation replaces the arch.
+const OFFER = {
+  splint: { role: 'splint', key: 'splint', keep: true, label: () => 'Splint', what: () => 'the splint from the Splint tab' },
+  shell: { role: 'shell-shape', key: 'shell', keep: false, label: (m) => (m === 'matrix' ? 'Wax-up' : 'Pre-op'), what: (m) => (m === 'matrix' ? 'the wax-up from the Shells tab' : 'the scan before preparation from the Shells tab') },
+};
+const CA = { splint: null, shell: null };                         // { jaw, mesh (case frame), sig, label, what }
+// Models with base from Scan Card's Models tab may carry its bite hinge: two ball-and-socket posts just behind the arches, which would
+// lock the jaws together here. Model Card (planHinge) stands them 5 mm behind the furthest-back scan, radius 3.2 mm, with a tab out to
+// their back: so the model reaches 8.2 mm past the scans. Everything more than HINGE_CUT mm in front of a hinged model's back is kept.
+const HINGE_CUT = 7.4, HINGED = { upper: false, lower: false };
+let E = null;                                                     // the mounted engine
+const S = { move: 'prot', p: 0, theta: 0, an: null, playing: false, show: { upper: true, lower: true, rig: true, paths: true, map: true }, pick: null, view: 'both', lastStep: '' };
+
+// ───────────── kinematics (pure functions; the case frame: +X patient's left, +Y back, +Z up) ─────────────
+const K = {};
+/** the most occlusal point near the midline, in the front half: the lower incisal point (dir +1) or the upper incisal edge (dir −1) */
+K.frontPoint = (mesh, dir = 1) => {
+  const Q = mesh.positions, n = Q.length / 3; let yc = 0; for (let i = 1; i < Q.length; i += 3) yc += Q[i]; yc /= n || 1;
+  for (const w of [3, 8, 25]) {                                    // widen the search if nothing is that close to the midline (missing incisors)
+    let best = -1, zt = -Infinity; for (let i = 0; i < Q.length; i += 3) if (Math.abs(Q[i]) < w && Q[i + 1] < yc && dir * Q[i + 2] > zt) { zt = dir * Q[i + 2]; best = i; }
+    if (best >= 0) return new V3(0, Q[best + 1], Q[best + 2]);
+  }
+  return new V3(0, yc, 0);
+};
+/** a canine tip: the most occlusal point at the canine's usual distance round the arch from the front point (to be checked by eye) */
+K.canineTip = (mesh, dir, front, sideSign) => {
+  const Q = mesh.positions, lo = dir > 0 ? 12 : 15, hi = dir > 0 ? 17 : 20.5; let best = null, bz = -Infinity;
+  for (let i = 0; i < Q.length; i += 3) { const x = Q[i] - front.x; if (x * sideSign < 6) continue; const d = Math.hypot(x, Q[i + 1] - front.y); if (d < lo || d > hi || Q[i + 1] > front.y + 16) continue; if (dir * Q[i + 2] > bz) { bz = dir * Q[i + 2]; best = i; } }
+  return best === null ? new V3(front.x + sideSign * 15, front.y + 8, front.z) : new V3(Q[best], Q[best + 1], Q[best + 2]);
+};
+/** the articulator: condyles from the incisal point, the Bonwill triangle (side, intercondylar width) and the Balkwill angle */
+K.frame = (inc, p) => {
+  const d = Math.sqrt(Math.max(1, p.side * p.side - p.icw * p.icw / 4)), b = p.balk * D2R, y = inc.y + d * Math.cos(b), z = inc.z + d * Math.sin(b);
+  return { inc: inc.clone(), L: new V3(inc.x + p.icw / 2, y, z), R: new V3(inc.x - p.icw / 2, y, z), W: p.icw, rInc: d };
+};
+/** how far along the path the immediate side shift is taken up (mm of condylar travel) */
+K.ISS_OVER = 0.5;
+/** the unit direction of a condylar path: forward, down by the sagittal angle, inwards by the Bennett angle (both as seen in projection) */
+K.pathDir = (sciDeg, benDeg, inward) => new V3(inward * Math.tan(benDeg * D2R), -1, -Math.tan(sciDeg * D2R)).normalize();
+/**
+ * Where the two condyles are after `t` mm of travel along the path. move: 'prot' | 'right' | 'left' | 'back' | 'open'.
+ * In a side movement the non-working condyle runs forward, down and inwards (after the immediate side shift); the working condyle
+ * stays at its height and depth and shifts outwards by whatever keeps the two the fixed distance apart (the Bennett movement).
+ */
+K.condyles = (F, p, move, t) => {
+  const L = F.L.clone(), R = F.R.clone(), W = F.W;
+  if (move === 'prot') { L.addScaledVector(K.pathDir(p.sci[0], 0, 0), t); R.addScaledVector(K.pathDir(p.sci[1], 0, 0), t); }
+  else if (move === 'back') { L.y += t; R.y += t; }
+  else if (move === 'right' || move === 'left') {
+    const orb = move === 'right' ? L : R, k = move === 'right' ? 0 : 1, inward = move === 'right' ? -1 : 1;
+    orb.addScaledVector(K.pathDir(p.sci[k], p.ben[k], inward), t); orb.x += inward * p.iss[k] * Math.min(1, t / K.ISS_OVER);
+  }
+  const dy = L.y - R.y, dz = L.z - R.z, sx = Math.sqrt(Math.max(0, W * W - dy * dy - dz * dz));
+  if (move === 'right') R.x = L.x - sx; else if (move === 'left') L.x = R.x + sx; else { const c = (L.x + R.x) / 2; L.x = c + sx / 2; R.x = c - sx / 2; }
+  return { L, R };
+};
+/** the lower jaw's movement (4×4, case frame) with its condyles at C and turned `theta` about the line through them (+ opens) */
+K.pose = (F, C, theta, out = new M4()) => {
+  const e0 = F.L.clone().sub(F.R).normalize(), e1 = C.L.clone().sub(C.R).normalize(), q = new THREE.Quaternion().setFromUnitVectors(e0, e1);
+  const m0 = F.L.clone().add(F.R).multiplyScalar(0.5), m1 = C.L.clone().add(C.R).multiplyScalar(0.5);
+  const hinge = new THREE.Quaternion().setFromAxisAngle(e1, theta).multiply(q);
+  return out.compose(m1.clone().sub(m0.clone().applyQuaternion(hinge)), hinge, new V3(1, 1, 1));
+};
+/** the hinge angle at which the incisal point rides on an incisal table sloping down by `deg` away from its start (0 = flat) */
+K.tableTheta = (F, C, deg) => {
+  const tn = Math.tan(deg * D2R), v = new V3(), m = new M4(), g = (th) => { v.copy(F.inc).applyMatrix4(K.pose(F, C, th, m)); return v.z - (F.inc.z - Math.hypot(v.x - F.inc.x, v.y - F.inc.y) * tn); };
+  let lo = -0.35, hi = 0.9; for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (g(mid) > 0) lo = mid; else hi = mid; } return (lo + hi) / 2;
+};
+/** which part of the arch a point lies in, from that arch's front point and canine tips */
+K.region = (lm, p) => {
+  const c = p.x > lm.inc.x ? lm.cL : lm.cR, dx = p.x - c.x, dy = p.y - c.y, d = Math.hypot(dx, dy); if (d <= 3.8) return 'canine';
+  return dx * (c.x - lm.inc.x) + dy * (c.y - lm.inc.y) < 0 ? 'incisor' : d <= 18.5 ? 'premolar' : 'molar';
+};
+
+// ───────────── the movements ─────────────
+// A movement gives the lower jaw's position for a slider value. The built-in ones come from the condylar paths plus contact.
+// RECORDED JAW MOTION (not built yet) belongs here: a jaw-tracker export (e.g. what exocad's Jaw Motion Import reads), once turned
+// into a list of 4×4 matrices of the lower jaw relative to the mounted bite (case frame), becomes one more entry with its own
+// `pose(p)` and `solve: false` — setRecorded() below already plays such a list and maps its contacts. What is missing is reading
+// the trackers' file formats and lining their coordinates up with the scans.
+const MOVES = {
+  prot: { label: 'Forward', name: 'Protrusion', max: () => P.travel, solve: true },
+  right: { label: 'Right', name: 'Right side movement', max: () => P.travel, solve: true, work: 'R' },
+  left: { label: 'Left', name: 'Left side movement', max: () => P.travel, solve: true, work: 'L' },
+  back: { label: 'Back', name: 'Retrusion', max: () => 2, solve: true },
+  open: { label: 'Open', name: 'Hinge opening', max: () => 25, solve: false },
+};
+function setRecorded(frames) {                                     // frames: arrays of 16 numbers (column-major, as THREE.Matrix4.toArray)
+  if (!frames || frames.length < 2) { delete MOVES.rec; syncUI(); return; }
+  const ms = frames.map((f) => { const m = new M4().fromArray(f), t = new V3(), q = new THREE.Quaternion(), s = new V3(); m.decompose(t, q, s); return { t, q }; });
+  MOVES.rec = { label: 'Recorded', name: 'Recorded movement', max: () => ms.length - 1, solve: false, frameStep: 1,
+    pose: (p) => { const i = N.clamp(Math.floor(p), 0, ms.length - 2), f = N.clamp(p - i, 0, 1); return new M4().compose(ms[i].t.clone().lerp(ms[i + 1].t, f), ms[i].q.clone().slerp(ms[i + 1].q, f), new V3(1, 1, 1)); } };
+  if (E) delete E.res.rec; syncUI();
+}
+
+// ───────────── shell ─────────────
+const srcButtons = (j) => `<button data-v="scan" type="button" title="Use the ${j} arch as loaded">The scan</button>${Object.keys(OFFER).map((k) => `<button data-v="${k}" type="button" hidden></button>`).join('')}<button data-v="file" type="button" title="Use an STL in the same position as this scan: a wax-up, a model or an appliance">STL…</button>`;
+const shell = N.createShell({
+  name: 'Articulator Card', tagline: 'Virtual articulator', title: document.title,
+  emptyHtml: '<div><b>Load the upper and lower scans</b>Drop them here, or use the demo.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'mount', title: 'Mount', html: `
+      <p class="lead">The arches are mounted in the bite they were scanned in, on an average-value hinge axis.</p>
+      <div id="mtWarn"></div><div class="offerBox" id="mtOffer"></div>
+      ${JAWS.map((j) => `<div class="mnt" data-jaw="${j}"><b>${NAME[j]} arch</b><div class="seg" data-src="${j}">${srcButtons(j)}</div><label class="check" data-keep="${j}" hidden><input type="checkbox" checked> Keep the scan’s teeth too (it sits on them, or covers only part of the arch)</label><small data-info="${j}"></small></div>`).join('')}
+      <input type="file" id="apIn" accept=".stl,.ply,.obj" hidden>
+      <div class="h4">Points</div>
+      <p>Check the five dots: the lower incisal point (I) and the four canine tips. To move one, choose it and tap the right place.</p>
+      <div class="seg" id="ptSeg"><button data-v="inc" type="button" title="Lower incisal point: between the lower central incisors, at their edge">Incisal</button><button data-v="ucR" type="button" title="Upper right canine tip">UR3</button><button data-v="ucL" type="button" title="Upper left canine tip">UL3</button><button data-v="lcR" type="button" title="Lower right canine tip">LR3</button><button data-v="lcL" type="button" title="Lower left canine tip">LL3</button></div>
+      <div class="btns"><button class="btn" id="ptAuto" type="button" title="Find the five points again from the scans">Find them again</button></div>
+      <div class="h4">Hinge axis (average values)</div>
+      <div class="row"><label>Between the condyles</label><input type="range" id="aIcw" min="90" max="120" step="0.1" value="101.6"><span class="val wide"></span></div>
+      <div class="row"><label>Condyle to incisal point</label><input type="range" id="aSide" min="90" max="120" step="0.1" value="101.6"><span class="val wide"></span></div>
+      <div class="row"><label>Balkwill angle</label><input type="range" id="aBalk" min="15" max="35" step="1" value="26"><span class="val"></span></div>
+      <p class="tip">The condyles are placed from the lower incisal point: the two condyles and that point make the Bonwill triangle, tilted up from the biting plane (as levelled on the Scans tab) by the Balkwill angle. The starting values are the classical averages Splint Card uses for its hinge opening (see the Sources there), so a splint made with a hinge opening seats here on the same arc. They are not this patient’s hinge axis — there is no facebow here.</p>
+      <p class="tip">UR3, UL3, LR3 and LL3 are the canine tips: they decide which contacts are called canine, front or back teeth, and the lower ones’ paths are drawn.</p>
+      <p class="tip">“STL…” takes a file in the same coordinates as the scan it replaces — a wax-up or a splint exported from other software alongside the scan. Work from the other tabs (a splint, a wax-up) is already in place. An appliance that sits on the teeth can keep the scan under it, so teeth it does not cover still count.</p>` },
+    { id: 'set', title: 'Settings', html: `
+      <p class="lead">Average values to start from. Change them if you have the patient’s own.</p>
+      <label class="check"><input type="checkbox" id="sApart"> Set left and right separately</label>
+      <div class="row"><label id="sCiL">Condylar guidance</label><input type="range" id="sCi0" min="0" max="60" step="1" value="30"><span class="val"></span></div>
+      <div class="row rt"><label>Condylar guidance, right</label><input type="range" id="sCi1" min="0" max="60" step="1" value="30"><span class="val"></span></div>
+      <div class="row"><label id="sBnL">Bennett angle</label><input type="range" id="sBn0" min="0" max="30" step="1" value="15"><span class="val"></span></div>
+      <div class="row rt"><label>Bennett angle, right</label><input type="range" id="sBn1" min="0" max="30" step="1" value="15"><span class="val"></span></div>
+      <div class="row"><label id="sIsL">Immediate side shift</label><input type="range" id="sIs0" min="0" max="1.5" step="0.1" value="0"><span class="val"></span></div>
+      <div class="row rt"><label>Immediate side shift, right</label><input type="range" id="sIs1" min="0" max="1.5" step="0.1" value="0"><span class="val"></span></div>
+      <div class="row"><label>Front guidance</label><div class="seg" id="sGuide"><button data-v="teeth" type="button" title="The jaw closes until the teeth (or the appliance) touch: the guidance is theirs">The teeth</button><button data-v="table" type="button" title="An incisal table as well: the jaw rests on the table or the teeth, whichever holds it further open">Incisal table</button></div></div>
+      <div class="row" id="sTableRow"><label>Table angle (0 = flat)</label><input type="range" id="sTable" min="0" max="60" step="1" value="0"><span class="val"></span></div>
+      <div class="row"><label>How far to move</label><input type="range" id="sTravel" min="3" max="12" step="1" value="8"><span class="val"></span></div>
+      <div class="row"><label>Overlap allowed</label><input type="range" id="sTol" min="0" max="0.3" step="0.01" value="0"><span class="val"></span></div>
+      <p class="tip">Condylar guidance is the slope of each condyle’s path below the biting plane as levelled on the Scans tab. The Bennett angle (seen from above) and the immediate side shift apply to the condyle on the non-working side; that side’s values are used (left values for a movement to the right). The paths are straight lines; the dashed lines at the condyles show them.</p>
+      <p class="tip">“Overlap allowed” lets the surfaces pass into each other by that much before they count as touching — for scans whose bite overlaps a little. “How far to move” is the travel of the condyle along its path. The incisal table slopes down at its angle in every direction from where the incisal point starts.</p>` },
+    { id: 'move', title: 'Movements', html: `
+      <div class="offerBox" id="mvOffer"></div>
+      <div class="seg" id="mvSeg"></div>
+      <div id="playRow"><button class="btn" id="mvPlay" type="button" title="Play the movement out and back">Play</button><input type="range" id="mvP" min="0" max="8" step="0.05" value="0" aria-label="Position"><span class="val" id="mvVal"></span></div>
+      <div class="row"><label>View</label><div class="seg" id="mvView"><button data-v="both" type="button" title="Both arches from the front">Both</button><button data-v="lower" type="button" title="The lower arch from above, the upper hidden: its contacts">Lower</button><button data-v="upper" type="button" title="The upper arch from below, the lower hidden: its contacts">Upper</button></div></div>
+      <div id="mvVerdict"></div>
+      <div class="read" id="mvRead"></div>
+      <div id="mvContacts"></div>
+      <div id="mvChart"></div>
+      <div class="btns"><button class="btn" id="mvStl" type="button" title="Download the lower arch as an STL in this position">Download lower arch here</button><button class="btn" id="mvRec" type="button" disabled title="Playing back a jaw-tracker recording is not built yet">Recorded jaw motion: not yet</button></div>
+      <p class="tip">Drag the slider or press Play. At each position the lower jaw has closed about the line through its condyles until something touches. Red is contact (under ${CONTACT} mm), orange to yellow is near (up to ${NEAR} mm). “Working side” is the side the jaw moves towards. “Lower” and “Upper” show one arch on its own so its contacts can be seen.</p>
+      <p class="tip">Canine guidance: on the working side only the canine touches while the jaw moves from 1 to 4 mm. Group function: the canine and back teeth of the working side share it. A contact of back teeth on the other side (from 1 mm on) is flagged as a non-working-side contact. This is a rigid, average-value model: a planning aid, not a record of how this patient moves.</p>` },
+    { id: 'report', title: 'Summary', html: `
+      <p class="lead">Forward and both side movements, worked out with the settings as they are.</p>
+      <div id="rOut"></div>
+      <div class="btns"><button class="btn pri" id="rCopy" type="button" title="Copy the summary as text">Copy the summary</button><button class="btn" id="rCase" type="button" title="Save the scans and these settings as one case file">Save case</button></div>
+      <p class="tip">A design aid, not a certified medical device. The hinge axis and the condylar settings are averages unless you set the patient’s own; check anything that matters in the mouth.</p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+const legend = shell.panel(`<div><i style="background:#ef4444"></i>Contact (under ${CONTACT} mm)</div><div><i style="background:linear-gradient(90deg,#fb923c,#fde047)"></i>Near (${CONTACT}–${NEAR} mm)</div>`, 'legend'); legend.hidden = true;
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Articulator Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility') return; if (what !== 'case') { HINGED.upper = HINGED.lower = false; for (const j of JAWS) if (!scans.has(j)) { A[j] = null; P.src[j] = 'scan'; } } stale(); syncUI(); if (MY()) enter(); else refreshView(); },
+  extendCase: (c) => {
+    c.remove('articulator-part');
+    for (const j of JAWS) if (A[j] && scans.has(j)) c.add({ role: 'articulator-part', name: `appliance-${j}`, mesh: A[j].mesh, matrix: scans[j].matrix, meta: { jaw: j } });   // (its file name is shown, not kept: it could name the patient)
+    c.data.articulator = { version: 1, icw: P.icw, side: P.side, balk: P.balk, sci: [...P.sci], ben: [...P.ben], iss: [...P.iss], apart: P.apart, guide: P.guide, table: P.table, tol: P.tol, travel: P.travel, pts: P.pts, src: { ...P.src }, keep: { ...P.keep }, summary: E && E.summary ? E.summary : null };
+  },
+  readCase: (c) => {
+    const d = c.data.articulator; A.upper = A.lower = null; stale();
+    Object.assign(P, DEF());
+    if (d) for (const k of ['icw', 'side', 'balk', 'apart', 'guide', 'table', 'tol', 'travel']) if (d[k] !== undefined) P[k] = d[k];
+    if (d) { for (const k of ['sci', 'ben', 'iss']) if (Array.isArray(d[k])) P[k] = [+d[k][0], +d[k][1]]; if (d.pts) P.pts = d.pts; if (d.src) P.src = { ...P.src, ...d.src }; if (d.keep) P.keep = { ...P.keep, ...d.keep }; }
+    for (const it of c.all('articulator-part')) { const j = it.meta && it.meta.jaw; if (JAWS.includes(j)) A[j] = { mesh: it.mesh, name: '', sig: meshSig(it.mesh) }; }
+    if (!N.EMBED) for (const k of Object.keys(OFFER)) CA[k] = offerFrom(k, c);   // (inside Scan Card they are asked of the hub instead: hubParts)
+    const hinge = !!(c.data.model && c.data.model.params && c.data.model.params.hinge);   // Scan Card passes Models' settings along; a model stands in for the scan with meta.model
+    for (const j of JAWS) { const it = c.get(j + '-scan'); HINGED[j] = hinge && !!(it && it.meta && it.meta.model); }
+    fixSources(N.EMBED); S.p = 0; putControls();
+  },
+});
+const MY = () => shell.current >= 0 && !['load', 'orient'].includes(shell.steps[shell.current].id);
+const both = () => scans.has('upper') && scans.has('lower');
+/** forget the mounted engine (and take its meshes out of the view) */
+function stale() { clearScene(); E = null; S.an = null; }
+
+// ───────────── what stands for each arch ─────────────
+const meshSig = (m) => m.positions.length + '.' + N.crc32(new Uint8Array(m.positions.buffer, m.positions.byteOffset, m.positions.byteLength));
+/** an appliance from another tool, from a case: { jaw, mesh (case frame), sig, label, what } or null */
+function offerFrom(k, c) {
+  const it = c.get(OFFER[k].role); if (!it || !it.meta || !JAWS.includes(it.meta.jaw)) return null;
+  const raw = it.mesh; if (!raw || !raw.indices || !raw.indices.length) return null;
+  const mesh = N.transformMesh({ positions: raw.positions, indices: raw.indices }, it.matrix), mode = k === 'shell' ? c.data.shell && c.data.shell.mode : null;
+  return { jaw: it.meta.jaw, mesh, sig: k + ':' + it.meta.jaw + ':' + meshSig(mesh), label: OFFER[k].label(mode), what: OFFER[k].what(mode) };
+}
+/** a source that is no longer there falls back to the scan (keepOffers: leave the other tools' work alone until the hub has been asked) */
+function fixSources(keepOffers = false) { for (const j of JAWS) { const s = P.src[j]; if (s === 'file' && !A[j]) P.src[j] = 'scan'; if (OFFER[s] && !keepOffers && !(CA[s] && CA[s].jaw === j)) P.src[j] = 'scan'; if (!['scan', 'file', ...Object.keys(OFFER)].includes(P.src[j])) P.src[j] = 'scan'; } }
+/** inside Scan Card: the other tabs' finished work (a splint, a wax-up), asked for afresh — it may have changed since this tab was opened */
+async function hubParts() {
+  if (!N.EMBED || !N.HUB || typeof N.HUB.part !== 'function') return false;
+  let changed = false;
+  for (const k of Object.keys(OFFER)) {
+    let next = null;
+    try { const b = await N.HUB.part(OFFER[k].key); if (b) next = offerFrom(k, await N.DentalCase.fromBlob(b)); } catch (e) { console.warn('Articulator: could not read', k, e); }
+    if ((next && next.sig) !== (CA[k] && CA[k].sig)) { CA[k] = next; changed = true; }
+  }
+  fixSources(); if (changed) syncUI();
+  return changed;
+}
+// Scan Card tells a tab when it is brought to the front again: the splint (or wax-up) may have been made or changed meanwhile
+if (N.EMBED) window.addEventListener('scanhub-shown', () => { entering = entering.then(async () => { if (MY() && (await hubParts())) await doEnter(); }).catch((e) => console.error(e)); });
+function standIn(j) { const s = P.src[j]; if (s === 'file') return A[j] && scans.has(j) ? N.transformMesh(A[j].mesh, scans[j].matrix) : null; const o = CA[s]; return o && o.jaw === j ? o.mesh : null; }
+function useSource(j, v) { P.src[j] = v; if (OFFER[v]) P.keep[j] = OFFER[v].keep; else if (v === 'file') P.keep[j] = true; afterMount(); }
+
+// ───────────── mounting: the two surfaces, their search trees, the points and the hinge axis ─────────────
+const scanKey = (j) => { const sc = scans[j]; return sc ? j + ':' + sc.raw.positions.length + ':' + N.crc32(new Uint8Array(sc.raw.positions.buffer, sc.raw.positions.byteOffset, Math.min(sc.raw.positions.byteLength, 120000))) + ':' + sc.matrix.elements.map((v) => v.toFixed(5)).join(',') : ''; };
+const mountKey = () => JAWS.map((j) => scanKey(j) + '|' + HINGED[j] + '|' + P.src[j] + '|' + P.keep[j] + '|' + (P.src[j] === 'file' && A[j] ? A[j].sig : '') + (CA[P.src[j]] ? CA[P.src[j]].sig : '')).join('#');
+/** a model's bite-hinge posts left out: only triangles lying wholly more than HINGE_CUT mm in front of its back */
+function unhinged(j, m) {
+  if (!HINGED[j]) return m; const Q = m.positions, I = m.indices, cut = N.meshBounds(m).max[1] - HINGE_CUT, out = [];
+  for (let t = 0; t < I.length; t += 3) if (Math.max(Q[3 * I[t] + 1], Q[3 * I[t + 1] + 1], Q[3 * I[t + 2] + 1]) <= cut) out.push(I[t], I[t + 1], I[t + 2]);   // (the scans end ≥ 0.8 mm in front of the cut)
+  return N.compact({ positions: Q, indices: Uint32Array.from(out) });
+}
+function mounted(j) {                                              // the surface that stands for this arch, in the case frame; nScan: how many of its vertices are the scan's
+  const scan = unhinged(j, scans.framed(j)), ap = standIn(j);
+  if (!ap) return { mesh: { positions: scan.positions, indices: scan.indices }, nScan: scan.positions.length / 3 };
+  if (!P.keep[j]) return { mesh: { positions: ap.positions, indices: ap.indices }, nScan: 0 };
+  return { mesh: N.mergeMeshes([scan, ap]), nScan: scan.positions.length / 3 };
+}
+function part(j) {
+  const m = mounted(j), g = new THREE.BufferGeometry(), n = m.mesh.positions.length / 3;
+  g.setAttribute('position', new THREE.BufferAttribute(m.mesh.positions, 3)); g.setIndex(new THREE.BufferAttribute(Uint32Array.from(m.mesh.indices), 1));   // a copy: the search tree reorders it
+  g.boundsTree = new N.MeshBVH(g); g.computeVertexNormals(); g.computeBoundingBox(); g.computeBoundingSphere();
+  const base = new Float32Array(n * 3), cs = j === 'upper' ? [0.918, 0.875, 0.796] : [0.843, 0.875, 0.91], ca = [0.55, 0.86, 0.82];
+  for (let v = 0; v < n; v++) { const c = v < m.nScan ? cs : ca; base[3 * v] = c[0]; base[3 * v + 1] = c[1]; base[3 * v + 2] = c[2]; }
+  g.setAttribute('color', new THREE.BufferAttribute(base.slice(), 3));
+  const obj = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.62, metalness: 0.02, side: THREE.DoubleSide })); obj.matrixAutoUpdate = false; obj.name = 'art-' + j;
+  return { jaw: j, mesh: m.mesh, geo: g, bvh: g.boundsTree, n, nScan: m.nScan, base, obj, box: g.boundingBox.clone() };
+}
+function autoPoints() {
+  const lo = scans.framed('lower'), up = scans.framed('upper'), li = K.frontPoint(lo, 1), ui = K.frontPoint(up, -1);
+  return { inc: li, lcL: K.canineTip(lo, 1, li, 1), lcR: K.canineTip(lo, 1, li, -1), ui, ucL: K.canineTip(up, -1, ui, 1), ucR: K.canineTip(up, -1, ui, -1) };
+}
+function landmarks() {
+  const a = E.auto, g = (k) => (P.pts[k] ? new V3(...P.pts[k]) : a[k].clone());
+  E.pt = { inc: g('inc'), lcL: g('lcL'), lcR: g('lcR'), ucL: g('ucL'), ucR: g('ucR') };
+  E.lm = { lower: { inc: E.pt.inc, cL: E.pt.lcL, cR: E.pt.lcR }, upper: { inc: E.pt.inc, cL: E.pt.ucL, cR: E.pt.ucR } };   // (in the bite the lower incisal point lies within a few mm of the upper incisors: one midline reference for both)
+  E.F = K.frame(E.pt.inc, P); E.res = {}; E.th0 = null; E.seat = null; E.summary = null;
+}
+async function ensure() {                                          // mount (again) if the scans or what stands for them changed
+  if (!both()) { stale(); return false; }
+  const key = mountKey(); if (E && E.key === key) return true;
+  await shell.busy('Mounting the arches…', async () => {
+    stale(); await N.sleep(20);
+    E = { key, up: part('upper'), lo: part('lower'), res: {}, th0: null, calls: 0 }; E.auto = autoPoints(); landmarks();
+    viewer.add(E.up.obj); viewer.add(E.lo.obj); buildRig();
+  });
+  S.an = null; return true;
+}
+/** the settings changed: the positions have to be worked out again (the mounted surfaces stay) */
+function changed() { if (E) landmarks(); S.an = null; scans.touch(); }
+
+// ───────────── contact: how far the jaw closes ─────────────
+const tM = new M4(), tZ = new M4();
+function hits(M) { E.calls++; tM.copy(M); if (P.tol > 0) tM.premultiply(tZ.makeTranslation(0, 0, -P.tol)); return E.up.bvh.intersectsGeometry(E.lo.geo, tM); }
+/**
+ * With the condyles at C: the hinge angle at which the lower surface first touches the upper one when closing.
+ * Bracketed from `guess` (the position before), then bisected until the bracket is 0.002 mm wide at the incisal point;
+ * the open end of the bracket is returned, so the surfaces never cross (beyond the overlap allowed).
+ * → { theta, free: nothing touches even 4 mm past level, stuck: still crossing 45 mm open }
+ */
+function solveTheta(C, guess) {
+  const F = E.F, u = 1 / F.rInc, m = new M4(), hit = (th) => hits(K.pose(F, C, th, m)), flat = K.tableTheta(F, C, 0), floor = flat - 4 * u, ceil = flat + 45 * u;
+  let th = N.clamp(guess, floor, ceil), lo, hi, h = 0.1 * u;
+  if (hit(th)) { lo = th; for (;;) { hi = Math.min(ceil, lo + h); h = Math.min(h * 2, 2 * u); if (!hit(hi)) break; lo = hi; if (hi >= ceil) return { theta: ceil, stuck: true }; } }
+  else { hi = th; for (;;) { if (hi <= floor) return { theta: flat, free: true }; lo = Math.max(floor, hi - h); h = Math.min(h * 2, 0.5 * u); if (hit(lo)) break; hi = lo; } }
+  while (hi - lo > 0.002 * u) { const mid = (lo + hi) / 2; if (hit(mid)) lo = mid; else hi = mid; }
+  return { theta: hi };
+}
+/** the jaw's hinge angle for a movement at travel p: by the teeth, or by the incisal table where that holds the jaw further open */
+function thetaAt(id, p, guess) {
+  const C = K.condyles(E.F, P, id, p), r = solveTheta(C, guess); r.by = r.free ? 'none' : 'teeth';
+  if (P.guide === 'table') { const tt = K.tableTheta(E.F, C, P.table); if (r.free || tt > r.theta) { r.theta = tt; r.by = 'table'; r.free = false; } }
+  return r;
+}
+function theta0() { if (E.th0 === null) { E.seat = thetaAt('prot', 0, 0); E.th0 = E.seat.theta; } return E.th0; }
+function poseOf(id, p, theta) { const mv = MOVES[id]; return mv.pose ? mv.pose(p) : K.pose(E.F, K.condyles(E.F, P, id, mv.solve ? p : 0), theta); }
+/** the hinge angle to show at any slider value: between the worked-out positions it is interpolated */
+function thetaShown(id, p) {
+  const mv = MOVES[id]; if (mv.pose) return 0;
+  if (!mv.solve) return theta0() + 2 * Math.asin(Math.min(1, p / (2 * E.F.rInc)));
+  const R = E.res[id]; if (!R || !R.steps.length) return theta0();
+  const k = N.clamp(p / STEP, 0, R.steps.length - 1), i = Math.min(R.steps.length - 2, Math.floor(k)); if (i < 0) return R.steps[0].theta;
+  return N.lerp(R.steps[i].theta, R.steps[i + 1].theta, k - i);
+}
+
+// ───────────── what touches: distances, contacts by region and side ─────────────
+/** distances between the surfaces with the lower jaw at M → { dUp, dLo (per vertex, 9 = further than `near`), contacts, min } */
+function analyse(M) {
+  const inv = M.clone().invert(), q = new V3(), h = {}, dLo = new Float32Array(E.lo.n).fill(9), dUp = new Float32Array(E.up.n).fill(9), near = NEAR + P.tol, map = new Map(), mid = E.F.inc.x; let min = Infinity;
+  const add = (lp, up, d, onAp) => {                               // lp: on the lower arch as mounted; up: on the upper arch; onAp: on an appliance
+    const side = lp.x > mid ? 'L' : 'R', rl = K.region(E.lm.lower, lp), ru = K.region(E.lm.upper, up), k = side + rl + ru; let c = map.get(k);
+    if (!c) map.set(k, c = { side, lower: rl, upper: ru, d: Infinity, n: 0, at: [0, 0, 0], atL: [0, 0, 0], ap: false }); c.n++; if (onAp) c.ap = true; if (d < c.d) { c.d = d; c.at = [up.x, up.y, up.z]; c.atL = [lp.x, lp.y, lp.z]; }   // at: on the upper; atL: on the lower as mounted
+  };
+  const lp = new V3(), bu = E.up.box, bl = E.lo.box, Ql = E.lo.mesh.positions, Qu = E.up.mesh.positions, lAp = E.lo.nScan, uAp = E.up.nScan;
+  const Iu = E.up.geo.index.array, Il = E.lo.geo.index.array;      // (a vertex index ≥ nScan is the appliance's: of a vertex, or of the face found on the other surface)
+  for (let i = 0, v = 0; i < Ql.length; i += 3, v++) {
+    q.set(Ql[i], Ql[i + 1], Ql[i + 2]).applyMatrix4(M); if (q.x < bu.min.x - near || q.x > bu.max.x + near || q.y < bu.min.y - near || q.y > bu.max.y + near || q.z < bu.min.z - near || q.z > bu.max.z + near) continue;
+    if (!E.up.bvh.closestPointToPoint(q, h, 0, near)) continue; dLo[v] = h.distance; if (h.distance < min) min = h.distance;
+    if (h.distance < CONTACT) add(lp.set(Ql[i], Ql[i + 1], Ql[i + 2]), h.point, h.distance, v >= lAp || Iu[3 * h.faceIndex] >= uAp);
+  }
+  for (let i = 0, v = 0; i < Qu.length; i += 3, v++) {
+    q.set(Qu[i], Qu[i + 1], Qu[i + 2]).applyMatrix4(inv); if (q.x < bl.min.x - near || q.x > bl.max.x + near || q.y < bl.min.y - near || q.y > bl.max.y + near || q.z < bl.min.z - near || q.z > bl.max.z + near) continue;
+    if (!E.lo.bvh.closestPointToPoint(q, h, 0, near)) continue; dUp[v] = h.distance; if (h.distance < min) min = h.distance;
+    if (h.distance < CONTACT) add(h.point, lp.set(Qu[i], Qu[i + 1], Qu[i + 2]), h.distance, v >= uAp || Il[3 * h.faceIndex] >= lAp);
+  }
+  return { dLo, dUp, min, contacts: [...map.values()].sort((a, b) => a.side.localeCompare(b.side) || ORD[a.upper] - ORD[b.upper] || ORD[a.lower] - ORD[b.lower]) };
+}
+/** one position, kept: where the tracked points are, the opening, and what touches */
+function record(id, p, theta, extra = {}) {
+  const M = poseOf(id, p, theta), an = analyse(M), at = (v) => v.clone().applyMatrix4(M), inc = at(E.pt.inc);
+  return { p, theta, ...extra, pose: M.toArray(), inc: inc.toArray(), cL: at(E.pt.lcL).toArray(), cR: at(E.pt.lcR).toArray(), drop: E.pt.inc.z - inc.z, min: an.min, contacts: an.contacts };
+}
+/** work a movement out position by position (kept until a setting changes) */
+async function run(id, say) {
+  if (!E) return null; if (E.res[id]) return E.res[id];
+  const mv = MOVES[id], steps = [], st = mv.frameStep || STEP, n = Math.round(mv.max() / st); let th = mv.solve ? theta0() : 0, prev = null;
+  for (let k = 0; k <= n; k++) {
+    const p = k * st;
+    if (mv.solve) { const r = thetaAt(id, p, prev === null ? th : th + (th - prev) * 0.7); prev = th; th = r.theta; steps.push(record(id, p, th, { by: r.by, free: !!r.free, stuck: !!r.stuck })); }
+    else steps.push(record(id, p, thetaShown(id, p), { by: 'path' }));
+    if (say) say(k, n); if (k % 2 === 1) await N.sleep(0);
+  }
+  const R = { id, steps }; R.verdict = verdict(R); E.res[id] = R; return R;
+}
+const RN = { incisor: 'incisors', canine: 'canine', premolar: 'premolars', molar: 'molars' }, ORD = { incisor: 0, canine: 1, premolar: 2, molar: 3 }, FLAG = 1;
+/** what guides a movement: from the contacts between 1 and 4 mm of travel */
+function verdict(R) {
+  const mv = MOVES[R.id], win = R.steps.filter((s) => s.p >= 1 - 1e-6 && s.p <= 4 + 1e-6), n = win.length || 1, cnt = (f) => win.filter((s) => s.contacts.some(f)).length / n;
+  const at3 = R.steps.reduce((b, s) => (Math.abs(s.p - 3) < Math.abs(b.p - 3) ? s : b), R.steps[0]), out = { kind: 'none', head: '', notes: [], warn: false, drop3: at3.drop, at: at3.p };
+  if (!mv.solve || !win.length) return out;
+  const slope = (k) => { const a = win[0][k], b = win[win.length - 1][k], run2 = Math.hypot(b[0] - a[0], b[1] - a[1]); return run2 > 0.2 ? Math.atan2(a[2] - b[2], run2) / D2R : null; };   // a tracked point's path, degrees below level from 1 to 4 mm
+  out.angle = slope('inc'); if (mv.work) out.canineAngle = slope(mv.work === 'R' ? 'cR' : 'cL');
+  // contacts to flag (non-working side, back teeth in protrusion) count from FLAG mm: nearer the bite the other side has hardly dropped yet
+  const span = (f) => { const s = R.steps.filter((x) => x.p >= FLAG - 1e-6 && x.contacts.some(f)); return s.length ? `${s[0].p.toFixed(1)}–${s[s.length - 1].p.toFixed(1)} mm` : ''; };
+  const regs = (f, to = Infinity) => [...new Set(R.steps.filter((x) => x.p >= FLAG - 1e-6 && x.p <= to + 1e-6).flatMap((x) => x.contacts.filter(f).map((c) => c.upper)))].sort((a, b) => ORD[a] - ORD[b]).map((k) => RN[k]).join(', ');
+  if (R.steps.some((s) => s.stuck)) { out.warn = true; out.notes.push('At some positions the surfaces still cross with the jaw opened 45 mm: check that any STL or appliance is in the scan’s position.'); }
+  if (win.some((s) => s.by === 'table')) out.notes.push('The incisal table holds the jaw open for part of the movement.');
+  if (win.every((s) => s.free || !s.contacts.length)) { out.kind = 'free'; out.head = 'Nothing touches from 1 to 4 mm'; return out; }
+  if (win.some((s) => s.free)) out.notes.push('At some positions nothing touches at all.');
+  if (mv.work) {
+    const w = mv.work, wc = (c) => c.side === w && c.upper === 'canine', wp = (c) => c.side === w && (c.upper === 'premolar' || c.upper === 'molar'), an = (c) => c.upper === 'incisor', nw = (c) => c.side !== w && c.upper !== 'incisor';
+    const fc = cnt(wc), fp = cnt(wp), fa = cnt(an), fn = cnt(nw), W = w === 'R' ? 'right' : 'left', NWs = w === 'R' ? 'left' : 'right';
+    if (fc >= 0.6 && fp <= 0.2) { out.kind = 'canine'; out.head = `Canine guidance on the ${W}` + (fa >= 0.5 ? ', with the incisors' : ''); }
+    else if (fc >= 0.4 && fp >= 0.4) { out.kind = 'group'; out.head = `Group function on the ${W} (canine and ${regs(wp, 4)})`; }
+    else if (fp >= 0.6) { out.kind = 'posterior'; out.head = `Guided by the ${W} back teeth (${regs(wp, 4)}), not the canine`; out.warn = true; }
+    else if (fa >= 0.6) { out.kind = 'incisor'; out.head = 'Guided by the incisors'; }
+    else if (fn >= 0.6) { out.kind = 'nonworking'; out.head = `Guided by the non-working (${NWs}) side`; }
+    else { out.kind = 'mixed'; out.head = 'Mixed guidance: no one pattern from 1 to 4 mm'; }
+    const s = span(nw); out.nonWorking = s ? { where: regs(nw), span: s } : null;
+    if (s) { out.warn = true; out.notes.push(`Non-working-side contact: ${NWs} ${regs(nw)}, at ${s}.`); } else out.notes.push('No non-working-side contact.');
+  } else if (R.id === 'prot') {
+    const an = (c) => c.upper === 'incisor' || c.upper === 'canine', po = (c) => !an(c), fa = cnt(an), fp = cnt(po);
+    if (fa >= 0.6 && fp <= 0.2) { out.kind = 'anterior'; out.head = 'Front-tooth guidance: the back teeth come apart'; }
+    else if (fa >= 0.4 && fp >= 0.4) { out.kind = 'shared'; out.head = 'Front and back teeth both touch'; out.warn = true; }
+    else if (fp >= 0.6) { out.kind = 'posterior'; out.head = 'Guided by the back teeth: the front teeth do not touch'; out.warn = true; }
+    else { out.kind = 'mixed'; out.head = 'Mixed guidance: no one pattern from 1 to 4 mm'; }
+    for (const sd of ['R', 'L']) { const f = (c) => po(c) && c.side === sd, s = span(f); if (s) { out.warn = true; out.notes.push(`Back-tooth contact on the ${sd === 'R' ? 'right' : 'left'}: ${regs(f)}, at ${s}.`); } }
+    if (!out.notes.some((t) => /Back-tooth/.test(t))) out.notes.push(`No back-tooth contact after the first ${FLAG} mm.`);
+  } else { out.kind = 'path'; out.head = ''; }
+  return out;
+}
+
+// ───────────── the view ─────────────
+const rig = { lines: [], dots: {}, labels: {}, traces: [], hits: [] };
+function clearScene() {
+  if (E) for (const k of ['up', 'lo']) if (E[k] && E[k].obj) { viewer.scene.remove(E[k].obj); E[k].geo.dispose(); E[k].obj.material.dispose(); }
+  for (const d of rig.hits) viewer.scene.remove(d); rig.hits = [];
+  for (const l of rig.lines) l.dispose(); rig.lines = []; for (const l of rig.traces) l.dispose(); rig.traces = [];
+  for (const k in rig.dots) viewer.scene.remove(rig.dots[k]); rig.dots = {}; for (const k in rig.labels) rig.labels[k].remove(); rig.labels = {}; viewer.invalidate();
+}
+const PTS = { inc: ['I', 0xe879f9], lcR: ['LR3', 0x38bdf8], lcL: ['LL3', 0x38bdf8], ucR: ['UR3', 0xfbbf24], ucL: ['UL3', 0xfbbf24] };
+function buildRig() {
+  const ln = (color, o = {}) => { const l = viewer.line([], { color, width: o.width || 2, depthTest: false, opacity: o.opacity ?? 0.9, dashed: !!o.dashed }); rig.lines.push(l); return l; };
+  rig.axis = ln(0x5eead4, { width: 3 }); rig.triL = ln(0x5eead4, { opacity: 0.55 }); rig.triR = ln(0x5eead4, { opacity: 0.55 });
+  rig.pathL = ln(0xf59e0b, { dashed: true }); rig.pathR = ln(0xf59e0b, { dashed: true }); rig.orbL = ln(0xfb7185, { dashed: true }); rig.orbR = ln(0xfb7185, { dashed: true });
+  for (const k of ['cL', 'cR']) { rig.dots[k] = viewer.marker(new V3(), { color: 0x5eead4, px: 13 }); rig.labels[k] = viewer.label(k === 'cL' ? 'L' : 'R', new V3(), { dy: -14 }); }
+  for (const k in PTS) { rig.dots[k] = viewer.marker(new V3(), { color: PTS[k][1], px: 11 }); rig.labels[k] = viewer.label(PTS[k][0], new V3(), { dy: -13 }); }
+}
+/** the condylar paths as drawn: forward (protrusion) and, for each condyle as the non-working one, forward–inward after the side shift */
+function pathPts(side) {
+  const F = E.F, k = side === 'L' ? 0 : 1, c = side === 'L' ? F.L : F.R, inward = side === 'L' ? -1 : 1, iss = c.clone(); iss.x += inward * P.iss[k];
+  return { prot: [c, c.clone().addScaledVector(K.pathDir(P.sci[k], 0, 0), 12)], orb: [c, iss, iss.clone().addScaledVector(K.pathDir(P.sci[k], P.ben[k], inward), 12)] };
+}
+function refreshView() {
+  const mine = MY() && !!E; for (const j of JAWS) if (scans[j]) scans[j].object.visible = !mine;
+  scans.panel.classList.toggle('art', mine); for (const r of scans.panel.querySelectorAll('[data-art]')) { r.hidden = !mine; r.querySelector('input').checked = !!S.show[r.dataset.art]; }
+  legend.hidden = !(mine && S.show.map && ['move', 'report'].includes(stepId()));
+  if (!E) { viewer.invalidate(); return; }
+  E.up.obj.visible = mine && S.show.upper; E.lo.obj.visible = mine && S.show.lower;
+  const id = stepId(), atRest = !['move', 'report'].includes(id), M = atRest ? new M4() : poseOf(S.move, S.p, S.theta), C = atRest || MOVES[S.move].pose ? null : K.condyles(E.F, P, S.move, MOVES[S.move].solve ? S.p : 0);
+  E.lo.obj.matrix.copy(M); E.lo.obj.updateMatrixWorld(true);
+  const cL = C ? C.L : E.F.L.clone().applyMatrix4(M), cR = C ? C.R : E.F.R.clone().applyMatrix4(M), inc = E.pt.inc.clone().applyMatrix4(M), showRig = mine && S.show.rig && (atRest || S.view === 'both');   // (one arch on its own: no axis lines across it)
+  rig.axis.setPoints([cR, cL]); rig.triL.setPoints([cL, inc]); rig.triR.setPoints([cR, inc]);
+  const pl = pathPts('L'), pr = pathPts('R'); rig.pathL.setPoints(pl.prot); rig.pathR.setPoints(pr.prot); rig.orbL.setPoints(pl.orb); rig.orbR.setPoints(pr.orb);
+  for (const l of rig.lines) l.visible = showRig && l.visible;
+  const put = (k, v, vis) => { rig.dots[k].position.copy(v); rig.dots[k].visible = vis; rig.labels[k].pos.copy(v); rig.labels[k].hidden = !vis; };
+  put('cL', cL, showRig); put('cR', cR, showRig);
+  const ptsOn = mine && (id === 'mount' || S.show.paths);
+  put('inc', inc, ptsOn && S.show.lower); put('lcL', E.pt.lcL.clone().applyMatrix4(M), ptsOn && S.show.lower); put('lcR', E.pt.lcR.clone().applyMatrix4(M), ptsOn && S.show.lower);
+  put('ucL', E.pt.ucL, ptsOn && S.show.upper && id === 'mount'); put('ucR', E.pt.ucR, ptsOn && S.show.upper && id === 'mount');
+  for (const l of rig.traces) l.visible = mine && S.show.paths && !atRest && l.visible;
+  paint(atRest ? null : S.an); hitDots(mine && !atRest && S.show.map ? S.an : null); viewer.invalidate();
+}
+/** a small red dot at each contact (drawn through the teeth, so contacts out of sight can be found) */
+function hitDots(an) {
+  const list = an ? an.contacts : [];
+  while (rig.hits.length > list.length) viewer.scene.remove(rig.hits.pop());
+  list.forEach((c, i) => { let d = rig.hits[i]; if (!d) rig.hits.push(d = viewer.marker(new V3(), { color: 0xef4444, px: 9 })); d.position.set(c.at[0], c.at[1], c.at[2]); d.visible = true; });
+}
+function paint(an) {
+  for (const [pt, d] of [[E.up, an && an.dUp], [E.lo, an && an.dLo]]) {
+    const col = pt.geo.attributes.color.array; col.set(pt.base);
+    if (d && S.show.map) for (let v = 0; v < pt.n; v++) {
+      const x = d[v]; if (x >= NEAR) continue; const i = 3 * v;
+      if (x < CONTACT) { col[i] = 0.94; col[i + 1] = 0.2; col[i + 2] = 0.2; continue; }
+      const t = (x - CONTACT) / (NEAR - CONTACT), f = t > 0.75 ? (1 - t) / 0.25 : 1, r = 0.98, g = 0.57 + 0.31 * t, b = 0.24 + 0.04 * t;
+      col[i] = N.lerp(pt.base[i], r, f); col[i + 1] = N.lerp(pt.base[i + 1], g, f); col[i + 2] = N.lerp(pt.base[i + 2], b, f);
+    }
+    pt.geo.attributes.color.needsUpdate = true;
+  }
+}
+function drawTraces() {
+  for (const l of rig.traces) l.dispose(); rig.traces = []; const R = E && E.res[S.move]; if (!R) return;
+  for (const [k, color] of [['inc', 0xe879f9], ['cL', 0x38bdf8], ['cR', 0x38bdf8]]) rig.traces.push(viewer.line(R.steps.map((s) => new V3(...s[k])), { color, width: 2.5, depthTest: false }));
+}
+const stepId = () => (shell.current >= 0 ? shell.steps[shell.current].id : '');
+/** the camera: the whole articulator (mount, settings) or the teeth — both from the front, the lower from above, the upper from below */
+function frame(what) {
+  if (!E) return; const b = E.up.box.clone().union(E.lo.box);
+  if (what === 'rig') { b.expandByPoint(E.F.L); b.expandByPoint(E.F.R); return viewer.fit(b, { dir: [0.85, -0.62, 0.38] }); }
+  if (what === 'lower') return viewer.fit(E.lo.box, { dir: [0, -0.32, 1] });
+  if (what === 'upper') return viewer.fit(E.up.box, { dir: [0, -0.32, -1] });
+  viewer.fit(b, { dir: [0.3, -1, 0.28] });
+}
+function setView(v) {
+  S.view = ['lower', 'upper'].includes(v) ? v : 'both'; S.show.upper = S.view !== 'lower'; S.show.lower = S.view !== 'upper';
+  for (const b of $('mvView').children) b.classList.toggle('on', b.dataset.v === S.view);
+  refreshView(); frame(S.view);
+}
+
+// ───────────── the position on show ─────────────
+let anT = 0;
+/** move the jaw to slider value p. exact: work this very position out (otherwise between worked-out positions it is interpolated) */
+function setPos(p, exact) {
+  if (!E) return; const mv = MOVES[S.move]; S.p = N.clamp(p, 0, mv.max());
+  if (exact && mv.solve && !mv.pose && Math.abs(S.p / STEP - Math.round(S.p / STEP)) > 1e-6) S.theta = thetaAt(S.move, S.p, thetaShown(S.move, S.p)).theta; else S.theta = thetaShown(S.move, S.p);
+  if (exact) { S.an = analyse(poseOf(S.move, S.p, S.theta)); refreshView(); readout(); }
+  else { refreshView(); readout(); clearTimeout(anT); anT = setTimeout(() => { if (E && !S.playing) setPos(S.p, true); }, 140); }
+  $('mvP').value = S.p; $('mvVal').textContent = mv.pose ? `frame ${Math.round(S.p)}` : S.p.toFixed(1) + ' mm';
+}
+async function setMove(id) {
+  if (!MOVES[id]) return; stop(); S.move = id; S.p = 0; segMove(id);
+  if (!(await ensure())) return; const mv = MOVES[id]; $('mvP').max = mv.max(); $('mvP').step = mv.pose ? 1 : 0.05;
+  await shell.busy(`${mv.name}…`, async () => { theta0(); await run(id, (k, n) => shell.setBusyText(`${mv.name}: position ${k + 1} of ${n + 1}`)); });
+  drawTraces(); setPos(0, true); showVerdict(); scans.touch();
+}
+let raf = 0;
+function stop() { S.playing = false; cancelAnimationFrame(raf); $('mvPlay').textContent = 'Play'; $('mvPlay').classList.remove('on'); }
+function play() {
+  if (S.playing) { stop(); setPos(S.p, true); return; } if (!E) return;
+  S.playing = true; $('mvPlay').textContent = 'Stop'; $('mvPlay').classList.add('on'); const max = MOVES[S.move].max(), t0 = performance.now(), dur = 5200; let last = 0;
+  const tick = (t) => {
+    if (!S.playing) return; const u = (t - t0) / dur; if (u >= 1) { stop(); setPos(0, true); return; }
+    const p = max * (1 - Math.abs(1 - 2 * u)); S.p = p; S.theta = thetaShown(S.move, p);
+    if (t - last > 160) { S.an = analyse(poseOf(S.move, p, S.theta)); last = t; }
+    refreshView(); readout(); $('mvP').value = p; $('mvVal').textContent = MOVES[S.move].pose ? `frame ${Math.round(p)}` : p.toFixed(1) + ' mm'; raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+}
+const sideWord = (c, mv) => (c.side === 'R' ? 'Right' : 'Left') + (mv.work ? (c.upper === 'incisor' ? '' : c.side === mv.work ? ' (working)' : ' (non-working)') : '');
+function readout() {
+  if (!E) return; const mv = MOVES[S.move], M = poseOf(S.move, S.p, S.theta), inc = E.pt.inc.clone().applyMatrix4(M), d = inc.clone().sub(E.pt.inc), an = S.an;
+  const lat = d.x, sideTxt = Math.abs(lat) < 0.05 ? '0.0 mm' : `${Math.abs(lat).toFixed(1)} mm ${lat > 0 ? 'left' : 'right'}`;
+  $('mvRead').innerHTML = `<span>Opening at the incisal point</span><b id="rdDrop">${(-d.z).toFixed(2)} mm</b><span>Incisal point forward</span><b>${(-d.y).toFixed(1)} mm</b><span>Incisal point sideways</span><b>${sideTxt}</b><span>Hinge turn</span><b>${(S.theta / D2R).toFixed(2)}°</b><span>Closest the surfaces come</span><b id="rdMin">${an ? (an.min < NEAR + P.tol ? an.min.toFixed(2) + ' mm' : 'over ' + NEAR + ' mm') : '…'}</b>`;
+  const apNote = (c) => (c.ap ? ' (appliance)' : '');
+  const rows = an ? an.contacts.map((c) => `<tr><td class="dot"><i style="background:${mv.work && c.side !== mv.work && c.upper !== 'incisor' ? '#f59e0b' : '#ef4444'}"></i>${sideWord(c, mv)}</td><td>upper ${RN[c.upper]} on lower ${RN[c.lower]}${apNote(c)}</td></tr>`).join('') : '';
+  $('mvContacts').innerHTML = an ? (rows ? `<table class="tbl" id="ctTbl"><tr><th>Touching here</th><th></th></tr>${rows}</table>` : '<p class="note">Nothing is in contact at this position.</p>') : '';
+  chart();
+}
+function chart() {
+  const R = E && E.res[S.move], box = $('mvChart'); if (!R || R.steps.length < 2) { box.innerHTML = ''; return; }
+  const mv = MOVES[S.move], W = 300, H = 118, l = 30, r = 8, t = 16, b = 22, xm = R.steps[R.steps.length - 1].p, ys = R.steps.map((s) => s.drop), y0 = Math.min(0, ...ys), y1 = Math.max(1, ...ys) * 1.08;
+  const X = (p) => l + (W - l - r) * p / xm, Y = (v) => t + (H - t - b) * (1 - (v - y0) / (y1 - y0)), pts = R.steps.map((s) => `${X(s.p).toFixed(1)},${Y(s.drop).toFixed(1)}`).join(' '), now = E.pt.inc.z - E.pt.inc.clone().applyMatrix4(poseOf(S.move, S.p, S.theta)).z;
+  const ticks = [0, y1 / 1.08 / 2, y1 / 1.08].map((v) => `<line x1="${l}" x2="${W - r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e2e8f0"/><text x="${l - 4}" y="${Y(v) + 3}" text-anchor="end">${v.toFixed(1)}</text>`).join('');
+  box.innerHTML = `<svg class="ch" viewBox="0 0 ${W} ${H}" role="img" aria-label="Opening at the incisal point against travel"><text x="${l}" y="11">Opening at the incisal point (mm)</text>${ticks}<polyline fill="none" stroke="#0d9488" stroke-width="2" points="${pts}"/><circle cx="${X(S.p)}" cy="${Y(now)}" r="4" fill="#e879f9" stroke="#fff"/><text x="${l}" y="${H - 6}">0</text><text x="${W - r}" y="${H - 6}" text-anchor="end">${mv.pose ? 'frame ' + xm : xm + ' mm of travel'}</text></svg>`;
+}
+const pathsLine = (v) => [v.angle != null ? `Incisal point path: ${v.angle.toFixed(0)}° below level between 1 and 4 mm.` : '', v.canineAngle != null ? `Working-side lower canine tip: ${v.canineAngle.toFixed(0)}° below level.` : ''].filter(Boolean).join(' ');
+function verdictHtml(R) { const v = R.verdict; if (!v.head) return ''; return `<div class="verdict${v.warn ? ' warn' : ''}"><b>${N.esc(v.head)}</b>${v.notes.map(N.esc).join('<br>')}<br>${N.esc(pathsLine(v))} Opening ${v.drop3.toFixed(1)} mm at ${v.at.toFixed(0)} mm.</div>`; }
+function showVerdict() { const R = E && E.res[S.move]; $('mvVerdict').innerHTML = R ? verdictHtml(R) : ''; }
+
+// ───────────── summary ─────────────
+function settingsLine() {
+  const two = (a, u) => (P.apart && a[0] !== a[1] ? `left ${a[0]}${u}, right ${a[1]}${u}` : `${a[0]}${u}`);
+  return `Average-value articulator: condyles ${P.icw} mm apart, ${P.side} mm from the incisal point, Balkwill angle ${P.balk}°; condylar guidance ${two(P.sci, '°')}, Bennett angle ${two(P.ben, '°')}, immediate side shift ${two(P.iss, ' mm')}; front guidance from ${P.guide === 'table' ? `the teeth and an incisal table at ${P.table}°` : 'the teeth'}${P.tol > 0 ? `; ${P.tol.toFixed(2)} mm of overlap allowed` : ''}.`;
+}
+function summaryText() {
+  const what = JAWS.filter((j) => P.src[j] !== 'scan').map((j) => `${NAME[j]} arch: ${P.src[j] === 'file' ? 'an STL' : CA[P.src[j]] ? CA[P.src[j]].what : 'an appliance'}${P.keep[j] ? ' on the scan' : ' in place of the scan'}.`);
+  const lines = ['Virtual articulator (Scan Card)', settingsLine(), ...what];
+  for (const id of ['prot', 'right', 'left']) { const R = E.res[id]; if (!R) continue; const v = R.verdict; lines.push(`${MOVES[id].name}: ${v.head}. ${v.notes.join(' ')} ${pathsLine(v)} Opening at the incisal point ${v.drop3.toFixed(1)} mm at ${v.at.toFixed(0)} mm of travel.`.replace(/\s+/g, ' ')); }
+  lines.push('A rigid average-value model: a planning aid, not a record of the patient’s own movement.');
+  return lines.join('\n');
+}
+async function report() {
+  if (!(await ensure())) { $('rOut').innerHTML = '<p class="note warn">Load an upper and a lower scan first.</p>'; return; }
+  await shell.busy('Working the movements out…', async () => { theta0(); for (const id of ['prot', 'right', 'left']) await run(id, (k, n) => shell.setBusyText(`${MOVES[id].name}: position ${k + 1} of ${n + 1}`)); });
+  const rows = E.res.prot.steps.filter((s, i) => i % 2 === 0).map((s, i) => `<tr><td class="num">${s.p.toFixed(0)}</td>${['prot', 'right', 'left'].map((id) => `<td class="num">${(E.res[id].steps[2 * i] || s).drop.toFixed(2)}</td>`).join('')}</tr>`).join('');
+  E.summary = { prot: E.res.prot.verdict.kind, right: E.res.right.verdict.kind, left: E.res.left.verdict.kind };
+  $('rOut').innerHTML = ['prot', 'right', 'left'].map((id) => `<div class="h4">${MOVES[id].name}</div>${verdictHtml(E.res[id])}`).join('') + `<div class="h4">Opening at the incisal point (mm)</div><table class="tbl"><tr><th class="num">Travel</th><th class="num">Forward</th><th class="num">Right</th><th class="num">Left</th></tr>${rows}</table><div class="h4">For the notes</div><div id="rText">${N.esc(summaryText())}</div>`;
+  drawTraces(); setPos(S.p, true); scans.touch();
+}
+
+// ───────────── controls ─────────────
+const RB = {}, bind = (id, get, set, fmt) => { RB[id] = N.rangeBind(id, (v, done) => { set(v); if (done) { changed(); syncUI(); refreshView(); } }, { fmt }); RB[id].read = () => RB[id].set(get()); };
+const deg = (v) => v + '°', mm0 = (v) => v + ' mm', mm1 = (v) => v.toFixed(1) + ' mm', mm2 = (v) => v.toFixed(2) + ' mm';
+bind('aIcw', () => P.icw, (v) => { P.icw = v; }, mm1); bind('aSide', () => P.side, (v) => { P.side = v; }, mm1); bind('aBalk', () => P.balk, (v) => { P.balk = v; }, deg);
+for (const [id, key, fmt] of [['sCi', 'sci', deg], ['sBn', 'ben', deg], ['sIs', 'iss', mm1]]) for (const k of [0, 1]) bind(id + k, () => P[key][k], (v) => { P[key][k] = v; if (!P.apart) P[key][1 - k] = v; }, fmt);
+bind('sTable', () => P.table, (v) => { P.table = v; }, deg); bind('sTravel', () => P.travel, (v) => { P.travel = v; }, mm0); bind('sTol', () => P.tol, (v) => { P.tol = v; }, mm2);
+const segGuide = N.segBind($('sGuide'), (v) => { P.guide = v; changed(); syncUI(); }, P.guide);
+$('sApart').addEventListener('change', (e) => { P.apart = e.target.checked; if (!P.apart) { for (const k of ['sci', 'ben', 'iss']) P[k][1] = P[k][0]; changed(); } putControls(); });
+$('mvSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setMove(b.dataset.v); });
+function segMove(id) { $('mvSeg').innerHTML = Object.entries(MOVES).map(([k, m]) => `<button data-v="${k}" type="button" class="${k === id ? 'on' : ''}" title="${N.esc(m.name)}">${N.esc(m.label)}</button>`).join(''); }
+$('mvP').addEventListener('input', () => { stop(); setPos(+$('mvP').value, false); });
+$('mvP').addEventListener('change', () => setPos(+$('mvP').value, true));
+$('mvPlay').addEventListener('click', play);
+$('mvView').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setView(b.dataset.v); });
+$('mvStl').addEventListener('click', async () => { if (!E) return; const r = await N.saveFile(`lower-${S.move}-${S.p.toFixed(1)}mm.stl`, N.stlBinary(E.lo.mesh, poseOf(S.move, S.p, S.theta), 'Scan Card articulator, lower arch moved, mm')); shell.status(r.message, !r.ok && r.code !== 'declined'); });
+$('rCopy').addEventListener('click', async () => { const t = $('rText'); if (!t) return; try { await navigator.clipboard.writeText(t.textContent); shell.status('Summary copied'); } catch (_) { const r = document.createRange(); r.selectNodeContents(t); const s = getSelection(); s.removeAllRanges(); s.addRange(r); shell.status('Select and copy the text shown'); } });
+$('rCase').addEventListener('click', () => scans.saveCase());
+// what stands for each arch
+let apFor = null;
+document.addEventListener('click', (e) => { const o = e.target.closest('[data-offer]'); if (o) { const [k, j] = o.dataset.offer.split(':'); useSource(j, k); } });   // “Use the splint” (Mount and Movements)
+shell.stepEl('mount').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-src] button'); if (!b) return; const j = b.parentElement.dataset.src;
+  if (b.dataset.v === 'file') { apFor = j; $('apIn').click(); return; }
+  useSource(j, b.dataset.v);
+});
+shell.stepEl('mount').addEventListener('change', (e) => { const k = e.target.closest('[data-keep]'); if (k) { P.keep[k.dataset.keep] = e.target.checked; afterMount(); } });
+$('apIn').addEventListener('change', async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f && apFor) await loadAppliance(apFor, f); });
+async function loadAppliance(j, file) {
+  if (!scans.has(j)) return shell.status(`Load the ${j} scan first`, true);
+  try { const m = await shell.busy('Reading the STL…', async () => N.cleanMesh(await N.readMeshFile(file), { keepIslands: true }).mesh); A[j] = { mesh: { positions: m.positions, indices: m.indices }, name: (file.name || '').slice(0, 80), sig: meshSig(m) }; useSource(j, 'file'); await entering; } catch (_) { /* shown */ }
+}
+async function afterMount() { stop(); S.p = 0; scans.touch(); syncUI(); await enter(); }
+// the five points
+const segPt = N.segBind($('ptSeg'), (v) => { S.pick = S.pick === v ? null : v; segPt(S.pick || ''); pickTool(); });
+$('ptAuto').addEventListener('click', () => { P.pts = {}; S.pick = null; segPt(''); pickTool(); changed(); refreshView(); shell.status('Points found again from the scans'); });
+const PICK = { inc: 'lower incisal point', lcR: 'lower right canine tip (LR3)', lcL: 'lower left canine tip (LL3)', ucR: 'upper right canine tip (UR3)', ucL: 'upper left canine tip (UL3)' };
+function pickTool() {
+  if (!S.pick || !E) { viewer.setTool(null); shell.hint(''); return; }
+  shell.hint('Tap the ' + PICK[S.pick]);
+  viewer.setTool({ cursor: 'crosshair', onDown: () => false, onClick: (i) => { const up = S.pick[0] === 'u', h = i.pick([up ? E.up.obj : E.lo.obj]); if (!h) return; setPoint(S.pick, h.point.toArray()); } });
+}
+function setPoint(k, xyz) { P.pts[k] = xyz.map((v) => Math.round(v * 1000) / 1000); changed(); syncUI(); refreshView(); }
+// display list (in the scans' own "Show" panel)
+scans.panel.insertAdjacentHTML('beforeend', [['upper', 'Upper'], ['lower', 'Lower'], ['map', 'Contact colours'], ['paths', 'Points and paths'], ['rig', 'Hinge axis']].map(([k, t]) => `<div class="row" data-art="${k}" hidden><label><input type="checkbox" checked> ${t}</label></div>`).join(''));
+scans.panel.addEventListener('change', (e) => { const r = e.target.closest('[data-art]'); if (r) { S.show[r.dataset.art] = e.target.checked; if (['upper', 'lower'].includes(r.dataset.art)) { S.view = 'both'; for (const b of $('mvView').children) b.classList.toggle('on', b.dataset.v === 'both' && S.show.upper && S.show.lower); } refreshView(); } });
+
+function putControls() {
+  for (const k in RB) RB[k].read(); $('sApart').checked = P.apart; segGuide(P.guide);
+  for (const r of document.querySelectorAll('.row.rt')) r.hidden = !P.apart;
+  $('sCiL').textContent = 'Condylar guidance' + (P.apart ? ', left' : ''); $('sBnL').textContent = 'Bennett angle' + (P.apart ? ', left' : ''); $('sIsL').textContent = 'Immediate side shift' + (P.apart ? ', left' : '');
+  syncUI();
+}
+function syncUI() {
+  $('sTableRow').hidden = P.guide !== 'table'; segMove(S.move);
+  for (const b of $('mvView').children) b.classList.toggle('on', b.dataset.v === S.view);
+  const tris = (m) => (m.indices.length / 3).toLocaleString('en-GB') + ' triangles';
+  for (const j of JAWS) {
+    const seg = document.querySelector(`[data-src=${j}]`);
+    for (const b of seg.children) {
+      const o = CA[b.dataset.v]; if (OFFER[b.dataset.v]) { b.hidden = !(o && o.jaw === j); if (o) { b.textContent = o.label; b.title = `Use ${o.what}`; } }
+      b.classList.toggle('on', b.dataset.v === P.src[j]);
+    }
+    document.querySelector(`[data-keep=${j}]`).hidden = P.src[j] === 'scan'; document.querySelector(`[data-keep=${j}] input`).checked = P.keep[j];
+    const info = document.querySelector(`[data-info=${j}]`), o = CA[P.src[j]];
+    info.textContent = !scans.has(j) ? 'No scan loaded.' : o ? `${o.what[0].toUpperCase() + o.what.slice(1)} (${tris(o.mesh)}).` : P.src[j] === 'file' && A[j] ? `An STL in the scan’s position${A[j].name ? ': ' + A[j].name : ''} (${tris(A[j].mesh)}).` : '';
+  }
+  const offers = Object.keys(OFFER).filter((k) => CA[k] && scans.has(CA[k].jaw) && P.src[CA[k].jaw] !== k);
+  const oh = offers.map((k) => `<div class="note">This case holds ${N.esc(CA[k].what)} (${CA[k].jaw} arch).<br><button class="btn" type="button" data-offer="${k}:${CA[k].jaw}" title="Put it in place of the ${CA[k].jaw} scan">Use the ${N.esc(CA[k].label.toLowerCase())}</button></div>`).join('');
+  for (const el of document.querySelectorAll('.offerBox')) el.innerHTML = oh;
+  const w = []; if (JAWS.some((j) => HINGED[j] && scans.has(j))) w.push(['info', 'The bite-hinge posts behind the models (from Models) are left out here.']);
+  if (scans.has('upper') !== scans.has('lower')) w.push(['warn', 'The articulator needs both arches. Load the other scan.']); else if (both() && !scans.inBite) w.push(['warn', 'These scans are not in their bite. Line them up with a bite scan on the Scans tab first: until then nothing here means anything.']);
+  if (E && E.seat) {
+    const d = E.F.rInc * E.th0;
+    if (E.seat.stuck) w.push(['warn', 'The surfaces still cross with the jaw opened 45 mm. Check that any STL or appliance is in the same position as the scan it replaces.']);
+    else if (E.seat.free) w.push(['warn', 'The teeth do not meet anywhere near the bite as scanned: check the scans are in their bite.']);
+    else w.push(['seat', Math.abs(d) < 0.03 ? 'The teeth just touch in the bite as scanned.' : d > 0 ? `As mounted the surfaces overlap: the jaw is opened ${d.toFixed(2)} mm at the incisal point until they only touch.` : `As scanned the surfaces do not quite touch: the jaw is closed ${(-d).toFixed(2)} mm at the incisal point until they do.`]);
+  }
+  $('mtWarn').innerHTML = w.map(([k, t]) => `<p class="note${k === 'warn' ? ' warn' : ''}"${k === 'seat' ? ' id="mtSeat"' : ''}>${N.esc(t)}</p>`).join('');
+  shell.markDone('mount', !!E); shell.markDone('move', !!(E && Object.keys(E.res).length)); shell.markDone('report', !!(E && E.summary));
+}
+let entering = Promise.resolve();
+/** (re)enter the step on show: mount if need be, work out what it shows */
+function enter() { entering = entering.then(doEnter).catch((e) => console.error(e)); return entering; }
+async function doEnter() {
+  const id = stepId(), was = S.lastStep; S.lastStep = id; stop(); if (id !== 'mount') { S.pick = null; segPt(''); viewer.setTool(null); shell.hint(''); }
+  if (!MY()) { refreshView(); return; }
+  await hubParts();
+  const fresh = !E, ok = await ensure(); if (!ok) { syncUI(); refreshView(); return; }
+  const teeth = ['move', 'report'].includes(id), wasTeeth = ['move', 'report'].includes(was);
+  if (id === 'mount') { await shell.busy('Seating the bite…', async () => { theta0(); }); syncUI(); refreshView(); if (fresh || wasTeeth) frame('rig'); pickTool(); }
+  else if (id === 'set') { refreshView(); if (fresh || wasTeeth) frame('rig'); }
+  else if (id === 'move') { await setMove(S.move); syncUI(); if (fresh || !wasTeeth) frame(S.view); }
+  else if (id === 'report') { await report(); syncUI(); if (fresh || !wasTeeth) frame(S.view); }
+}
+shell.onStepChange(() => { enter(); });
+putControls(); shell.goto(N.EMBED ? 'mount' : 'load');
+
+window.APP = { N, THREE, shell, viewer, scans, P, K, S, A, CA, OFFER, MOVES, STEP, CONTACT, NEAR, get E() { return E; }, get entering() { return entering; }, ensure, enter, changed, run, setMove, setPos, setView, analyse, solveTheta, thetaAt, theta0, poseOf, thetaShown, verdict, report, loadAppliance, useSource, hubParts, setPoint, setRecorded, putControls, syncUI, refreshView, summaryText, play, stop, DEF };
+</script>
+</body>
+</html>

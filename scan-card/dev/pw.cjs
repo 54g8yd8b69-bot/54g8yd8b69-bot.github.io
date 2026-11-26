@@ -24,7 +24,7 @@ const ROOT = '/home/claude/suite';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.stl': 'model/stl', '.ply': 'application/octet-stream',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.zip': 'application/zip', '.obj': 'text/plain' };
-const SHARED = new Set(['core.js', 'solid.js', 'manifold-wasm.js']);
+const SHARED = new Set(['core.js', 'solid.js', 'manifold-wasm.js', 'dicom.js']);   // dicom.js: the CBCT tab's DICOM reader (added for cbct-card)
 
 // An approximation of the policy a published artifact page runs under (see the artifact guide): own files and inline code,
 // libraries only from the allowed CDNs, no network requests to other hosts, images only from data:/blob:.

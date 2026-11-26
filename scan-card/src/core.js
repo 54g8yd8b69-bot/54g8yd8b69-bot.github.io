@@ -1245,7 +1245,8 @@ function surfaceNets(F, nx, ny, nz) {                           // F < 0 inside;
   return { V, T };
 }
 /**
- * makeDemoArch({ jaw:'lower'|'upper', res:0.3, missing:{12:5.5, 22:true}, spacing:0, prep })
+ * makeDemoArch({ jaw:'lower'|'upper', res:0.3, missing:{12:5.5, 22:true}, spacing:0, prep, turn:{fdi:deg}, shift:{fdi:mm} })
+ *   turn / shift: that tooth turned about its long axis / moved out of the arch line (+ buccal or labial), for crowded arches.
  *   missing: FDI → width of the gap left (true = the tooth's own width).   spacing: extra mm between each of the six front teeth.
  *   prep: { fdi, zTop, zMargin, R0, shoulder, taper, taperLingual, lean } — that tooth is a preparation of exactly known shape instead of a
  *     crown: walls round its long axis (radius R0 at the margin) converging at `taper`° each (buccal, mesial, distal) and at
@@ -1274,6 +1275,10 @@ export function makeDemoArch(o = {}) {
       const quad = upper ? (sg > 0 ? 1 : 2) : (sg > 0 ? 3 : 4), fdi = quad * 10 + i, md = D.md[i - 1];
       if (missing[fdi]) { const gw = missing[fdi] === true ? md : +missing[fdi]; gaps.push({ fdi, width: gw, s0: sg * s, s1: sg * (s + gw) }); s += gw; continue; }
       const f = at(sg * (s + md / 2)), bl = D.bl[i - 1], hh = D.h[i - 1], T = { fdi, type: i, md, bl, h: hh, s: sg * (s + md / 2), cx: f.x, cy: f.y, tx: f.tx, ty: f.ty, nx: f.nx, ny: f.ny, mesialU: sg > 0 ? -1 : 1 };
+      { // (added for the findTeeth tests) o.turn: { fdi: degrees } turns that tooth about its long axis; o.shift: { fdi: mm } moves it out of the arch (+ towards the cheek / lip)
+        const a = ((o.turn && o.turn[fdi]) || 0) * Math.PI / 180, d = (o.shift && o.shift[fdi]) || 0, c = Math.cos(a), sn = Math.sin(a);
+        if (a) { const tx = T.tx * c - T.ty * sn, ty = T.tx * sn + T.ty * c, nx2 = T.nx * c - T.ny * sn, ny2 = T.nx * sn + T.ny * c; Object.assign(T, { tx, ty, nx: nx2, ny: ny2 }); }
+        if (d) { T.cx += d * f.nx; T.cy += d * f.ny; } }
       T.cusps = i >= 6 ? [[0.25 * md, 0.26 * bl, 1.7], [-0.25 * md, 0.26 * bl, 1.7], [0.25 * md, -0.26 * bl, 1.5], [-0.25 * md, -0.26 * bl, 1.5]] : [[0, 0.24 * bl, 1.7], [0, -0.26 * bl, upper ? 1.5 : 1.0]];
       teeth.push(T); s += md + (i <= 3 ? spacing : 0);
     }
@@ -1991,3 +1996,336 @@ export function surfaceDistances(mesh, graph, sources, o = {}) {
   }
   return { dist, prev };
 }
+
+// ═════════════════════════════ tooth detection and numbering (findTeeth) — start ═════════════════════════════
+// Finds the teeth on an arch scan or a model and gives each its FDI number. Geometry only (no trained model):
+//   1. the scan seen from the biting side as a height map (so a model's base, which lies under the teeth, plays no part);
+//   2. the tooth row: what lies near the local biting level and stands proud of its surroundings (a ridge, a pad or a palate does
+//      not); a line runs along the middle of its biggest piece and on across gaps to the pieces beyond;
+//   3. the row is straightened out along that line. At every station the crown material above "4 mm below the local tips" is
+//      added up across the row, and the valleys that cross the whole row are measured; teeth show as humps, embrasures as dips
+//      and valleys, missing teeth as empty stretches;
+//   4. the dips and valleys are candidate boundaries. Which of them are real, and which tooth is which, is settled together by
+//      dynamic programming against typical crown widths and thicknesses, counting out from the midline: a tooth may be missing
+//      with its space kept or (at a cost, less for the teeth most often absent) closed, a dip inside a molar may be ignored,
+//      anything that fits no tooth is left unnumbered. Contacts are the saddles between neighbouring crowns; a free end is
+//      where the crown's outline reaches furthest along the row. A gap one tooth wide holding a short stump is numbered too.
+// Typical widths below are textbook averages used only to tell teeth apart (a prior); nothing clinical is read off them.
+export const FDI_ORDER = { upper: [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], lower: [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38] };
+const FT_W = { upper: [8.6, 6.6, 7.6, 7.0, 6.7, 10.2, 9.6, 8.8], lower: [5.3, 5.9, 6.9, 7.0, 7.1, 10.9, 10.3, 10.2] };   // mesiodistal, tooth 1…8
+const FT_BL = { upper: [5.6, 5.2, 7.0, 8.4, 8.4, 10.4, 10.2, 9.8], lower: [4.6, 4.8, 6.4, 7.0, 7.6, 9.8, 9.6, 9.4] };    // across the crown 4 mm below its tips, seen from the biting side
+const FT_MISS = [1.5, 0.6, 2.0, 0.3, 0.3, 1.0, 0.8, 0];          // extra cost of taking a tooth 1…8 to be missing between two others: second premolars, upper laterals (hypodontia) and first premolars (orthodontic extractions) are the usual absentees; canines and centrals seldom are
+const ftType = (L) => (L < 8 ? 8 - L : L - 7);                        // place in FDI_ORDER → tooth 1…8
+function ftGauss(a, sigma) { const r = Math.max(1, Math.ceil(sigma * 3)), k = []; let sum = 0; for (let i = -r; i <= r; i++) { const w = Math.exp(-0.5 * (i / sigma) ** 2); k.push(w); sum += w; } const n = a.length, out = new Float64Array(n); for (let i = 0; i < n; i++) { let s = 0; for (let j = -r; j <= r; j++) { const q = Math.min(n - 1, Math.max(0, i + j)); s += a[q] * k[j + r]; } out[i] = s / sum; } return out; }
+function ftHeap() { const hd = [], hv = []; return { get size() { return hd.length; },
+  push(d, v) { let i = hd.length; hd.push(d); hv.push(v); while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hd[i] = hd[p]; hv[i] = hv[p]; i = p; } hd[i] = d; hv[i] = v; },
+  pop() { const d = hd[0], v = hv[0], ld = hd.pop(), lv = hv.pop(); if (hd.length) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= hd.length) break; if (c + 1 < hd.length && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hd[i] = hd[c]; hv[i] = hv[c]; i = c; } hd[i] = ld; hv[i] = lv; } return [d, v]; } }; }
+/**
+ * findTeeth(mesh, { jaw:'upper'|'lower', matrix (mesh → case frame, a THREE.Matrix4; leave out if the mesh is already in the case frame),
+ *                   side:'left'|'right' (only for a part arch that does not reach the midline), pins:[{ p:[x,y,z], fdi }] })
+ * The arch must be oriented as the suite orients it (occlusal plane level, front towards −Y, midline near x = 0).
+ * → { jaw, teeth:[{ fdi, type (1…8), tip, tap, centre, mesial, distal (points, in the mesh's own coordinates), width (mm, between the
+ *       contact points, measured in the occlusal plane), bl (mm across the crown), confidence (0…1), s0, s1 (mm along the row), label (a place
+ *       for its number, outside the arch) }]  in order round the arch
+ *       from the patient's right,
+ *     gaps:[{ fdi:[…] (the teeth taken to be missing there), width, a, b, label }], extras:[{ centre, width }] (crown-like lumps given no number),
+ *     side ('both' | 'left' | 'right'), midline (true if the arch crosses the midline), curve:[[x,y,z]…] (the line along the row), ok, note,
+ *     relabel(pins) → the same again with the user's corrections: each pin says the tooth at point p is `fdi` (0 = not a tooth) }
+ *   short: true on a tooth found as a stump in a one-tooth gap (a preparation, a broken-down crown, a healing abutment): its width is
+ *     the gap's.   confidence: how well the crown fits its number's typical width and thickness and how clear its boundaries are.
+ *   tip = middle of the incisal edge, the canine's cusp tip, a premolar's buccal cusp tip, a molar's mesiobuccal cusp tip.
+ *   tap = where a user would tap the tooth from the biting side: the tip for front teeth, the middle of the biting surface behind.
+ *   mesial / distal = the tooth's own ends on its axis along the row, at its contact points (their distance is its width). contacts = the contact
+ *     points themselves, mesial then distal: the saddle between two touching crowns (shared by both), the crown's end where it has no neighbour.
+ */
+export function findTeeth(mesh, o = {}) {
+  const jaw = o.jaw === 'upper' ? 'upper' : 'lower', up = jaw === 'upper' ? -1 : 1, SEQ = FDI_ORDER[jaw], WT = FT_W[jaw], BLT = FT_BL[jaw];
+  const Mx = o.matrix ? o.matrix.clone() : new THREE.Matrix4(), e = Mx.elements, Minv = Mx.clone().invert();
+  const empty = (note) => ({ jaw, teeth: [], gaps: [], extras: [], side: 'both', midline: false, curve: [], ok: false, note, relabel() { return this; } });
+  // ── 1. height map in the working frame: case frame with the teeth pointing up (an upper is turned over in z only, so x stays the patient's left)
+  const P = mesh.positions, nV = P.length / 3, Q = new Float32Array(P.length);
+  for (let v = 0; v < nV; v++) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2]; Q[3 * v] = e[0] * x + e[4] * y + e[8] * z + e[12]; Q[3 * v + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]; Q[3 * v + 2] = up * (e[2] * x + e[6] * y + e[10] * z + e[14]); }
+  if (!mesh.indices || mesh.indices.length < 300) return empty('No surface to look at.');
+  const bb = meshBounds({ positions: Q }), cell0 = Math.max(0.25, Math.sqrt((bb.size[0] + 4) * (bb.size[1] + 4) / 4e6));   // 0.25 mm unless the scan is unusually large
+  const hf = rasterHeightfield({ positions: Q, indices: mesh.indices }, { cell: cell0, mode: 'max', pad: 2 }), { nx, ny, cell } = hf, H = hf.z;
+  for (let pass = 0; pass < 3; pass++) {                              // close pinholes (a scan often has small gaps between the teeth)
+    const add = []; for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) { const k = j * nx + i; if (H[k] > -1e9) continue; let s = 0, c = 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const v = H[k + dj * nx + di]; if (v > -1e9) { s += v; c++; } } if (c >= 5) add.push(k, s / c); }
+    for (let q = 0; q < add.length; q += 2) H[add[q]] = add[q + 1]; if (!add.length) break;
+  }
+  // ── 2. the tooth row, on a coarser grid: near the local biting level and standing proud of its surroundings (white top-hat, radius 6.5 mm)
+  const cx2 = 2, gx = Math.floor(nx / cx2), gy = Math.floor(ny / cx2), gc = cell * cx2, G = new Float32Array(gx * gy).fill(-Infinity);
+  for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) { let m = -Infinity; for (let dj = 0; dj < cx2; dj++) for (let di = 0; di < cx2; di++) { const v = H[(j * cx2 + dj) * nx + i * cx2 + di]; if (v > m) m = v; } G[j * gx + i] = m; }
+  const R = Math.round(6.5 / gc), offs = []; for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) if (di * di + dj * dj <= R * R) offs.push(di, dj);
+  const morph = (src, isMin) => { const out = new Float32Array(src.length).fill(isMin ? Infinity : -Infinity); for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) { let m = isMin ? Infinity : -Infinity; for (let q = 0; q < offs.length; q += 2) { const a = i + offs[q], b = j + offs[q + 1]; if (a < 0 || b < 0 || a >= gx || b >= gy) continue; const v = src[b * gx + a]; if (isMin ? (v > -1e9 && v < m) : (v < 1e9 && v > m)) m = v; } out[j * gx + i] = m; } return out; };
+  const eroded = morph(G, true); for (let k = 0; k < G.length; k++) if (!(G[k] > -1e9)) eroded[k] = Infinity;   // an empty cell (nothing seen there) takes no part in the opening
+  const opened = morph(eroded, false), hat = new Float32Array(gx * gy);
+  const tops = []; for (let k = 0; k < G.length; k++) { hat[k] = G[k] > -1e9 && opened[k] < 1e9 && opened[k] > -1e9 ? G[k] - opened[k] : 0; if (hat[k] >= 4) tops.push(G[k]); }
+  if (tops.length * gc * gc < 25) return empty('No teeth found on this scan.');
+  tops.sort((a, b) => a - b); const zTeeth = tops[Math.floor(0.85 * (tops.length - 1))];
+  const dil = morph(G, false);                                        // the local biting level: the highest point within 6.5 mm
+  let mask = new Uint8Array(gx * gy); for (let k = 0; k < G.length; k++) mask[k] = G[k] > -1e9 && G[k] >= dil[k] - 3.5 && G[k] > zTeeth - 7 && hat[k] >= 2.5 ? 1 : 0;   // near the local biting level and standing proud of its surroundings (not a ridge or a pad)
+  const lab = new Int32Array(gx * gy).fill(-1); let big = -1;
+  { // keep the pieces of the row that look like crowns: the biggest piece, and any other that is big enough, mostly well proud of its
+    // surroundings and up near the biting level (a piece of ridge or a pad is dropped)
+    const st = []; let nl = 0; const comps = [];
+    for (let k0 = 0; k0 < mask.length; k0++) { if (!mask[k0] || lab[k0] >= 0) continue; const cp = { n: 0, h3: 0, top: -Infinity }; st.push(k0); lab[k0] = nl;
+      while (st.length) { const k = st.pop(), i = k % gx, j = (k / gx) | 0; cp.n++; if (hat[k] >= 3) cp.h3++; if (G[k] > cp.top) cp.top = G[k];
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const a2 = i + di, b2 = j + dj; if (a2 < 0 || b2 < 0 || a2 >= gx || b2 >= gy) continue; const q = b2 * gx + a2; if (mask[q] && lab[q] < 0) { lab[q] = nl; st.push(q); } } }
+      comps.push(cp); nl++; }
+    comps.forEach((cp, q) => { if (big < 0 || cp.n > comps[big].n) big = q; });
+    const keep = comps.map((cp, q) => q === big ? cp.n * gc * gc >= 6 : cp.n * gc * gc >= 20 && cp.h3 >= 0.5 * cp.n && cp.top >= zTeeth - 6);
+    for (let k = 0; k < mask.length; k++) if (mask[k] && !keep[lab[k]]) { mask[k] = 0; lab[k] = -1; }
+  }
+  // distance (in cells) from each row cell to the row's edge, so the line keeps to the middle
+  const dt = new Float32Array(gx * gy); { const BIG = 1e6; for (let k = 0; k < dt.length; k++) dt[k] = mask[k] ? BIG : 0;
+    for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) { const k = j * gx + i; if (!mask[k]) continue; let d = dt[k]; if (i > 0) d = Math.min(d, dt[k - 1] + 1); else d = 1; if (j > 0) { d = Math.min(d, dt[k - gx] + 1); if (i > 0) d = Math.min(d, dt[k - gx - 1] + 1.414); if (i < gx - 1) d = Math.min(d, dt[k - gx + 1] + 1.414); } else d = 1; dt[k] = d; }
+    for (let j = gy - 1; j >= 0; j--) for (let i = gx - 1; i >= 0; i--) { const k = j * gx + i; if (!mask[k]) continue; let d = dt[k]; if (i < gx - 1) d = Math.min(d, dt[k + 1] + 1); else d = 1; if (j < gy - 1) { d = Math.min(d, dt[k + gx] + 1); if (i > 0) d = Math.min(d, dt[k + gx - 1] + 1.414); if (i < gx - 1) d = Math.min(d, dt[k + gx + 1] + 1.414); } else d = 1; dt[k] = d; } }
+  const stepCost = new Float32Array(gx * gy); let seed = -1, seedD = 0;
+  for (let k = 0; k < stepCost.length; k++) { stepCost[k] = mask[k] ? 1 + 4 / (0.5 + dt[k]) : G[k] > zTeeth - 12 ? 6 : 30; if (mask[k] && dt[k] > seedD) { seedD = dt[k]; seed = k; } }
+  if (seed < 0) return empty('No teeth found on this scan.');
+  const dijkstra = (src, comp) => { const dist = new Float64Array(gx * gy).fill(Infinity), prev = new Int32Array(gx * gy).fill(-1), hp = ftHeap(); dist[src] = 0; hp.push(0, src);
+    while (hp.size) { const [d, k] = hp.pop(); if (d > dist[k]) continue; const i = k % gx, j = (k / gx) | 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { if (!di && !dj) continue; const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= gx || b >= gy) continue; const q = b * gx + a; if (comp != null && lab[q] !== comp) continue; const nd = d + 0.5 * (stepCost[k] + stepCost[q]) * (di && dj ? 1.414 : 1); if (nd < dist[q]) { dist[q] = nd; prev[q] = k; hp.push(nd, q); } } }
+    return { dist, prev }; };
+  const farthest = (dist) => { let b = -1, bd = -1; for (let k = 0; k < mask.length; k++) if (mask[k] && dist[k] > bd && dist[k] < Infinity) { bd = dist[k]; b = k; } return b; };
+  const cxy = (k) => [hf.x0 + ((k % gx) * cx2 + 0.5) * cell, hf.y0 + (((k / gx) | 0) * cx2 + 0.5) * cell];
+  // the line: the longest way through the biggest piece of the row; then, at either end, on to the next piece lying ahead (within
+  // 30 mm and 55° of the way the row was going: teeth beyond a gap), through that piece, and so on
+  const s0 = lab[seed] === big ? seed : (() => { let b2 = -1, bd = 0; for (let k = 0; k < mask.length; k++) if (lab[k] === big && dt[k] > bd) { bd = dt[k]; b2 = k; } return b2; })();
+  const eA = farthest(dijkstra(s0, big).dist), dA = dijkstra(eA, big), eB = farthest(dA.dist);
+  let path = []; for (let k = eB; k >= 0; k = dA.prev[k]) path.push(cxy(k));
+  { const used = new Set([big]);
+    for (let guard = 0; guard < 12; guard++) { let grew = false;
+      for (const atEnd of [true, false]) { if (path.length < 8) break; const pts = atEnd ? path : path.slice().reverse(), e = pts[pts.length - 1]; let back = pts[Math.max(0, pts.length - 17)], dl = Math.hypot(e[0] - back[0], e[1] - back[1]) || 1; const dir = [(e[0] - back[0]) / dl, (e[1] - back[1]) / dl];
+        let bestK = -1, bestD = 30; for (let k = 0; k < mask.length; k++) { if (!mask[k] || used.has(lab[k])) continue; const p = cxy(k), vx = p[0] - e[0], vy = p[1] - e[1], d = Math.hypot(vx, vy); if (d >= bestD || d < 1e-6 || (vx * dir[0] + vy * dir[1]) / d < Math.cos(55 * Math.PI / 180)) continue; bestD = d; bestK = k; }
+        if (bestK < 0) continue; const comp = lab[bestK]; used.add(comp); const dC = dijkstra(bestK, comp), far = farthest(dC.dist), seg = []; for (let k = far; k >= 0; k = dC.prev[k]) seg.push(cxy(k)); seg.reverse();   // seg runs from the near cell to the far end
+        const join = [], nj = Math.ceil(bestD / gc); for (let q = 1; q < nj; q++) join.push([e[0] + (seg[0][0] - e[0]) * q / nj, e[1] + (seg[0][1] - e[1]) * q / nj]);
+        const ext = join.concat(seg); path = atEnd ? path.concat(ext) : ext.reverse().concat(path); grew = true; }
+      if (!grew) break; } }
+  if (path.length < 8) return empty('No teeth found on this scan.');
+  // ── the line: smoothed, pulled onto the middle of the crowns, run a little past both ends
+  const resample = (pts, ds) => { const out = [pts[0].slice()]; let carry = 0; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]); let t = ds - carry; while (t <= L) { out.push([a[0] + (b[0] - a[0]) * t / L, a[1] + (b[1] - a[1]) * t / L]); t += ds; } carry = L - (t - ds); } return out; };
+  const smooth = (pts, sigma, ds) => { const n = pts.length, pad = Math.ceil(3 * sigma / ds), ext = (c) => { const a = new Float64Array(n + 2 * pad); for (let i = 0; i < a.length; i++) { const q = i - pad; a[i] = q < 0 ? 2 * pts[0][c] - pts[Math.min(n - 1, -q)][c] : q >= n ? 2 * pts[n - 1][c] - pts[Math.max(0, 2 * (n - 1) - q)][c] : pts[q][c]; } return ftGauss(a, sigma / ds); }, X = ext(0), Y = ext(1); return pts.map((_, i) => [X[i + pad], Y[i + pad]]); };
+  const hAt = (x, y) => { const v = sampleField(hf, x, y); return v > -1e9 ? v : -1e3; };   // NaN and empty cells → far below
+  const DS = 0.25; let line = smooth(resample(path, DS), 3, DS);
+  const tangents = (pts) => pts.map((_, i) => { const a = pts[Math.max(0, i - 4)], b = pts[Math.min(pts.length - 1, i + 4)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; });
+  const straightEnds = (pts, cut, ext) => {                          // the path ends in a corner of the last crown: drop the last `cut` mm and run on straight, in the direction of the stretch before it
+    const nc = Math.round(cut / DS), nf = Math.round(8 / DS); if (pts.length < 2 * (nc + nf) + 4) return pts; const mid = pts.slice(nc, pts.length - nc), dir = (a, b) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; };
+    const a = mid[0], ta = dir(mid[nf], a), b = mid[mid.length - 1], tb = dir(mid[mid.length - 1 - nf], b), pre = [], post = []; for (let d = cut + ext; d >= DS; d -= DS) pre.push([a[0] + ta[0] * d, a[1] + ta[1] * d]); for (let d = DS; d <= cut + ext; d += DS) post.push([b[0] + tb[0] * d, b[1] + tb[1] * d]); return pre.concat(mid, post); };
+  for (let it = 0; it < 6; it++) {                                   // pull the line onto the middle of the crown material near the tips; the level is the local tips' (±4 mm along), so a short
+    const tg = tangents(line), n = line.length, cols = [], tops = new Float64Array(n);   // tooth (a preparation) does not drag it onto the gum behind; each pull is the median of its neighbours' (±4 mm)
+    const TW = 7, nq = Math.round(2 * TW / 0.25) + 1, tq = (q) => -TW + q * 0.25;
+    for (let i = 0; i < n; i++) { const p = line[i], nxn = tg[i][1], nyn = -tg[i][0], col = new Float64Array(nq); let top = -Infinity; for (let q = 0; q < nq; q++) { const t = tq(q), h = hAt(p[0] + t * nxn, p[1] + t * nyn); col[q] = h; if (Math.abs(t) <= 5 && h > top) top = h; } cols.push(col); tops[i] = top; }
+    const W4 = Math.round(4 / DS), shift = new Float64Array(n), ok = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { let top = -Infinity; for (let q = Math.max(0, i - W4); q <= Math.min(n - 1, i + W4); q++) if (tops[q] > top) top = tops[q]; if (top < zTeeth - 7) continue;
+      // the middle of the crown at 4 mm below the local tips: halfway between the two ends of the stretch above that level that holds the highest point near the line
+      const col = cols[i], L = top - 4; let qm = -1, hm = -Infinity; for (let q = 0; q < nq; q++) if (Math.abs(tq(q)) <= 4.5 && col[q] > hm) { hm = col[q]; qm = q; } if (qm < 0 || hm <= L) continue;
+      let q0 = qm, q1 = qm; while (q0 > 0 && col[q0 - 1] > L) q0--; while (q1 < nq - 1 && col[q1 + 1] > L) q1++; shift[i] = 0.5 * (tq(q0) + tq(q1)); ok[i] = 1; }
+    const moved = line.map((p, i) => { const vals = []; for (let q = Math.max(0, i - W4); q <= Math.min(n - 1, i + W4); q++) if (ok[q]) vals.push(shift[q]); if (vals.length < W4) return p; vals.sort((a, b) => a - b); const sh = clamp(vals[vals.length >> 1], -1.5, 1.5); return [p[0] + sh * tg[i][1], p[1] - sh * tg[i][0]]; });
+    line = smooth(resample(moved, DS), 2, DS); if (it === 0) line = straightEnds(line, 5, 0);
+  }
+  line = straightEnds(line, 5, 5);
+  // which way round: from the patient's right, round the front, to the left
+  { const yc = Math.max(...line.map((p) => p[1])) + 25, ang = (p) => Math.atan2(p[0], yc - p[1]); if (ang(line[0]) > ang(line[line.length - 1])) line.reverse(); }
+  const build = (lineIn, sideIn) => ftAlong({ line: lineIn, sideIn, hAt, zTeeth, jaw, up, SEQ, WT, BLT, Minv, pins: o.pins || [], Mx, DS, proud: (x, y) => { const i = Math.floor((x - hf.x0) / gc), j = Math.floor((y - hf.y0) / gc); return i < 0 || j < 0 || i >= gx || j >= gy ? 0 : hat[j * gx + i]; }, dbg0: { mask, gx, gy, gc, x0: hf.x0, y0: hf.y0, path, hat, G } });
+  let res;
+  if (o.side === 'left' || o.side === 'right') { const a = build(line, o.side); res = a; if (!a.midline) { const b = build(line.slice().reverse(), o.side); if (b.cost < a.cost) res = b; } }
+  else res = build(line, null);
+  return res;
+}
+// The second half of findTeeth: everything measured along the line. Kept apart so a part arch can be tried both ways round.
+function ftAlong(c) {
+  const { line, hAt, zTeeth, jaw, up, SEQ, WT, BLT, Minv, Mx, DS } = c, ns = line.length, NT = 65, T0 = 32, DT = 0.25;
+  const tg = line.map((_, i) => { const a = line[Math.max(0, i - 4)], b = line[Math.min(ns - 1, i + 4)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; });
+  const nrm = tg.map((t) => [t[1], -t[0]]);                           // towards the cheek / lip when going from the patient's right to the left
+  const S = new Float32Array(ns * NT); for (let i = 0; i < ns; i++) for (let k = 0; k < NT; k++) { const t = (k - T0) * DT; S[i * NT + k] = hAt(line[i][0] + t * nrm[i][0], line[i][1] + t * nrm[i][1]); }
+  const xy = (i, k) => { const t = (k - T0) * DT; return [line[i][0] + t * nrm[i][0], line[i][1] + t * nrm[i][1]]; };
+  // local level of the tips, and the crown material above 4 mm below it
+  const colTop = new Float64Array(ns); for (let i = 0; i < ns; i++) { let m = -1e3; for (let k = T0 - 26; k <= T0 + 26; k++) if (S[i * NT + k] > m) m = S[i * NT + k]; colTop[i] = m; }
+  const win = Math.round(5 / DS), zl0 = new Float64Array(ns); for (let i = 0; i < ns; i++) { let m = -1e3; for (let q = Math.max(0, i - win); q <= Math.min(ns - 1, i + win); q++) if (colTop[q] > m) m = colTop[q]; zl0[i] = m; }
+  const zl = ftGauss(zl0, 1.5 / DS), A0 = new Float64Array(ns), BLw = new Float64Array(ns), lo = new Int16Array(ns), hi = new Int16Array(ns), DEPTH = 4;
+  for (let i = 0; i < ns; i++) {
+    lo[i] = hi[i] = -1; if (zl[i] < zTeeth - 6.5 || colTop[i] < zTeeth - 9) continue; const L = zl[i] - DEPTH; let k = 1, k0b = -1, k1b = -1;
+    while (k < NT - 1) { if (S[i * NT + k] <= L) { k++; continue; } let k1 = k; while (k1 < NT - 1 && S[i * NT + k1 + 1] > L) k1++;
+      const open = k <= 1 || k1 >= NT - 2, wdt = (k1 - k + 1) * DT;   // empty cells beside a run close it (nothing is seen beyond a proclined incisor's edge from the biting side)
+      if (!open && wdt <= 13.5) { let a = 0; for (let q = k; q <= k1; q++) a += (S[i * NT + q] - L) * DT; A0[i] += a; BLw[i] += wdt; if (k0b < 0) k0b = k; k1b = k1; }
+      k = k1 + 1; }
+    lo[i] = k0b; hi[i] = k1b;
+  }
+  const A = ftGauss(A0, 0.35 / DS), AMIN = 1.2;
+  // valleys that run across the row: at an embrasure most of the crown's width lies lower than on either side of it along the row
+  // (buccal and lingual embrasures, the notch between marginal ridges or incisal edges); a fissure crosses only part of a crown
+  const V0 = new Float64Array(ns), WV = Math.round(2.5 / DS);
+  for (let i = WV; i < ns - WV; i++) { if (lo[i] < 0) continue; let sum = 0, cnt = 0, deep = 0;
+    for (let k = lo[i]; k <= hi[i]; k++) { const h = S[i * NT + k]; if (h < -900) continue; let l = -1e3, r = -1e3; for (let q = i - WV; q < i; q++) l = Math.max(l, S[q * NT + k]); for (let q = i + 1; q <= i + WV; q++) r = Math.max(r, S[q * NT + k]); const d = clamp(Math.min(l, r) - h, 0, 2.5); sum += d; cnt++; if (d > 0.3) deep++; }
+    if (cnt) V0[i] = (sum / cnt) * (deep / cnt); }
+  const V = ftGauss(V0, 0.3 / DS);
+  // ── runs of crown, and the dips inside them
+  const sAt = (i) => i * DS, nodes = [];                             // node: { i (station), q (0…1 how sure a boundary), edge: -1 a crown starts here, +1 a crown ends here, 0 a dip }
+  { let i = 0; while (i < ns) { if (A[i] <= AMIN) { i++; continue; } let j = i; while (j + 1 < ns && A[j + 1] > AMIN) j++;
+      if ((j - i) * DS >= 1.5) { nodes.push({ i, q: 1, edge: -1 });
+        const mins = []; for (let m = i + 2; m < j - 1; m++) if (A[m] <= A[m - 1] && A[m] < A[m + 1]) mins.push(m);
+        for (const m of mins) { let pl = A[m], pr = A[m]; for (let q = m - 1; q >= i; q--) { if (A[q] < A[m]) break; if (A[q] > pl) pl = A[q]; } for (let q = m + 1; q <= j; q++) { if (A[q] < A[m]) break; if (A[q] > pr) pr = A[q]; }
+          const pk = Math.min(pl, pr), prom = pk - A[m], rel = prom / pk; if (prom > 0.6 && rel > 0.035) nodes.push({ i: m, q: Math.max(clamp((rel - 0.03) / 0.42, 0.03, 1), clamp(V[m] / 0.6, 0, 1)), edge: 0 }); }
+        // a valley across the row with no dip in the amount of crown (crowded incisors that overlap) is a boundary too, if a weaker one
+        const W1 = Math.round(1 / DS), W2 = Math.round(2.5 / DS);
+        for (let m = i + W1; m <= j - W1; m++) { if (V[m] < 0.08 || V[m] < V[m - 1] || V[m] <= V[m + 1]) continue; let lo2 = V[m]; for (let q = Math.max(i, m - W2); q <= Math.min(j, m + W2); q++) lo2 = Math.min(lo2, V[q]);
+          if (V[m] - lo2 < 0.06 || nodes.some((nd) => nd.edge === 0 && Math.abs(nd.i - m) <= W1)) continue; nodes.push({ i: m, q: clamp(V[m] / 0.6, 0.03, 0.8), edge: 0 }); }
+        nodes.sort((a, b) => a.i - b.i || a.edge - b.edge);
+        nodes.push({ i: j, q: 1, edge: 1 }); }
+      i = j + 1; } }
+  // a point for each node. Between two crowns: the contact, i.e. the saddle between them — down each column across the row the lowest
+  // point near the boundary (the valley from the buccal to the lingual embrasure), and of those the highest. At a crown's free end:
+  // its outline's furthest point along the row, where the crown drops to the gum beside it (halfway down that drop).
+  const xyf = (fi, k) => { const i = clamp(Math.floor(fi), 0, ns - 2), f = clamp(fi - i, 0, 1), t = (k - T0) * DT; return [line[i][0] + (line[i + 1][0] - line[i][0]) * f + t * nrm[i][0], line[i][1] + (line[i + 1][1] - line[i][1]) * f + t * nrm[i][1]]; };
+  const WS = Math.round(1.5 / DS);
+  for (const nd of nodes) { const i = nd.i;
+    if (nd.edge === 0) {
+      let k0 = lo[i], k1 = hi[i]; for (let q = Math.max(0, i - WS); q <= Math.min(ns - 1, i + WS); q++) if (lo[q] >= 0) { k0 = k0 < 0 ? lo[q] : Math.min(k0, lo[q]); k1 = Math.max(k1, hi[q]); } if (k0 < 0) { k0 = T0 - 8; k1 = T0 + 8; }
+      const vk = [], ik = []; for (let k = k0; k <= k1; k++) { let v = Infinity, iv = i; const qa = Math.max(0, i - WS), qb = Math.min(ns - 1, i + WS); for (let q = qa; q <= qb; q++) { const h = S[q * NT + k]; if (h > -900 && h < v) { v = h; iv = q; } } vk.push(v === Infinity || iv === qa || iv === qb ? -1e3 : v); ik.push(iv); }   // a column still falling at the window's edge has no valley here
+      let bk = -1, bv = -Infinity; for (let j = 0; j < vk.length; j++) { const sm = (vk[Math.max(0, j - 1)] + 2 * vk[j] + vk[Math.min(vk.length - 1, j + 1)]) / 4; if (sm > bv) { bv = sm; bk = j; } }
+      let j0 = bk, j1 = bk; while (j0 > 0 && vk[j0 - 1] >= bv - 0.5) j0--; while (j1 < vk.length - 1 && vk[j1 + 1] >= bv - 0.5) j1++;   // the top of the saddle can be a ridge across the row: its middle
+      let sw = 0, sk = 0, si = 0; for (let j = j0; j <= j1; j++) { const w = vk[j] - (bv - 0.5) + 0.05; sw += w; sk += w * j; si += w * ik[j]; }
+      const kc = k0 + sk / sw, [px, py] = xyf(si / sw, kc); nd.p = [px, py, bv]; nd.i2 = si / sw;
+    } else {
+      const out = nd.edge, ii = clamp(i - out * Math.round(1 / DS), 0, ns - 1), L0 = zl[ii] - DEPTH; let c = -1e3; for (let q = Math.min(i, ii); q <= Math.max(i, ii); q++) c = Math.max(c, colTop[q]);
+      let g = Infinity; for (let q = i + out; q >= 0 && q < ns && Math.abs(q - i) <= Math.round(3 / DS); q += out) g = Math.min(g, colTop[q] > -900 ? colTop[q] : c - 8); if (!Number.isFinite(g)) g = c - 8;
+      const thr = Math.max(g + 0.5 * (c - g), Math.min(L0, c - 1)), k0 = lo[ii] >= 0 ? lo[ii] : T0 - 8, k1 = lo[ii] >= 0 ? hi[ii] : T0 + 8; let best = -Infinity, bp = null;
+      const dk = [];
+      for (let k = k0; k <= k1; k++) { if (S[ii * NT + k] <= thr) continue; let q = ii; while (q + out >= 0 && q + out < ns && S[(q + out) * NT + k] > thr && Math.abs(q + out - ii) < Math.round(5 / DS)) q += out;
+        const h0 = S[q * NT + k], h1 = q + out >= 0 && q + out < ns ? S[(q + out) * NT + k] : -1e3, f = h1 > -900 ? clamp((h0 - thr) / ((h0 - h1) || 1), 0, 1) : 0.5, d = (q + out * f - i) * out;
+        dk.push([d, k]); if (d > best) best = d; }
+      let kk = 0, nk = 0; for (const [d, k] of dk) if (d >= best - 0.3 / DS) { kk += k; nk++; }   // a boxy crown reaches its furthest along a stretch of its outline: the middle of that stretch
+      bp = nk ? [i + out * best, kk / nk] : [i, T0]; const [px, py] = xyf(bp[0], bp[1]); nd.p = [px, py, thr]; nd.i2 = bp[0]; } }
+  const nN = nodes.length, crownAfter = nodes.map((nd, n) => n + 1 < nN && !(nd.edge === 1));     // is the stretch from node n to n+1 crown?
+  const dist2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const cumG = new Float64Array(nN + 1), cumJ = new Float64Array(nN + 1); for (let n = 0; n + 1 < nN; n++) { const d = dist2(nodes[n].p, nodes[n + 1].p); cumG[n + 1] = cumG[n] + (crownAfter[n] ? 0 : d); cumJ[n + 1] = cumJ[n] + (crownAfter[n] ? d : 0); }
+  // a crown's width: its two end points' distance along the row there (the line's chord between them), so a contact found towards the
+  // cheek at one end and towards the tongue at the other does not add its sideways offset
+  const mdWidth = (a, b) => { const pa = nodes[a].p, pb = nodes[b].p, ia = clamp(Math.round(nodes[a].i2 ?? nodes[a].i), 0, ns - 1), ib = clamp(Math.round(nodes[b].i2 ?? nodes[b].i), 0, ns - 1);
+    const dx = line[ib][0] - line[ia][0], dy = line[ib][1] - line[ia][1], L = Math.hypot(dx, dy); if (L < 1e-6) return dist2(pa, pb); return Math.abs((pb[0] - pa[0]) * dx + (pb[1] - pa[1]) * dy) / L; };
+  // candidate teeth: node a → node b with crown all the way
+  const cands = nodes.map(() => []);
+  for (let a = 0; a < nN; a++) { let skipQ = 0; for (let b = a + 1; b < nN; b++) { if (!crownAfter[b - 1]) break; const w = mdWidth(a, b); if (w > 14.8) break;
+      if (w >= 3.2) { const i0 = nodes[a].i, i1 = nodes[b].i, m0 = Math.round(i0 + 0.2 * (i1 - i0)), m1 = Math.round(i1 - 0.2 * (i1 - i0)), bls = []; for (let i = m0; i <= m1; i++) bls.push(BLw[i]); bls.sort((x, y) => x - y);
+        cands[a].push({ a, b, w, bl: bls[Math.floor(0.7 * (bls.length - 1))] || 0, skipQ, bq: (1 - nodes[a].q) + (1 - nodes[b].q), sm: 0.5 * (sAt(i0) + sAt(i1)) }); }
+      skipQ += nodes[b].q; } }
+  // ── the midline: only trusted when the row looks the same either side of x = 0
+  let sMid = null; { let cross = -1; for (let i = 1; i < ns; i++) if ((line[i - 1][0] < 0) !== (line[i][0] < 0)) { if (cross < 0 || Math.abs(line[i][1]) > 0 && line[i][1] < line[cross][1]) cross = i; }
+    if (cross > 0) { const first = nodes.length ? nodes[0].i : 0, last = nodes.length ? nodes[nN - 1].i : ns - 1, f = (cross - first) / Math.max(1, last - first); let err = 0, cnt = 0;
+      for (let i = first; i <= last; i += 8) { let bd = Infinity; for (let q = first; q <= last; q += 4) { const d = Math.hypot(line[q][0] + line[i][0], line[q][1] - line[i][1]); if (d < bd) bd = d; } err += Math.min(bd, 15); cnt++; }
+      if (f > 0.25 && f < 0.75 && err / cnt < 5) sMid = sAt(cross); } }
+  const midline = sMid != null; let side = midline ? 'both' : c.sideIn;
+  const pinS = (c.pins || []).map((pn) => { const v = new THREE.Vector3(pn.p[0], pn.p[1], pn.p[2]).applyMatrix4(Mx); let bi = 0, bd = Infinity; for (let i = 0; i < ns; i++) { const d = Math.hypot(line[i][0] - v.x, line[i][1] - v.y); if (d < bd) { bd = d; bi = i; } } return { i: bi, L: pn.fdi ? SEQ.indexOf(pn.fdi) : -1, far: bd > 9 }; }).filter((pn) => !pn.far && (pn.L >= 0 || pn.L === -1));
+  for (const pn of pinS) if (pn.L < 0) { pn.lo = 0; pn.hi = ns; for (const nd of nodes) { if (nd.q < 0.5) continue; if (nd.i <= pn.i) pn.lo = Math.max(pn.lo, nd.i); else pn.hi = Math.min(pn.hi, nd.i); } pn.lo += 2; pn.hi -= 2; }
+  // ── dynamic programming over (node reached, last tooth number used)
+  const NL = 16, midCost = (s) => (midline ? Math.min(((s - sMid) / 2.5) ** 2, 12) : 0);
+  const solve = (k, sideTry) => {
+    const lMin = sideTry === 'left' ? 8 : 0, lMax = sideTry === 'right' ? 7 : 15;
+    const toothCost = (cd, L) => { const t = ftType(L), W = k * WT[t - 1], ew = (cd.w - W) / (0.09 * W + 0.45), eb = (cd.bl - BLT[t - 1]) / 1.8; return Math.min(ew * ew, 10) + 0.5 * Math.min(eb * eb, 6) + 1.25 * cd.bq + 3 * cd.skipQ + (t === 8 ? 1.5 : 0); };
+    // a pin says which tooth covers its point; a "not a tooth" pin keeps every tooth off the lump it is on (between the surest boundaries either side)
+    const pinOK = (cd, L) => { const i0 = nodes[cd.a].i, i1 = nodes[cd.b].i; for (const pn of pinS) { if (pn.L >= 0) { if (pn.i > i0 && pn.i < i1 && pn.L !== L) return false; } else if (i1 > pn.lo && i0 < pn.hi) return false; } return true; };
+    const junk = (a, b) => { const j = cumJ[b] - cumJ[a]; if (j <= 0) return 0; for (const pn of pinS) if (pn.L >= 0 && pn.i > nodes[a].i && pn.i < nodes[b].i && A[pn.i] > AMIN) return Infinity; return 2.5 + 0.55 * j; };
+    const skipCost = (n, g) => { if (n === 0) return g < 1 ? 0 : Math.min(6, ((g - 1) / 2.5) ** 2); return 0; };
+    const f = new Float64Array(nN * NL).fill(Infinity), bk = new Int32Array(nN * NL).fill(-1), bc = new Array(nN * NL).fill(null);
+    const tcost = cands.map((list) => list.map((cd) => { const r = new Float64Array(NL); for (let L = 0; L < NL; L++) r[L] = L >= lMin && L <= lMax && pinOK(cd, L) ? toothCost(cd, L) : Infinity; return r; }));
+    for (let a = 0; a < nN; a++) { const lead = junk(0, a); if (lead === Infinity) break; cands[a].forEach((cd, ci) => { for (let L = lMin; L <= lMax; L++) { let cst = lead + tcost[a][ci][L]; if (L >= 8 && midline) cst += Math.min((Math.max(0, sMid - sAt(nodes[a].i)) / 3.5) ** 2, 8); const st = cd.b * NL + L; if (cst < f[st]) { f[st] = cst; bk[st] = -2; bc[st] = cd; } } }); }
+    for (let a = 0; a < nN; a++) for (let L = lMin; L <= lMax; L++) { const cur = f[a * NL + L]; if (cur === Infinity) continue;
+      for (let a2 = a; a2 < nN; a2++) { const jk = junk(a, a2); if (jk === Infinity) break; const g = (cumG[a2] - cumG[a]) + (cumJ[a2] - cumJ[a]);
+        cands[a2].forEach((cd, ci) => { for (let L2 = L + 1; L2 <= lMax; L2++) { const tc = tcost[a2][ci][L2]; if (tc === Infinity) continue; const n = L2 - L - 1; let sk;
+            if (n === 0) sk = skipCost(0, g); else { let sum = 0, pri = 0; for (let q = L + 1; q < L2; q++) { sum += k * WT[ftType(q) - 1]; pri += FT_MISS[ftType(q) - 1]; } sk = 0.6 * n + pri + (g >= sum ? ((g - sum) / (3 + 0.3 * sum)) ** 2 : 1.2 * ((sum - g) / (0.45 * sum + 1)) ** 2); }
+            let cst = cur + jk + sk + tc; if (L <= 7 && L2 >= 8) cst += midCost(0.5 * (sAt(nodes[a].i) + sAt(nodes[a2].i)));
+            const st = cd.b * NL + L2; if (cst < f[st]) { f[st] = cst; bk[st] = a * NL + L; bc[st] = cd; } } }); } }
+    let best = junk(0, nN - 1), bst = -1; if (best === Infinity) best = 1e9;
+    for (let a = 0; a < nN; a++) for (let L = lMin; L <= lMax; L++) { const cur = f[a * NL + L]; if (cur === Infinity) continue; let cst = cur + junk(a, nN - 1); if (L <= 7 && midline) cst += Math.min((Math.max(0, sAt(nodes[a].i) - sMid) / 3.5) ** 2, 8); if (cst < best) { best = cst; bst = a * NL + L; } }
+    const chain = []; for (let st = bst; st >= 0; st = bk[st]) chain.push({ cd: bc[st], L: st % NL, cost: tcost[bc[st].a][cands[bc[st].a].indexOf(bc[st])][st % NL] }); chain.reverse();
+    return { cost: best + 0.5 * ((k - 1) / 0.08) ** 2, chain, k };
+  };
+  // with no trusted midline the arch may still cross it (a part arch, or one set off-centre): both sides together are tried too, a little dearer
+  let best = null; for (const sideTry of (midline ? [null] : side ? [side, 'any'] : ['left', 'right', 'any'])) for (const k of [0.88, 0.94, 1, 1.06, 1.12]) { const r = solve(k, sideTry === 'any' ? null : sideTry); if (sideTry === 'any') r.cost += 1.5; r.side = sideTry; if (!best || r.cost < best.cost - 1e-9) best = r; }
+  if (!midline) { const Ls = best.chain.map((q) => q.L); side = !Ls.length ? side || 'left' : Ls.some((L) => L <= 7) && Ls.some((L) => L >= 8) ? 'both' : Ls[0] >= 8 ? 'left' : 'right'; }
+  // ── the teeth
+  const toMesh = (p) => { const v = new THREE.Vector3(p[0], p[1], up * p[2]).applyMatrix4(Minv); return [v.x, v.y, v.z]; };
+  const outside = (i, z) => toMesh([line[i][0] + 6.5 * nrm[i][0], line[i][1] + 6.5 * nrm[i][1], z]);   // a place for a tooth's number: beside it, outside the arch
+  const teeth = best.chain.map(({ cd, L, cost }) => {
+    const t = ftType(L), fdi = SEQ[L], i0 = nodes[cd.a].i, i1 = nodes[cd.b].i, right = L <= 7, mes = right ? nodes[cd.b].p : nodes[cd.a].p, dis = right ? nodes[cd.a].p : nodes[cd.b].p;
+    let sx = 0, sy = 0, sn = 0, top = -Infinity, tp = null, kc = 0, kn = 0;
+    for (let i = i0; i <= i1; i++) { if (lo[i] < 0) continue; const Lv = zl[i] - 4; for (let k = lo[i]; k <= hi[i]; k++) { const h = S[i * NT + k]; if (h <= Lv) continue; const p = xy(i, k); sx += p[0]; sy += p[1]; sn++; kc += k; kn++; if (h > top) { top = h; tp = [p[0], p[1], h]; } } }
+    if (!sn) { sx = 0.5 * (mes[0] + dis[0]); sy = 0.5 * (mes[1] + dis[1]); sn = 1; top = mes[2]; tp = [sx, sy, top]; kc = T0; kn = 1; }
+    const cxy = [sx / sn, sy / sn], kMid = kc / kn; let tip = tp;
+    const peak = (ia, ib, ka, kb) => { let bh = -Infinity, bp = null; for (let i = Math.max(i0, ia); i <= Math.min(i1, ib); i++) for (let k = Math.max(lo[i] < 0 ? 0 : lo[i], ka); k <= Math.min(hi[i] < 0 ? NT - 1 : hi[i], kb); k++) { const h = S[i * NT + k]; if (h > bh) { bh = h; bp = [...xy(i, k), h]; } } return bp; };
+    if (t <= 2) { const im = Math.round(0.5 * (i0 + i1)); let ax = 0, ay = 0, az = 0, an = 0; for (let i = im - 2; i <= im + 2; i++) { const q = peak(i, i, 0, NT - 1); if (q) { ax += q[0]; ay += q[1]; az += q[2]; an++; } } if (an) tip = [ax / an, ay / an, az / an]; }
+    else if (t >= 4) { const mesialHalf = t >= 6 ? (right ? [Math.round(0.5 * (i0 + i1)), i1] : [i0, Math.round(0.5 * (i0 + i1))]) : [i0, i1]; const q = peak(mesialHalf[0], mesialHalf[1], Math.round(kMid) + 2, NT - 1); if (q) tip = q; }
+    const tapP = t <= 3 ? tip : [cxy[0], cxy[1], hAt(cxy[0], cxy[1])];
+    // the two contact points as this tooth's own ends: moved onto its axis along the row (through its middle), so their distance is its width
+    const ia = clamp(Math.round(nodes[cd.a].i2 ?? i0), 0, line.length - 1), ib = clamp(Math.round(nodes[cd.b].i2 ?? i1), 0, line.length - 1), ux0 = line[ib][0] - line[ia][0], uy0 = line[ib][1] - line[ia][1], ul = Math.hypot(ux0, uy0) || 1, ux = ux0 / ul, uy = uy0 / ul;
+    const onAxis = (p) => { const d = (p[0] - cxy[0]) * ux + (p[1] - cxy[1]) * uy, x = cxy[0] + d * ux, y = cxy[1] + d * uy, h = hAt(x, y); return [x, y, h > -900 && Math.abs(h - p[2]) < 3 ? h : p[2]]; };
+    return { fdi, type: t, tip: toMesh(tip), tap: toMesh(tapP), centre: toMesh([cxy[0], cxy[1], top - 4]), mesial: toMesh(onAxis(mes)), distal: toMesh(onAxis(dis)), contacts: [toMesh(mes), toMesh(dis)], width: cd.w, bl: cd.bl, confidence: clamp(Math.exp(-cost / 4), 0.05, 1), s0: sAt(i0), s1: sAt(i1), label: outside(Math.round(0.5 * (i0 + i1)), top), _a: cd.a, _b: cd.b, _L: L };
+  });
+  // gaps (numbers skipped between two teeth) and lumps left without a number. A gap one tooth wide with something standing proud in it
+  // (a preparation, a broken-down or unerupted crown, a healing abutment) is given that number as a short crown (short: true).
+  const gaps = [], extras = [], used = new Uint8Array(nN), shortT = [];
+  for (const th of teeth) for (let n = th._a; n < th._b; n++) used[n] = 1;
+  for (let q = 0; q + 1 < teeth.length; q++) { const a = teeth[q], b = teeth[q + 1]; if (b._L - a._L <= 1) continue; const pa = nodes[a._b].p, pb = nodes[b._a].p, list = []; for (let L = a._L + 1; L < b._L; L++) list.push(SEQ[L]);
+    const im = Math.round(0.5 * (nodes[a._b].i + nodes[b._a].i)), g = { fdi: list, width: dist2(pa, pb), a: toMesh(pa), b: toMesh(pb), label: outside(im, zl[im] > -900 ? zl[im] : zTeeth) };
+    if (list.length === 1 && c.proud && !pinS.some((pn) => pn.L < 0 && pn.i > nodes[a._b].i && pn.i < nodes[b._a].i)) { const L = a._L + 1, t = ftType(L), ia = nodes[a._b].i, ib = nodes[b._a].i; let run = 0, best = 0, top = -Infinity, tp = null, sx = 0, sy = 0, sn = 0;
+      for (let i = ia + 1; i < ib; i++) { let hit = false; for (let k = T0 - 16; k <= T0 + 16; k += 2) { const [x, y] = xy(i, k), h = S[i * NT + k]; if (h > zl[i] - 6.5 && c.proud(x, y) >= 3) { hit = true; sx += x; sy += y; sn++; if (h > top) { top = h; tp = [x, y, h]; } } } run = hit ? run + 1 : 0; best = Math.max(best, run); }
+      if (best * DS >= 2.5 && g.width > 0.5 * WT[t - 1] && g.width < 1.5 * WT[t - 1]) { const right = L <= 7, cxy = [sx / sn, sy / sn];
+        shortT.push({ fdi: SEQ[L], type: t, short: true, tip: toMesh(tp), tap: toMesh(tp), centre: toMesh([cxy[0], cxy[1], top - 2]), mesial: toMesh(right ? pb : pa), distal: toMesh(right ? pa : pb), width: g.width, bl: 0, confidence: 0.4, s0: sAt(ia), s1: sAt(ib), label: outside(Math.round(0.5 * (ia + ib)), top), _L: L }); continue; } }
+    gaps.push(g); }
+  for (let n = 0; n + 1 < nN; n++) { if (!crownAfter[n] || used[n]) continue; let m = n + 1; while (m < nN - 1 && crownAfter[m] && !used[m]) m++; const pa = nodes[n].p, pb = nodes[m].p; extras.push({ centre: toMesh([0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1]), 0.5 * (pa[2] + pb[2])]), width: dist2(pa, pb) }); n = m - 1; }
+  if (shortT.length) { teeth.push(...shortT); teeth.sort((p, q) => p._L - q._L); }
+  for (const th of teeth) { delete th._a; delete th._b; delete th._L; }
+  const curve = []; for (let i = 0; i < ns; i += 4) curve.push(toMesh([line[i][0], line[i][1], zl[i] > -900 ? zl[i] : zTeeth]));
+  const out = { jaw, teeth, gaps, extras, side: midline ? 'both' : side, midline, curve, ok: teeth.length > 0, note: teeth.length ? '' : 'No teeth found on this scan.', cost: best.cost, scale: best.k,
+    relabel(pins) { return ftAlong({ ...c, pins: pins || [] }); } };
+  if (c.debug !== false) Object.defineProperty(out, 'debug', { enumerable: false, value: { A, zl, nodes, line, S, NT, ns, sMid, lo, hi, BLw, colTop, cands, best, V, ...(c.dbg0 || {}) } });
+  return out;
+}
+/**
+ * Tooth numbers on the scan, each one tappable to correct it (shared by the tools that use findTeeth).
+ *   const tl = toothLabels(viewer, { onChoose: ({ tooth, fdi }) => {} });   // fdi 0 = "not a tooth"
+ *   tl.show(res, toWorld)   // res from findTeeth; toWorld(p:[x,y,z]) → THREE.Vector3 in the viewer's world (e.g. apply the scan's matrix)
+ *   tl.clear()   tl.menuOpen → true while the choice is showing
+ * A number sits outside the arch beside its tooth; an unsure one shows in amber with a question mark, a gap's missing number in grey.
+ * Tapping a tooth's number offers the numbers either side of it and "Not a tooth"; the tool then calls res.relabel(pins) and shows again.
+ */
+export function toothLabels(viewer, o = {}) {
+  if (typeof document !== 'undefined' && !document.getElementById('tl-css')) {
+    const st = document.createElement('style'); st.id = 'tl-css';
+    st.textContent = '#labels .lbl.tn{pointer-events:auto;cursor:pointer;font-size:12px;padding:3px 7px;background:rgba(15,42,68,.92);border:1px solid rgba(255,255,255,.55);touch-action:manipulation}'
+      + '#labels .lbl.tn:hover{background:var(--teal2,#0d9488)}#labels .lbl.tn.unsure{background:rgba(180,83,9,.95)}#labels .lbl.tn.pinned{background:var(--teal2,#0d9488)}'
+      + '#labels .lbl.tgap{background:rgba(100,116,139,.8);font-weight:500;text-decoration:line-through}'
+      + '.tl-menu{position:absolute;z-index:6;background:#fff;border:1px solid #cbd5e1;border-radius:9px;box-shadow:0 6px 20px rgba(15,42,68,.25);padding:6px;display:flex;flex-wrap:wrap;gap:4px;max-width:250px;font-size:12px}'
+      + '.tl-menu b{flex-basis:100%;color:#0f2a44;font-size:11.5px;margin:0 2px 2px}.tl-menu button{border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:6px 9px;font:inherit;color:#0f2a44;min-width:38px;touch-action:manipulation}'
+      + '.tl-menu button.cur{background:#ccfbf1;border-color:#5eead4;font-weight:700}.tl-menu button.no{flex-basis:100%;color:#991b1b}';
+    document.head.appendChild(st);
+  }
+  let labels = [], menu = null, res = null;
+  const closeMenu = () => { if (menu) { menu.remove(); menu = null; document.removeEventListener('pointerdown', away, true); } };
+  const away = (e) => { if (menu && !menu.contains(e.target) && !(e.target.classList && e.target.classList.contains('tn'))) closeMenu(); };
+  function openMenu(tooth, el) {
+    closeMenu(); const SEQ = FDI_ORDER[res.jaw], at = SEQ.indexOf(tooth.fdi), box = viewer.container.getBoundingClientRect(), r = el.getBoundingClientRect();
+    menu = document.createElement('div'); menu.className = 'tl-menu'; menu.innerHTML = '<b>This tooth is</b>';
+    for (let q = Math.max(0, at - 3); q <= Math.min(SEQ.length - 1, at + 3); q++) { const b = document.createElement('button'); b.type = 'button'; b.textContent = String(SEQ[q]); b.dataset.fdi = SEQ[q]; if (q === at) b.className = 'cur'; menu.appendChild(b); }
+    const no = document.createElement('button'); no.type = 'button'; no.className = 'no'; no.textContent = 'Not a tooth'; no.dataset.fdi = '0'; menu.appendChild(no);
+    menu.addEventListener('click', (e) => { const b = e.target.closest('button[data-fdi]'); if (!b) return; const fdi = +b.dataset.fdi; closeMenu(); if (o.onChoose) o.onChoose({ tooth, fdi }); });
+    viewer.container.appendChild(menu);
+    const mw = menu.offsetWidth, mh = menu.offsetHeight; let x = r.left - box.left + r.width / 2 - mw / 2, y = r.bottom - box.top + 6; if (y + mh > box.height - 4) y = r.top - box.top - mh - 6;
+    menu.style.left = Math.max(4, Math.min(box.width - mw - 4, x)) + 'px'; menu.style.top = Math.max(4, y) + 'px';
+    setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  }
+  const api = {
+    show(r, toWorld, opts = {}) {
+      api.clear(); res = r; if (!r || !r.teeth) return;
+      for (const t of r.teeth) { const l = viewer.label(String(t.fdi) + (t.confidence < 0.5 && !opts.pinned?.has(t.fdi) ? '?' : ''), toWorld(t.label || t.tip), { class: 'tn' + (opts.pinned?.has(t.fdi) ? ' pinned' : t.confidence < 0.5 ? ' unsure' : '') });
+        l.el.title = `${t.fdi}: tap to change the number${t.short ? ' (a short crown: prepared or broken down?)' : ''}`; l.el.dataset.fdi = t.fdi;
+        l.el.addEventListener('click', (e) => { e.stopPropagation(); openMenu(t, l.el); }); labels.push(l); }
+      for (const g of r.gaps || []) if (g.label) { const l = viewer.label(g.fdi.join(' '), toWorld(g.label), { class: 'tgap' }); l.el.title = 'Taken to be missing'; labels.push(l); }
+    },
+    clear() { closeMenu(); for (const l of labels) l.remove(); labels = []; },
+    get menuOpen() { return !!menu; },
+    get labels() { return labels; },
+  };
+  return api;
+}
+// ═════════════════════════════ tooth detection and numbering (findTeeth) — end ═════════════════════════════

@@ -75,17 +75,26 @@ const TOOLS = [
   { id: 'prep', name: 'Prep check', what: 'Preparation checker', blurb: 'Mark a crown, onlay or inlay preparation and see its undercuts, wall angles, convergence, remaining walls, isthmus and room to the opposing teeth.', url: 'prep.html', path: '/scan-card/prep/', kind: 'case', key: 'prep', roles: [] },
   { id: 'survey', name: 'Survey', what: 'Surveyor and block-out', blurb: 'Tilt the path of insertion and see survey lines and undercut depths at the 0.25, 0.5 and 0.75 mm gauges on each abutment, then a blocked-out model.', url: 'survey.html', path: '/scan-card/survey/', kind: 'case', key: 'survey', roles: ['survey-blockout'] },
   { id: 'shell', name: 'Shells', what: 'Shell temporaries and matrices', blurb: 'A provisional crown or a shell to reline from a scan before the preparation, or a clear matrix over a wax-up for a mock-up.', url: 'shell.html', path: '/scan-card/shell/', kind: 'case', key: 'shell', roles: ['shell-shape', 'shell-part'], reads: ['prep'] },
+  // Articulator: also takes the Splint tab's finished splint through SCANHUB.part('splint') (below); reads Models' settings to leave out its bite-hinge posts
+  { id: 'articulator', name: 'Articulator', what: 'Virtual articulator', blurb: 'Mount the arches on an average-value articulator and move them forward and side to side: contacts, guidance and non-working-side interferences, also with a splint or a wax-up in place.', url: 'articulator.html', path: '/scan-card/articulator/', kind: 'case', key: 'articulator', roles: ['articulator-part'], reads: ['model'] },
+  // Obturator Card (added for the obturator tool): hollow-bulb and surgical obturators on the upper scan; reads Survey's path when there is one
+  { id: 'obturator', name: 'Obturator', what: 'Obturators after a maxillectomy', blurb: 'A palatal plate with a hollow bulb that fills a maxillectomy defect, or a surgical obturator up to a planned resection line, along a path of insertion.', url: 'obturator.html', path: '/scan-card/obturator/', kind: 'case', key: 'obturator', roles: ['obturator', 'obturator-lid'], reads: ['survey'] },
+  // CBCT (cbct-card): a CBCT viewer and donor-tooth replicas. It opens its own DICOM files and never needs the scans here
+  // (scans: false — its work does not depend on them, so it neither restarts when they change nor locks them).
+  { id: 'cbct', name: 'CBCT', what: 'CBCT viewer and tooth replicas', blurb: 'Open a CBCT on this device: slices, 3D, a panoramic with cross-sections, measurements, and a printable replica of a donor tooth for autotransplantation. The CBCT itself is not saved in the case.', url: 'cbct.html', path: '/scan-card/cbct/', kind: 'case', key: 'cbct', roles: ['cbct-replica'], scans: false },
   { id: 'tray', name: 'Trays', what: 'Special trays and record bases', blurb: 'Tray Card: special trays, record bases and Gothic arch plates on the scan.', url: '/tray-card/', path: '/tray-card/', kind: 'files' },
   { id: 'wax', name: 'Wax-up', what: 'Digital wax-up', blurb: 'Wax Card: place library teeth on the scan, blend them in and check the occlusion.', url: '/wax-card/', path: '/wax-card/', kind: 'files' },
 ].filter((t) => !CFG.tools || CFG.tools.includes(t.id)).map((t) => ({ ...t, url: (CFG.urls && CFG.urls[t.id]) || t.url }));
 const TOOL = Object.fromEntries(TOOLS.map((t) => [t.id, t])), CASE_TOOLS = TOOLS.filter((t) => t.kind === 'case');
-const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep', 'survey', 'shell', 'scanCard']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second', 'survey-blockout', 'shell-shape', 'shell-part']);
+const OWN_KEYS = new Set(['model', 'analysis', 'splint', 'compare', 'prep', 'survey', 'shell', 'scanCard', 'articulator']), OWN_ROLES = new Set(['upper-scan', 'lower-scan', 'upper-model', 'lower-model', 'splint', 'compare-second', 'survey-blockout', 'shell-shape', 'shell-part', 'articulator-part']);
+for (const k of ['obturator']) OWN_KEYS.add(k); for (const r of ['obturator', 'obturator-lid']) OWN_ROLES.add(r);   // Obturator Card's work (added with its tab)
+for (const k of ['cbct']) OWN_KEYS.add(k); for (const r of ['cbct-replica']) OWN_ROLES.add(r);   // CBCT Card's work (added with its tab)
 // Inside the single-file offline copy of the Notile suite there are no URLs to load: the suite hands over each page's HTML instead.
 const SUITE = (() => { try { return (window.parent !== window && window.parent.SUITE) || null; } catch (_) { return null; } })();
 if (SUITE && !window.SUITE) window.SUITE = SUITE;                // the tools' own offline shims look for it one level up
 
 const F = {};                                                    // tool id → { tool, el (iframe), api, sig (the scans it holds), ready }
-const H = { active: 'scans', sig: '', dirty: true, basis: {}, foreign: null, unlocked: false, q: Promise.resolve(), lru: [], step: {}, src: 'scan' };   // src: what the tools other than Models work on — 'scan' or 'model' (the model with its base, from Models)
+const H = { active: 'scans', sig: '', dirty: true, basis: {}, foreign: null, unlocked: false, q: Promise.resolve(), lru: [], step: {}, src: 'scan', caseGen: 0, keep: {} };   // caseGen: counts case files opened (tools with scans: false are fed again after one); keep: their last work, kept aside (it outlives a change of scans)   // src: what the tools other than Models work on — 'scan' or 'model' (the model with its base, from Models)
 
 // ───────────── what the tool pages can ask of the hub ─────────────
 window.SCANHUB = {
@@ -99,6 +108,13 @@ window.SCANHUB = {
   useModels: (on = true) => setSource(on ? 'model' : 'scan', true),
   get source() { return H.src; },
   modelsInUse: () => JAWS.filter((j) => !!modelItem(j)),
+  /** Another tool's finished work, as a case (its data section and its meshes, no scans), or null when there is none made on
+   *  the scans as they are now. Used by Articulator to offer the Splint tab's splint. (A tool asking for its own key gets null.) */
+  part: async (key) => {
+    const t = CASE_TOOLS.find((x) => x.key === key); if (!t || t.id === H.active || !valid(t)) return null;
+    const m = scans.toCase(), c = new N.DentalCase(); c.items = m.items.filter((it) => t.roles.includes(it.role)); if (m.data && m.data[key] !== undefined) c.data[key] = m.data[key];
+    return c.toBlob('Scan Card', { compress: false });
+  },
   /** Inside a Claude artifact only the top page is given `claude` (which is how files are saved there). The two existing
    *  apps look for window.claude themselves, so their frames are handed this stand-in: the real saving is done up here. */
   get claude() {
@@ -118,10 +134,10 @@ const shell = N.createShell({
     { id: 'trim', title: 'Tidy and trim', optional: true, html: '' },
     { id: 'tools', title: 'Choose a tool', html: `
       <p class="lead">The scans are loaded once, here. Every tool works on them — switch at any time with the tabs at the top.</p>
-      <div class="row"><label>Tools work on</label><div class="seg" id="srcSeg"><button data-v="scan" type="button" title="Trays, Analysis, Splint, Compare, Prep check, Survey, Shells and Wax-up get the scans as loaded here">The scans</button><button data-v="model" type="button" title="They get the model with its base, as built on the Models tab, in place of the scan">Models with base</button></div></div>
+      <div class="row"><label>Tools work on</label><div class="seg" id="srcSeg"><button data-v="scan" type="button" title="Trays, Analysis, Splint, Compare, Prep check, Survey, Shells, Articulator, Obturator and Wax-up get the scans as loaded here">The scans</button><button data-v="model" type="button" title="They get the model with its base, as built on the Models tab, in place of the scan">Models with base</button></div></div>
       <p class="note" id="srcNote"></p>
       ${TOOLS.map((t) => `<button class="tool" type="button" data-tool="${t.id}" title="Open ${N.esc(t.what.toLowerCase())}"><em hidden>in use</em><b>${N.esc(t.what)}</b><span>${N.esc(t.blurb)}</span></button>`).join('')}
-      <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis, Splint, Compare, Prep check, Survey and Shells in one file. Trays and Wax-up save their own project files from inside their tab.</p>
+      <p class="note">“Save case” at the top keeps the scans and the work from Models, Analysis, Splint, Compare, Prep check, Survey, Shells, Articulator, Obturator and CBCT in one file (CBCT keeps its work and replica, not the CBCT itself). Trays and Wax-up save their own project files from inside their tab.</p>
       <p class="tip">Each tool is a design aid, not a certified medical device: check everything it makes against the scan and the patient before it is used.</p>` },
   ],
 });
@@ -131,7 +147,7 @@ const scans = N.createScanSet({
   shell, viewer, appName: 'Scan Card', loadStep: 'load', orientStep: 'orient', autosave: false,
   onChange: (what) => { if (what === 'visibility') return; H.dirty = true; stashSoon(); syncUI(); },
   readCase: (c) => {                                             // a case file (or the resumed copy) was opened: its tools' work belongs to these scans
-    H.dirty = true; const sig = refreshSig(); H.basis = {}; H.src = c.data && c.data.scanCard && c.data.scanCard.source === 'model' ? 'model' : 'scan';
+    H.dirty = true; H.caseGen++; H.keep = {}; const sig = refreshSig(); H.basis = {}; H.src = c.data && c.data.scanCard && c.data.scanCard.source === 'model' ? 'model' : 'scan';
     for (const t of CASE_TOOLS) if ((c.data && c.data[t.key] !== undefined) || t.roles.some((r) => c.get(r))) H.basis[t.id] = sigFor(t);   // (Models first: the others' signatures may include its models)
     H.foreign = sig; queueMicrotask(srcUI);
   },
@@ -172,7 +188,7 @@ function modelItem(j) {
 }
 const srcPart = () => (H.src !== 'model' ? '' : JAWS.map((j) => { const it = modelItem(j); return it ? `|${j}-model:${rawSig(it.mesh)}` : ''; }).join(''));
 /** Models always works on the scans; every other tool on the scans or, when chosen, the models with their bases. */
-const sigFor = (t) => (t.kind === 'files' ? (rawSigNow() && rawSigNow() + srcPart()) : t.id === 'model' ? refreshSig() : (refreshSig() && refreshSig() + srcPart()));
+const sigFor = (t) => (t.scans === false ? 'own:' + H.caseGen : t.kind === 'files' ? (rawSigNow() && rawSigNow() + srcPart()) : t.id === 'model' ? refreshSig() : (refreshSig() && refreshSig() + srcPart()));   // (a tool that needs no scans: its work stands on its own)
 const valid = (t) => H.basis[t.id] !== undefined && H.basis[t.id] === sigFor(t);
 /** The case as it should leave the hub: the scans, plus the work of the tools named — and only work made on these scans. */
 function buildCase(o = {}) {
@@ -182,6 +198,7 @@ function buildCase(o = {}) {
   c.items = m.items.filter((it) => { if (/-scan$/.test(it.role)) return true; const t = ownerOfRole(it.role); return t ? keep.has(t.id) : (OWN_ROLES.has(it.role) ? false : foreign); });
   for (const k of Object.keys(m.data || {})) { const t = ownerOfKey(k); if (t ? keep.has(t.id) : (OWN_KEYS.has(k) ? false : foreign)) c.data[k] = m.data[k]; }
   if (o.tools) for (const id of o.tools) for (const k of (TOOL[id] && TOOL[id].reads) || []) { const t = ownerOfKey(k); if (m.data && m.data[k] !== undefined && (!t || valid(t))) c.data[k] = m.data[k]; }   // what a tool reads from another (Shells: Prep check's margin)
+  for (const t of CASE_TOOLS) { const k = H.keep[t.id]; if (t.scans !== false || !k || !keep.has(t.id)) continue; if (c.data[t.key] === undefined && k.data !== undefined) c.data[t.key] = k.data; if (!c.items.some((it) => t.roles.includes(it.role))) c.items.push(...k.items); }   // a tool that needs no scans: its work, even when the scans were changed after it
   if (H.src === 'model') c.data.scanCard = { source: 'model' };   // (only when it is not the default, so a case without it reads as before)
   if (o.models) for (const j of JAWS) {                           // a tool that works on the models: the model takes the scan's place (same coordinates, same matrix)
     const it = modelItem(j), k = c.items.findIndex((x) => x.role === j + '-scan'); if (!it || k < 0) continue;
@@ -255,6 +272,7 @@ async function pull(id) {
   for (const r of t.roles) m.remove(r);
   for (const it of p.items) if (t.roles.includes(it.role)) m.items.push(it);
   if (p.data && p.data[t.key] !== undefined) m.data[t.key] = p.data[t.key]; else delete m.data[t.key];
+  if (t.scans === false) H.keep[id] = { data: m.data[t.key], items: m.items.filter((it) => t.roles.includes(it.role)) };   // (new scans start a new case: this work goes on into it)
   H.basis[id] = f.sig; H.step[id] = f.api.step ? f.api.step() : null; stashSoon();
 }
 /** Every open tool holds its own copy of the scans. With large scans (half a million triangles or more) only the tool
@@ -264,7 +282,7 @@ async function pull(id) {
 const BIG = 500000;
 function closeIdle() {
   const tris = JAWS.reduce((n, j) => n + (scans[j] ? scans[j].raw.indices.length / 3 : 0), 0); if (tris < BIG) return;
-  const idle = H.lru.filter((k) => k !== H.active && F[k] && F[k].api && F[k].tool.kind === 'case');
+  const idle = H.lru.filter((k) => k !== H.active && F[k] && F[k].api && F[k].tool.kind === 'case' && F[k].tool.scans !== false);   // (the CBCT tab holds a volume the hub does not keep: never closed this way)
   while (idle.length > 1) { const k = idle.shift(), f = F[k]; if (f.sig && H.basis[k] !== f.sig) continue; f.el.remove(); delete F[k]; }   // (never one whose work has not reached the case)
 }
 /** Give a tool the scans as they are now (with its own saved work, when that was made on these scans). */
@@ -274,7 +292,8 @@ async function feed(id) {
   if (t.kind === 'case') {
     if (!sig) { if (f.api.hasScans()) f.api.clear(); f.sig = sig; return; }
     const again = !!f.sig && !valid(t), back = !f.sig && valid(t) && H.step[id];
-    await f.api.importCase(await buildCase({ tools: [id], foreign: false, models: id !== 'model' }).toBlob('Scan Card', { compress: false }));
+    const c = buildCase({ tools: [id], foreign: false, models: id !== 'model' }); if (t.scans === false) c.items = c.items.filter((it) => !/-scan$/.test(it.role));   // (a tool that needs no scans gets only its own work)
+    await f.api.importCase(await c.toBlob('Scan Card', { compress: false }));
     f.sig = sig; if (again) toast(`${t.name} has started again on the changed scans`);
     if (back && f.api.goto) f.api.goto(back);                    // a tool that was closed to save memory comes back where it was
     return;
@@ -361,6 +380,7 @@ async function doShow(id) {
   f.el.classList.add('on'); park(f, false);
   H.lru = H.lru.filter((k) => k !== id).concat(id);
   await feed(id);
+  try { f.el.contentWindow.dispatchEvent(new Event('scanhub-shown')); } catch (_) {}   // the tab is in front again (Articulator then looks for a newer splint)
   closeIdle(); paintTabs();
 }
 tabsEl.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); });
@@ -371,7 +391,7 @@ shell.stepEl('tools').addEventListener('click', (e) => { const b = e.target.clos
 // ───────────── the lock: scans that tools are working on are not changed by accident ─────────────
 // Who depends on the scans as they are: every open tool that has them, and every tool whose work in the case was made on them
 // (a tool closed to save memory, or work that came in with a case file, counts just the same).
-const users = () => (refreshSig() ? TOOLS.filter((t) => (F[t.id] && F[t.id].sig && F[t.id].sig === sigFor(t)) || (t.kind === 'case' && valid(t))).map((t) => t.name) : []);
+const users = () => (refreshSig() ? TOOLS.filter((t) => t.scans !== false && ((F[t.id] && F[t.id].sig && F[t.id].sig === sigFor(t)) || (t.kind === 'case' && valid(t)))).map((t) => t.name) : []);   // (the CBCT tab does not use the scans)
 const isLocked = () => !H.unlocked && users().length > 0;
 function flashLock() { shell.goto('load'); lockEl.classList.remove('flash'); void lockEl.offsetWidth; lockEl.classList.add('flash'); lockEl.scrollIntoView({ block: 'nearest' }); }
 function syncUI() {
@@ -398,7 +418,7 @@ async function setSource(v, fromModels) {
   if (fromModels && H.active === 'model') await pull('model');   // the models as they are now
   H.src = v === 'model' ? 'model' : 'scan'; stashSoon(); srcUI(); paintTabs();
   const got = JAWS.filter((j) => !!modelItem(j));
-  if (H.src === 'model') toast(got.length ? `Trays, Analysis, Splint, Compare, Prep check, Survey, Shells and Wax-up now work on the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base` : 'No finished model yet: build one on the Models tab first. Until then the tools get the scans.', !got.length);
+  if (H.src === 'model') toast(got.length ? `Trays, Analysis, Splint, Compare, Prep check, Survey, Shells, Articulator, Obturator and Wax-up now work on the ${listOf(got)} model${got.length > 1 ? 's' : ''} with base` : 'No finished model yet: build one on the Models tab first. Until then the tools get the scans.', !got.length);
   else toast('The tools work on the scans again');
   return { ok: H.src === 'scan' || got.length > 0, jaws: got, source: H.src };
 }

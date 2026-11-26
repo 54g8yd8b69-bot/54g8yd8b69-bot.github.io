@@ -26,6 +26,7 @@ button{touch-action:manipulation}
 .chart .t.miss b{text-decoration:line-through}
 .chart .t.skip{color:#94a3b8;border-style:dotted}
 .chart .t.cur{border-color:var(--teal2);box-shadow:0 0 0 2px rgba(20,184,166,.4)}
+.chart .t.auto{border-style:dashed;border-color:#14b8a6}
 .chart .t:disabled{opacity:.35;cursor:not-allowed}
 .prompt{display:flex;align-items:baseline;gap:8px;background:var(--navy);color:#fff;border-radius:8px;padding:8px 10px;margin:8px 0 6px}
 .prompt b{font-size:14.5px;font-weight:600}
@@ -131,6 +132,7 @@ const shell = N.createShell({
     { id: 'widths', title: 'Tooth widths', html: `
       <p class="lead">Click the two contact points of each tooth, working round the arch. Two clicks per tooth.</p>
       <div class="row"><label>Arch</label><div class="seg" id="wJaw"><button data-v="upper" type="button" title="Measure the upper teeth">Upper</button><button data-v="lower" type="button" title="Measure the lower teeth">Lower</button></div></div>
+      <div class="btns"><button class="btn pri" id="wFind" type="button" title="Find and number the teeth on the scans and place each one’s two contact points for you. Check them: drag any point that is off, and tap a number on the scan to correct it">Find the teeth</button></div>
       <div class="chart" id="chart"></div>
       <div class="prompt" id="wPrompt"><b></b><span></span></div>
       <div class="btns">
@@ -148,6 +150,7 @@ const shell = N.createShell({
       <div class="btns"><button class="btn" id="wClear" type="button" title="Remove every landmark on this arch (Undo brings them back)">Clear this arch</button></div>
       <p class="tip"><b>What to click.</b> For each tooth click its mesial and its distal contact point — the two points furthest apart along the arch, where it touches (or would touch) its neighbours. The prompt names the next point; the order runs round the arch from the patient’s right, so on the right side the distal point comes first. The view is a true parallel (orthographic) view straight onto the biting surfaces, so what you see is to scale.</p>
       <p class="tip"><b>How the width is worked out.</b> <i>In occlusal plane</i> (default): the distance between the two points measured parallel to the occlusal plane set in step 2, like calipers held level with the biting surfaces. It ignores any height difference between your two clicks, which you cannot control well from this view. A tooth whose mesio-distal axis is tipped out of the plane measures short by the cosine of the tip (about 6% at 20°). <i>Straight 3D</i>: the true point-to-point distance — use it for a markedly tipped tooth, and turn the model to place both points at contact level.</p>
+      <p class="tip"><b>Find the teeth.</b> Finds and numbers the teeth on each scan from its shape and places their contact points (dashed in the chart until you move one). Teeth skipped between two found teeth are marked missing. Points you placed yourself, and teeth you marked, are left alone. Check every point; tap a number beside the arch to renumber that tooth (the others follow) or to say it is not a tooth. Widths from points not yet moved are marked * in the summary.</p>
       <p class="tip"><b>Editing.</b> Drag any point to refine it. Click a tooth in the chart to jump to it. <i>Missing</i> = tooth absent (its space is kept and measured). <i>Not measured</i> = tooth present but left out. Either way the tooth is left out of the sums, and the Bolton step says so. Third molars and separate primary teeth are not charted.</p>` },
     { id: 'bolton', title: 'Bolton analysis', html: `
       <p class="lead">Tooth-size ratios, lower to upper, set against Bolton’s values.</p>
@@ -507,7 +510,8 @@ function drawMeasures() {
 }
 function draw() {
   layer.clear(); if (!C) return; const s = ui.step;
-  if (s === 'widths') { if (vis(ui.jaw)) drawTeeth(ui.jaw, { labels: true, select: true }); }
+  toothNums.clear();
+  if (s === 'widths') { if (vis(ui.jaw)) { drawTeeth(ui.jaw, { labels: true, select: true }); const A = autoOf(ui.jaw); if (A) toothNums.show(A.res, (p) => new V3(...p), { pinned: new Set(A.pins.filter((q) => q.fdi).map((q) => q.fdi)) }); } }
   else if (s === 'space') { if (vis(ui.jaw)) { drawTeeth(ui.jaw, { thin: true, color: COL.dim }); drawGaps(ui.jaw); drawLine(ui.jaw); } }
   else if (s === 'arch') { if (biteView()) drawOcc(); else if (vis(ui.aview)) { drawTeeth(ui.aview, { thin: true, color: COL.dim }); drawArch(ui.aview); } }
   else if (s === 'resto') drawResto();
@@ -548,11 +552,11 @@ function advance(from) {
 }
 function placePoint(p) {
   if (!ui.cur) { shell.status(ui.sel != null && stOf(ui.sel) === 'p' && hasPt(ui.sel, 'm') && hasPt(ui.sel, 'd') ? `${tname(ui.sel)} already has both points — drag a point to adjust it, or press Redo tooth` : 'Pick a tooth in the chart first'); return; }
-  snap(); const c = ui.cur; tooth(c.f)[c.k] = toRaw(jawOf(c.f), p); advance(c); changed();
+  snap(); const c = ui.cur; tooth(c.f)[c.k] = toRaw(jawOf(c.f), p); delete tooth(c.f).auto; advance(c); changed();
 }
 function selectTooth(f) { if (jawOf(f) !== ui.jaw) setJaw(jawOf(f)); ui.sel = f; ui.cur = firstOpenOf(f); changed(false); }
-function setStatus(st) { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); if (t.st === st) { t.st = 'p'; ui.cur = firstOpenOf(f); } else { t.st = st; t.m = t.d = null; advance({ f, k: ptOrder(f)[1] }); if (!ui.cur) ui.sel = f; } changed(); }
-function redoTooth() { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); t.st = 'p'; t.m = t.d = null; ui.cur = firstOpenOf(f); changed(); }
+function setStatus(st) { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); delete t.auto; if (t.st === st) { t.st = 'p'; ui.cur = firstOpenOf(f); } else { t.st = st; t.m = t.d = null; advance({ f, k: ptOrder(f)[1] }); if (!ui.cur) ui.sel = f; } changed(); }
+function redoTooth() { const f = ui.sel; if (f == null) return; snap(); const t = tooth(f); delete t.auto; t.st = 'p'; t.m = t.d = null; ui.cur = firstOpenOf(f); changed(); }
 function clearArch(jaw) { snap(); dropJaw(jaw); ui.cur = nextOpen(jaw, null); ui.sel = ui.cur ? ui.cur.f : null; changed(); }
 const widthTool = makeTool({
   handles: () => { const a = []; if (!C) return a; for (const f of archOrder(ui.jaw)) for (const k of ['m', 'd']) if (C.P[f] && C.P[f][k]) a.push({ p: C.P[f][k], f, k }); return a; },
@@ -560,7 +564,7 @@ const widthTool = makeTool({
   placing: () => !!ui.cur,
   targets: () => (scans[ui.jaw] ? [scans[ui.jaw].object] : []),
   onPick: (hit) => placePoint(hit.point),
-  onDrag: (h, hit) => { tooth(h.f)[h.k] = toRaw(ui.jaw, hit.point); ui.sel = h.f; recalc(); draw(); renderWidths(); },
+  onDrag: (h, hit) => { const t = tooth(h.f); t[h.k] = toRaw(ui.jaw, hit.point); delete t.auto; ui.sel = h.f; recalc(); draw(); renderWidths(); },
   onDragEnd: (h) => { changed(); shell.status(`${tname(h.f)} ${KN[h.k]} point moved${C.w[h.f] != null ? ' — width now ' + C.w[h.f].toFixed(1) + ' mm' : ''} (Undo puts it back)`); },      // said out loud, because a slipped tap on a shared contact moves the neighbour's point
   onSelect: (h) => selectTooth(h.f),
 });
@@ -573,8 +577,8 @@ function renderWidths() {
     order.forEach((f, idx) => {
       const t = state.teeth[f] || {}, st = t.st || 'p', w = C.w[f], cls = ['t'];
       if (st === 'm') cls.push('miss'); else if (st === 's') cls.push('skip'); else if (t.m && t.d) cls.push('done'); else if (t.m || t.d) cls.push('half');
-      if (f === ui.sel) cls.push('cur');
-      const sub = st === 'm' ? '✕' : st === 's' ? '–' : w != null ? w.toFixed(1) : '', tt = `${tname(f)}: ${st === 'm' ? 'missing' : st === 's' ? 'not measured' : w != null ? w.toFixed(2) + ' mm' : t.m || t.d ? 'one point placed' : 'to do'}`;
+      if (f === ui.sel) cls.push('cur'); if (t.auto) cls.push('auto');
+      const sub = st === 'm' ? '✕' : st === 's' ? '–' : w != null ? w.toFixed(1) : '', tt = `${tname(f)}: ${st === 'm' ? 'missing' : st === 's' ? 'not measured' : w != null ? w.toFixed(2) + ' mm' : t.m || t.d ? 'one point placed' : 'to do'}${t.auto ? ' (found automatically — check it)' : ''}`;
       h += `<button type="button" class="${cls.join(' ')}" data-f="${f}" title="${tt}"${has ? '' : ' disabled'}><b>${chartNum(f)}</b><i>${sub}</i></button>`;
       if (idx === order.length / 2 - 1) h += '<span class="mid"></span>';
     });
@@ -598,6 +602,39 @@ function renderWidths() {
   $('wSums').innerHTML = `<tr><th>Sum of widths (mm)</th><th class="num">Upper</th><th class="num">Lower</th></tr>${row('Front six (3–3)', 'a')}${row('Molar to molar (6–6)', 'o')}`;
   for (const [id, v] of [['wNot', state.notation], ['wMode', state.widthMode]]) $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
   $('w7').checked = state.include7; $('wLock').checked = ui.lock;
+}
+
+// ───────────────────────────── step 3: finding the teeth automatically (N.findTeeth) ─────────────────────────────
+// Each found tooth gets its two contact points (marked auto until the user moves one); numbers skipped between two found teeth are
+// marked missing. Points the user placed and teeth the user marked are left alone; earlier automatic ones are replaced.
+// AUTO[jaw]: { fp (which scan), base (findTeeth's result), res (with the user's corrections), pins }
+const AUTO = { upper: null, lower: null };
+const toothNums = N.toothLabels(viewer, { onChoose: ({ tooth, fdi }) => renumber(ui.jaw, tooth, fdi) });
+const autoKey = (jaw) => fingerprint(jaw) + '|' + scans[jaw].matrix.elements.map((v) => v.toFixed(5)).join(',');   // the same scan, oriented the same way
+const autoOf = (jaw) => (AUTO[jaw] && scans[jaw] && AUTO[jaw].fp === autoKey(jaw) ? AUTO[jaw] : null);
+/** a contact point found on the scan, dropped onto the surface as a click from the biting side would land */
+function onSurface(jaw, p) { const v = new V3(...p), h = rayHit(jaw, new V3(v.x, v.y, v.z + UP[jaw] * 30), new V3(0, 0, -UP[jaw])); return h || N.closestOnMesh(scans[jaw].object, v).point; }   // straight down from the biting side: the point keeps its place in the plane
+function applyAuto(jaw) {
+  const A = autoOf(jaw); if (!A) return { teeth: 0, missing: [] };
+  for (const f of archOrder(jaw, true)) if (state.teeth[f] && state.teeth[f].auto) delete state.teeth[f];
+  const mine = (f) => { const t = state.teeth[f]; return !!t && (t.st !== 'p' || t.m || t.d); }, missing = []; let n = 0;
+  for (const t of A.res.teeth) { const f = t.fdi; if (f % 10 > 7 || mine(f)) continue; state.teeth[f] = { st: 'p', m: toRaw(jaw, onSurface(jaw, t.mesial)), d: toRaw(jaw, onSurface(jaw, t.distal)), auto: true }; n++; }
+  for (const g of A.res.gaps) for (const f of g.fdi) { if (f % 10 > 7 || mine(f)) continue; state.teeth[f] = { st: 'm', m: null, d: null, auto: true }; missing.push(f); }
+  return { teeth: n, missing, unsure: A.res.teeth.filter((t) => t.confidence < 0.5 && t.fdi % 10 <= 7).map((t) => t.fdi) };
+}
+async function findTeeth() {
+  const jaws = JAWS.filter((j) => scans.has(j)); if (!jaws.length) return shell.status('Load a scan first', true);
+  await shell.busy('Finding the teeth…', async () => { for (const j of jaws) { await N.sleep(20); if (!autoOf(j)) { const base = N.findTeeth(scans.framed(j), { jaw: j }); AUTO[j] = { fp: autoKey(j), base, res: base, pins: [] }; } } });
+  snap(); const said = [];
+  for (const j of jaws) { const r = applyAuto(j); said.push(AUTO[j].res.ok ? `${JN[j]}: ${r.teeth} teeth${r.missing.length ? ', ' + tlist(r.missing) + ' missing' : ''}${r.unsure.length ? ' (check ' + tlist(r.unsure) + ')' : ''}` : `${JN[j]}: no teeth found`); }
+  ui.cur = nextOpen(ui.jaw, null); ui.sel = ui.cur ? ui.cur.f : null; changed();
+  shell.status(said.join(' · ') + '. Check each point; tap a number on the scan to correct it');
+}
+function renumber(jaw, tooth, fdi) {
+  const A = autoOf(jaw); if (!A) return;
+  A.pins = A.pins.filter((q) => Math.hypot(q.p[0] - tooth.centre[0], q.p[1] - tooth.centre[1]) > 2); A.pins.push({ p: tooth.centre.slice(), fdi });
+  A.res = A.base.relabel(A.pins); snap(); applyAuto(jaw); ui.cur = nextOpen(ui.jaw, null); ui.sel = ui.cur ? ui.cur.f : null; changed();
+  shell.status(fdi ? `Numbered ${tname(fdi)}: the teeth either side follow` : 'Taken as not a tooth');
 }
 
 // ───────────────────────────── step 4: Bolton ─────────────────────────────
@@ -889,8 +926,8 @@ const QN = { 1: 'Upper right', 2: 'Upper left', 3: 'Lower left', 4: 'Lower right
 function reportText() {
   const L = [], top = state.include7 ? 7 : 6, B = C.bolton, has = JAWS.filter((j) => C.has[j]);
   L.push(`MODEL ANALYSIS — ${today()} (Analysis Card)`);
-  L.push(`Tooth widths, mm (measured ${modeName()}):`);
-  for (const q of [1, 2, 4, 3]) { if (!C.has[jawOf(q * 10 + 1)]) continue; const a = []; for (let n = 1; n <= top; n++) { const f = q * 10 + n, st = stOf(f); a.push(`${tname(f)} ${st === 'm' ? 'missing' : C.w[f] != null ? C.w[f].toFixed(1) : st === 's' ? 'not measured' : '–'}`); } L.push(`  ${QN[q]}: ${a.join(', ')}`); }
+  L.push(`Tooth widths, mm (measured ${modeName()}):`); let autoW = false;
+  for (const q of [1, 2, 4, 3]) { if (!C.has[jawOf(q * 10 + 1)]) continue; const a = []; for (let n = 1; n <= top; n++) { const f = q * 10 + n, st = stOf(f); const au = !!(state.teeth[f] && state.teeth[f].auto); if (au && (st === 'm' || C.w[f] != null)) autoW = true; a.push(`${tname(f)} ${st === 'm' ? 'missing' + (au ? '*' : '') : C.w[f] != null ? C.w[f].toFixed(1) + (au ? '*' : '') : st === 's' ? 'not measured' : '–'}`); } L.push(`  ${QN[q]}: ${a.join(', ')}`); }
   for (const k of ['anterior', 'overall']) {
     const r = B[k], b = BOLTON[k];
     if (r.ratio != null) L.push(`${b.label}: ${r.ratio.toFixed(1)}%${r.subs.length ? ' (estimate: ' + r.subs.map((f) => `${tname(f)} taken as ${tname(contra(f))}`).join(', ') + ')' : ''} — lower ${r.lower.toFixed(1)} / upper ${r.upper.toFixed(1)} mm; Bolton mean ${b.mean}% (SD ${b.sd}); ${r.arch} excess ${r.excess.toFixed(1)} mm.`);
@@ -902,7 +939,7 @@ function reportText() {
   }
   for (const j of has) { const S = C.space[j]; if (!S.ok) continue; const none = S.missing.concat(S.unknown); L.push(`${JN[j]} space analysis (${S.e.a.label} to ${S.e.b.label}): available ${S.avail.toFixed(1)}, required ${S.req.toFixed(1)} mm — ${Math.abs(S.diff) < 0.05 ? 'balanced' : (S.diff < 0 ? 'crowding ' : 'spacing ') + Math.abs(S.diff).toFixed(1) + ' mm'}${none.length ? ` (no width counted for ${tlist(none)})` : ''}${S.planned != null ? `; with the planned ${tlist(S.missing)} (${S.planned.toFixed(1)} mm) ${Math.abs(S.diffPlanned) < 0.05 ? 'balanced' : (S.diffPlanned < 0 ? 'crowding ' : 'spacing ') + Math.abs(S.diffPlanned).toFixed(1) + ' mm'}` : ''}.`); }
   const A = C.arch, dim = (k, ak) => has.filter((j) => A[j][k] != null).map((j) => `${j} ${A[j][k].toFixed(1)}${ak && A[j][ak] ? '*' : ''}`).join(', ');
-  const d1 = dim('icw', 'icwAuto'), d2 = dim('imw', 'imwAuto'), d3 = dim('depth'); let star = /\*/.test(d1 + d2);
+  const d1 = dim('icw', 'icwAuto'), d2 = dim('imw', 'imwAuto'), d3 = dim('depth'); let star = autoW || /\*/.test(d1 + d2);
   if (d1 || d2 || d3) L.push(`Arch (mm): ${[d1 ? 'intercanine width ' + d1 : '', d2 ? 'intermolar width ' + d2 : '', d3 ? 'arch depth ' + d3 : ''].filter(Boolean).join('; ')}.`);
   const o = C.occ;
   if (o.can && (o.overjet != null || o.overbite != null || o.mid != null)) { if (o.auto && (o.overjet != null || o.overbite != null)) star = true; L.push(`Occlusion: ${[o.overjet != null ? `overjet ${neg(o.overjet)} mm${o.auto ? '*' : ''}${o.ojTo === 'edge' ? ' (to the lower incisal edge)' : ''}` : '', o.overbite != null ? `overbite ${neg(o.overbite)} mm${o.auto ? '*' : ''}` : '', o.mid != null ? (Math.abs(o.mid) < 0.05 ? 'midlines coincident' : `lower midline ${Math.abs(o.mid).toFixed(1)} mm to patient’s ${o.mid > 0 ? 'left' : 'right'} of upper`) : ''].filter(Boolean).join('; ')}.`); }
@@ -1045,7 +1082,7 @@ function loadState(src) {
   Object.assign(state, fresh());
   if (s.notation === 'palmer') state.notation = 'palmer'; if (s.widthMode === '3d') state.widthMode = '3d';
   state.include7 = !!s.include7; state.substitute = !!s.substitute; if (Number.isFinite(s.gapTol)) state.gapTol = N.clamp(s.gapTol, 0, 3); state.prop = num(s.prop);
-  for (const k in s.teeth || {}) { const t = s.teeth[k], f = +k; if (!t || !(f >= 11 && f <= 47) || f % 10 < 1 || f % 10 > 7) continue; state.teeth[f] = { st: ['p', 'm', 's'].includes(t.st) ? t.st : 'p', m: isPt(t.m) ? t.m : null, d: isPt(t.d) ? t.d : null }; }
+  for (const k in s.teeth || {}) { const t = s.teeth[k], f = +k; if (!t || !(f >= 11 && f <= 47) || f % 10 < 1 || f % 10 > 7) continue; state.teeth[f] = { st: ['p', 'm', 's'].includes(t.st) ? t.st : 'p', m: isPt(t.m) ? t.m : null, d: isPt(t.d) ? t.d : null }; if (t.auto) state.teeth[f].auto = true; }
   for (const j of JAWS) { const L = s.line && s.line[j]; if (L) state.line[j] = { pts: Array.isArray(L.pts) && L.pts.length >= 2 && L.pts.every(isPt) ? L.pts : null, smooth: L.smooth !== false }; }
   for (const k in s.tips || {}) { const t = s.tips[k]; if (/^t[1-4][36]$/.test(k) && t && isPt(t.p)) state.tips[k] = { p: t.p, auto: !!t.auto }; }
   if (s.occ) state.occ = { u: isPt(s.occ.u) ? s.occ.u : null, uAuto: s.occ.uAuto !== false, l: isPt(s.occ.l) ? s.occ.l : null, lAuto: s.occ.lAuto !== false };
@@ -1128,7 +1165,7 @@ N.segBind($('mTool'), (v) => { ui.mtool = v; ui.pend = []; draw(); renderMeasure
 $('chart').addEventListener('click', (e) => { const b = e.target.closest('button[data-f]'); if (b && !b.disabled) selectTooth(+b.dataset.f); });
 for (const id of ['wUndo', 'sUndo', 'aUndo']) $(id).addEventListener('click', undoLast);
 $('wMiss').addEventListener('click', () => setStatus('m')); $('wSkip').addEventListener('click', () => setStatus('s'));
-$('wRedo').addEventListener('click', redoTooth); $('wClear').addEventListener('click', () => clearArch(ui.jaw));
+$('wRedo').addEventListener('click', redoTooth); $('wFind').addEventListener('click', findTeeth); $('wClear').addEventListener('click', () => clearArch(ui.jaw));
 $('w7').addEventListener('change', (e) => { snap(); state.include7 = e.target.checked; ui.cur = nextOpen(ui.jaw, null); if (ui.cur) ui.sel = ui.cur.f; changed(); });
 $('wLock').addEventListener('change', (e) => { ui.lock = e.target.checked; viewer.controls.enableRotate = !ui.lock; if (ui.lock) occlusalView(ui.jaw); });
 $('bSub').addEventListener('change', (e) => { snap(); state.substitute = e.target.checked; changed(); });
@@ -1160,5 +1197,5 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && (sc
 
 recalc();
 shell.goto(0);
-window.APP = { N, THREE, shell, viewer, scans, state, ui, get calc() { return C; }, get sec() { return secMap; }, recalc, changed, bolton, BOLTON, frame, occlusalView, tname, archOrder, undoLast, loadState, reportText, reportCsv, reportCanvas, autoLandmarks, findCusp, toWorld };
+window.APP = { N, THREE, shell, viewer, scans, state, ui, AUTO, findTeeth, renumber, toothNums, get calc() { return C; }, get sec() { return secMap; }, recalc, changed, bolton, BOLTON, frame, occlusalView, tname, archOrder, undoLast, loadState, reportText, reportCsv, reportCanvas, autoLandmarks, findCusp, toWorld };
 </script></body></html>

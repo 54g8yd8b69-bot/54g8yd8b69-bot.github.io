@@ -3,12 +3,13 @@
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd); SRC="$HERE/../src"; SITE=$(cd "$HERE/../.." && pwd); W=${1:-/home/claude/suite}
 [ "$W" = /home/claude/suite ] || echo "note: the tests use absolute paths under /home/claude/suite"
-mkdir -p "$W/shared" "$W/model-card" "$W/analysis-card" "$W/splint-card" "$W/compare-card" "$W/prep-card" "$W/survey-card" "$W/shell-card" "$W/scan-card" "$W/dev/data" "$W/dev/out"
-cp "$SRC/core.js" "$SRC/solid.js" "$W/shared/"
+mkdir -p "$W/shared" "$W/model-card" "$W/analysis-card" "$W/splint-card" "$W/compare-card" "$W/prep-card" "$W/survey-card" "$W/shell-card" "$W/articulator-card" "$W/obturator-card" "$W/cbct-card" "$W/scan-card" "$W/dev/data" "$W/dev/out"
+cp "$SRC/core.js" "$SRC/solid.js" "$SRC/dicom.js" "$W/shared/"
 cp "$SRC/index.html" "$W/scan-card/index.html"
 cp "$SRC/model.html" "$W/model-card/index.html"; cp "$SRC/analysis.html" "$W/analysis-card/index.html"; cp "$SRC/splint.html" "$W/splint-card/index.html"
 cp "$SRC/compare.html" "$W/compare-card/index.html"; cp "$SRC/prep.html" "$W/prep-card/index.html"; cp "$SRC/survey.html" "$W/survey-card/index.html"; cp "$SRC/shell.html" "$W/shell-card/index.html"
-for t in model analysis splint compare prep survey shell; do ln -sfn "../$t-card/index.html" "$W/scan-card/$t.html"; done      # the hub's default addresses, served from the tool folders
+cp "$SRC/articulator.html" "$W/articulator-card/index.html"; cp "$SRC/obturator.html" "$W/obturator-card/index.html"; cp "$SRC/cbct.html" "$W/cbct-card/index.html"
+for t in model analysis splint compare prep survey shell articulator obturator cbct; do ln -sfn "../$t-card/index.html" "$W/scan-card/$t.html"; done      # the hub's default addresses, served from the tool folders
 for d in tray-card wax-card fonts icons; do ln -sfn "$SITE/$d" "$W/$d"; done                          # the site's pages for the Trays and Wax-up tabs
 cp "$HERE/pw.cjs" "$W/dev/"; cp -r "$HERE/tests" "$HERE/coretest" "$HERE/stlview" "$W/dev/"
 cd "$W"
@@ -21,5 +22,8 @@ node -e "const fs=require('fs');fs.writeFileSync('shared/manifold-wasm.js','wind
 [ -f dev/data/bite-key.stl ] || node dev/tests/bite/mkbite.mjs
 [ -f dev/data/prep-onlay-lower.stl ] || KIND=onlay node dev/tests/prep-card/mkpartial.mjs
 [ -f dev/data/prep-inlay-lower.stl ] || KIND=inlay node dev/tests/prep-card/mkpartial.mjs
-[ -f dev/data/shell-preop-lower.stl ] || node dev/tests/shell-card/mkshell.mjs
+[ -f dev/data/shell-waxparts-lower.stl ] || node dev/tests/shell-card/mkshell.mjs
+[ -f dev/data/art-truth.json ] || node dev/tests/articulator-card/mkshapes.mjs
+[ -f dev/data/obt-truth.json ] || node dev/tests/obturator-card/mkobt.mjs
+[ -d dev/data/cbct ] || node dev/tests/cbct-card/mkcbct.mjs
 echo "working folder ready: $W"

@@ -172,7 +172,7 @@ run({name:'Landing page',fn:async()=>{
   await test('Scan Card opens under the site CSP: scans loaded once feed Models, Analysis and Splint, and their work comes back as one case',async()=>{const pg=await page('/scan-card/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect((await pg.request.get(BASE+'/scan-card/manifest.webmanifest')).ok(),'Scan Card manifest missing');
-    expect(await pg.locator('#tabs button').count()===10,'expected the Scans tab and nine tools');
+    expect(await pg.locator('#tabs button').count()===13,'expected the Scans tab and twelve tools');
     const tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/')),settle=()=>pg.evaluate(()=>APP.H.q);
     const sig=fr=>fr.evaluate(()=>['upper','lower'].map(j=>APP.scans[j]?[APP.scans[j].raw.positions.length,APP.N.crc32(new Uint8Array(APP.scans[j].raw.positions.buffer)),APP.N.crc32(new Uint8Array(APP.scans[j].raw.indices.buffer)),Array.from(APP.scans[j].matrix.elements).join()].join(':'):'-').join('|'));
     await pg.click('[data-ss=demo]');await pg.waitForFunction(()=>APP.scans.has('upper')&&APP.scans.has('lower')&&!document.querySelector('#busy').classList.contains('show'),null,{timeout:60000});
@@ -246,6 +246,19 @@ run({name:'Landing page',fn:async()=>{
     await sp.check('#shUse');await idle(sp);await sp.click('#shAuto');await idle(sp);await sp.check('#gdOn');await idle(sp);await sp.waitForFunction(()=>APP.D.res&&!APP.D.dirty,null,{timeout:300000});
     const g=await sp.evaluate(()=>({r:APP.D.res.report.ramps,w:APP.D.res.report.watertight,e:['right','left','forward'].map(k=>APP.D.exc[k][1])}));
     expect(g.w&&g.r&&g.r.length===3&&g.e.every(q=>q.guide==='front'&&q.back>0.3),'Splint guidance '+JSON.stringify(g));await noErrors(pg)});
+  await test('Scan Card’s Articulator, Obturator and CBCT work under the site CSP',async()=>{const pg=await page('/scan-card/');
+    await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});const settle=()=>pg.evaluate(()=>APP.H.q),tool=id=>pg.frames().find(f=>f!==pg.mainFrame()&&f.url().endsWith('/scan-card/'+id+'/'));
+    const idle=fr=>fr.waitForFunction(()=>!document.querySelector('#busy').classList.contains('show'),null,{timeout:240000});
+    await pg.evaluate(async()=>{const N=APP.N,pair=N.makeDemoPair({res:0.3});await APP.scans.loadFiles([new File([N.stlBinary(pair.lower)],'lower.stl'),new File([N.stlBinary(pair.upper)],'upper.stl')]);});
+    await idle(pg);expect(await pg.evaluate(()=>APP.scans.has('upper')&&APP.scans.has('lower')),'scans did not load');
+    await pg.click('#tabs [data-tab=articulator]');await settle();const ar=tool('articulator');expect(!!ar,'Articulator did not open');await ar.waitForFunction(()=>window.APP&&APP.scans.has('lower'),null,{timeout:60000});
+    await ar.waitForFunction(()=>!!APP.E,null,{timeout:120000});await ar.evaluate(()=>APP.shell.goto('report'));await ar.waitForFunction(()=>APP.E&&APP.E.res&&APP.E.res.right&&APP.E.res.right.verdict,null,{timeout:300000});
+    const v=await ar.evaluate(()=>APP.E.res.right.verdict.head);expect(/guidance/i.test(v),'Articulator right excursion: '+v);
+    await pg.click('#tabs [data-tab=obturator]');await settle();const ob=tool('obturator');expect(!!ob,'Obturator did not open');await ob.waitForFunction(()=>window.APP&&APP.scans.has('upper'),null,{timeout:60000});
+    expect(await ob.evaluate(()=>APP.SOL.ready().then(()=>true)),'Obturator: the solid engine did not start');
+    await pg.click('#tabs [data-tab=cbct]');await settle();const cb=tool('cbct');expect(!!cb,'CBCT did not open');await cb.waitForFunction(()=>window.APP&&APP.loadDemo,null,{timeout:60000});
+    await cb.evaluate(()=>APP.loadDemo());await cb.waitForFunction(()=>APP.S.vol&&APP.S.vol.dims,null,{timeout:120000});
+    const d=await cb.evaluate(()=>APP.S.vol.dims);expect(d.every(n=>n>50),'CBCT demo volume '+JSON.stringify(d));await noErrors(pg)});
   await test('Scan Card’s tools still open on their own, and their logo leads back to Scan Card',async()=>{const pg=await page('/scan-card/model/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect(await pg.evaluate(()=>!APP.N.EMBED&&!APP.shell.stepEl('load').hidden&&document.querySelectorAll('#topBtns button').length===2),'Model Card on its own should have its own loading steps');

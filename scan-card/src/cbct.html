@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CBCT Card — CBCT viewer and donor-tooth replicas</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+}}
+</script>
+<style>
+button{touch-action:manipulation}
+#cb{position:absolute;inset:0;display:grid;grid-template-rows:auto 1fr;z-index:1;background:#08131f;min-width:0;min-height:0}
+#cbBar{display:flex;gap:6px;align-items:center;padding:5px 8px;background:#0f2a44;border-bottom:1px solid #1e4772;flex-wrap:wrap;min-width:0}
+#cbBar .seg{border-color:#1e4772}
+#cbBar .seg button{padding:5px 9px;font-size:11.5px;background:#16365a;color:#dbe7f3;border-right-color:#1e4772}
+#cbBar .seg button.on{background:var(--teal2);color:#fff}
+#cbBar .btn{padding:5px 9px;font-size:11.5px;background:#16365a;color:#dbe7f3;border-color:#1e4772}
+#cbBar .sp{flex:1}
+#cbBar .rd{color:#9fb6cf;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+html.embed #cbBar{padding-left:8px}
+#cbGrid{display:grid;gap:2px;min-height:0;min-width:0;background:#08131f}
+#cbGrid.mpr{grid-template:"ax co" 1fr "sa r3" 1fr / 1fr 1fr}
+#cbGrid.big3d{grid-template:"r3 ax" 1fr "r3 co" 1fr "r3 sa" 1fr / 2.2fr 1fr}
+#cbGrid.pano{grid-template:"ax xs" 1fr "pan pan" 1fr / 1fr 1.5fr}
+#cbGrid.max{grid-template:"m" 1fr / 1fr}
+#cbGrid>[data-a]{min-width:0;min-height:0}
+.vp{position:relative;overflow:hidden;background:#000}
+.vp>canvas{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;outline:none}
+.vp .vl{position:absolute;left:6px;top:5px;font:600 11px/1.3 system-ui,sans-serif;color:#fff;background:rgba(0,0,0,.5);padding:2px 6px;border-radius:4px;pointer-events:none;white-space:nowrap;max-width:calc(100% - 36px);overflow:hidden;text-overflow:ellipsis}
+.vp .vl i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:0}
+.vp .vx{position:absolute;right:5px;top:4px;display:flex;gap:3px;z-index:2}
+.vp .vx button{background:rgba(15,42,68,.85);color:#e6f0fa;border:1px solid rgba(255,255,255,.3);border-radius:5px;font-size:11px;padding:2px 7px}
+.vp .vs{position:absolute;right:8px;bottom:6px;width:42%;max-width:220px;accent-color:#14b8a6;z-index:2}
+#xsRow{display:flex;gap:2px;min-width:0}
+#xsRow .vp{flex:1}
+.vp.r3 .r3b{position:absolute;right:5px;bottom:5px;display:flex;gap:3px;z-index:2}
+.vp.r3 .r3b button{background:rgba(15,42,68,.85);color:#e6f0fa;border:1px solid rgba(255,255,255,.3);border-radius:5px;font-size:11px;padding:2px 7px}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum h5 .okb.warn{background:#fef3c7;color:#92400e}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px;gap:8px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600;text-align:right}
+.series{display:block;width:100%;text-align:left;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;margin:5px 0;background:#fff;color:var(--ink);font-size:12px}
+.series.on{border-color:var(--teal);box-shadow:0 0 0 3px rgba(20,184,166,.15)}
+.series:disabled{opacity:.6;cursor:not-allowed}
+.series b{color:var(--navy)}
+.series span{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0}
+.row select{max-width:120px}
+.step .body .row .val{width:74px}
+.prog{height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden;margin:6px 0}
+.prog i{display:block;height:100%;background:var(--teal);width:0}
+</style>
+</head>
+<body>
+<script type="module">
+// CBCT Card — a CBCT viewer and donor-tooth replicas, part of Scan Card (its CBCT tab) or on its own.
+//  • Opens DICOM on this device (several files, a folder, a .zip, multi-frame files; see dicom.js). Only technical tags are
+//    read: the patient's details are stepped over by the reader and never reach this page, a saved case or an export.
+//  • Axial, coronal and sagittal slices with a linked cross-hair, windows, zoom and pan; a 3D view (maximum intensity or a
+//    threshold surface, raymarched in a 3D texture) and a surface model as STL.
+//  • Panoramic: a curve along the arch (tapped, or proposed from the bright band of the teeth), a curved reformation with a
+//    slab, and cross-sections square to the curve with millimetre ticks. Distances and angles on any view.
+//  • Donor tooth: tap it; it is cut out of the bone and its neighbours inside an adjustable cylinder (threshold, then a flood
+//    from the tap against the region's edge that meets in the dark ligament space and at narrow contacts); fix leaks with
+//    "not tooth" taps and an eraser; a smooth closed replica, optionally enlarged for the ligament and with a handle, as STL.
+// Positions are the scan's own patient coordinates (LPS, mm), and so are the exported STL files.
+import * as N from './core.js';
+import * as D from './dicom.js';
+const THREE = N.THREE, $ = N.$, mm = (v, d = 1) => `${v.toFixed(d)} mm`;
+const COL = { ax: '#f59e0b', co: '#22d3ee', sa: '#e879f9', pan: '#a3e635', xs: '#a3e635', tooth: '#2dd4bf', not: '#f87171', meas: '#fde047', roi: '#38bdf8' };
+const TITLE = { ax: 'Axial', co: 'Coronal', sa: 'Sagittal', pan: 'Panoramic', xs: 'Cross-section', r3: '3D' };
+const EMPTY = '<div><b>Open a CBCT scan</b>Drop the DICOM folder, files or a .zip here, or use “Open the scan”. It stays on this device.</div>';
+
+// ───────────── state ─────────────
+const S = {
+  vol: null, H: null, P: null, series: [], seriesId: null, skipped: 0, files: 0,
+  cur: [0, 0, 0], win: { l: 0, w: 1 }, preset: 'bone', tool: 'browse', layout: 'mpr', max: null,
+  measures: [], draft: null,
+  arch: { points: [], curve: null, ver: 0, slab: 10, mode: 'mean', s: 0, count: 3, step: 2, width: 30 },
+  pano: null, xs: [],
+  r3: { mode: 'mip', iso: 0, showSurf: true },
+  surf: { mesh: null, info: null, detail: 0.5, largest: false, T: null },
+  tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, preview: null, hist: [], fitted: false },
+  rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
+  pending: null, demo: null, busy: false, loads: 0,
+};
+
+// ───────────── shell ─────────────
+const fdiOpts = ['<option value="">—</option>'].concat([1, 2, 3, 4].flatMap((q) => [1, 2, 3, 4, 5, 6, 7, 8].map((t) => `<option value="${q}${t}">${q}${t}</option>`))).join('');
+const shell = N.createShell({
+  name: 'CBCT Card', tagline: 'CBCT viewer and donor-tooth replicas', title: document.title, emptyHtml: EMPTY,
+  steps: [
+    { id: 'load', title: 'Open the scan', html: `
+      <p class="lead">Open the CBCT’s DICOM files: the folder they are in, a .zip, or the files themselves.</p>
+      <div class="btns"><button class="btn pri" id="lFolder" type="button" title="Choose the folder that holds the scan’s DICOM files">Choose a folder…</button><button class="btn" id="lFiles" type="button" title="Choose DICOM files, a multi-frame file or a .zip">Choose files…</button><button class="btn" id="lDemo" type="button" title="Open a made-up CBCT of a lower jaw to try the tool">Try the demo CBCT</button></div>
+      <input type="file" id="lFolderIn" webkitdirectory multiple hidden><input type="file" id="lFilesIn" multiple hidden>
+      <div class="prog" id="lProg" hidden><i></i></div>
+      <div id="lSeries"></div><div id="lInfo"></div>
+      <p class="tip">Everything is read on this device; nothing is uploaded. Only technical details are read from the files (size, voxel size, position, scan date): names, dates of birth, numbers and the like are stepped over and never shown or saved. If the scan is compressed with JPEG 2000 or JPEG-LS, export it again from the CBCT software as uncompressed DICOM.</p>` },
+    { id: 'view', title: 'Slices', html: `
+      <p class="lead">Scroll over a slice to move through it; tap to move the cross-hair. Pinch or Ctrl + scroll to zoom; two fingers or the right mouse button to pan.</p>
+      <div class="row"><label>Window</label><div class="seg" id="vPreset"><button data-v="bone" type="button" title="Bone and teeth">Bone</button><button data-v="teeth" type="button" title="Enamel, dentine and pulp">Teeth</button><button data-v="soft" type="button" title="Soft tissue and airway">Soft</button><button data-v="full" type="button" title="Every value in the scan">Full</button></div></div>
+      <div class="row"><label>Level</label><input type="range" id="vLevel" step="1"><span class="val"></span></div>
+      <div class="row"><label>Width</label><input type="range" id="vWidth" step="1"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="vFit" type="button" title="Show each slice whole again">Fit the slices</button><button class="btn" id="vCentre" type="button" title="Put the cross-hair back in the middle of the scan">Centre the cross-hair</button></div>
+      <div id="vInfo"></div>
+      <p class="tip">Use the bar above the slices for the tools: Point moves the cross-hair, Move pans, Window changes brightness (drag across for width, up and down for level), Distance and Angle measure on any slice — the panoramic and cross-sections too. Measurements are in millimetres in the plane of the slice. The window presets are display settings only.</p>` },
+    { id: 'd3', title: '3D and surface', optional: true, html: `
+      <p class="lead">The scan in 3D: the brightest value along each line of sight (MIP), or the surface where it crosses a threshold. Make that surface into an STL model.</p>
+      <div class="row"><label>Show</label><div class="seg" id="tMode"><button data-v="mip" type="button" title="Maximum intensity projection">MIP</button><button data-v="iso" type="button" title="The surface at the threshold below">Surface</button></div></div>
+      <div class="row"><label>Threshold</label><input type="range" id="tIso" step="1"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="tBone" type="button" title="A threshold that keeps the bone">Bone</button><button class="btn" id="tTeeth" type="button" title="A threshold that keeps mostly the teeth">Teeth</button></div>
+      <div class="h4">Surface model</div>
+      <div class="row"><label>Detail</label><div class="seg" id="tDetail"><button data-v="0.8" type="button" title="0.8 mm grid: quick, small file">Coarse</button><button data-v="0.5" type="button" title="0.5 mm grid">Normal</button><button data-v="0.3" type="button" title="0.3 mm grid: slower, large file">Fine</button></div></div>
+      <label class="check"><input type="checkbox" id="tLargest"> Only the largest piece</label>
+      <label class="check" id="tShowRow" hidden><input type="checkbox" id="tShow" checked> Show the surface model</label>
+      <div class="btns"><button class="btn pri" id="tMake" type="button" title="Make a closed surface at the threshold">Make the surface</button><button class="btn" id="tStl" type="button" title="Download the surface as an STL file, in the scan’s coordinates">Download STL</button></div>
+      <div id="tOut"></div>
+      <p class="tip">The STL is in the scan’s own patient coordinates (millimetres; +x the patient’s left, +y back, +z up), so it lines up with the scan in other software that uses DICOM coordinates. A model from a CBCT is limited by its voxel size and artefacts: check it before relying on it.</p>` },
+    { id: 'pano', title: 'Panoramic', html: `
+      <p class="lead">Tap along the middle of the arch on the axial slice, from one side to the other, or let the tool propose it. Drag a point to move it.</p>
+      <div class="btns"><button class="btn pri" id="pPropose" type="button" title="Find the arch from the bright band of the teeth">Propose the arch</button><button class="btn" id="pUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="pClear" type="button" title="Remove all the points">Start again</button></div>
+      <div class="row"><label>Slab thickness</label><input type="range" id="pSlab" min="0" max="30" step="0.5" value="10"><span class="val"></span></div>
+      <div class="row"><label>Slab shows</label><div class="seg" id="pMode"><button data-v="mean" type="button" title="The average across the slab, like a panoramic radiograph">Average</button><button data-v="max" type="button" title="The brightest value across the slab">Brightest</button></div></div>
+      <div class="row"><label>Cross-sections</label><div class="seg" id="pCount"><button data-v="1" type="button" title="One cross-section">1</button><button data-v="3" type="button" title="Three cross-sections">3</button><button data-v="5" type="button" title="Five cross-sections">5</button></div></div>
+      <div class="row"><label>Spacing</label><input type="range" id="pStep" min="0.5" max="5" step="0.5" value="2"><span class="val"></span></div>
+      <div class="row"><label>Width</label><input type="range" id="pWidth" min="15" max="50" step="1" value="30"><span class="val"></span></div>
+      <div id="pInfo"></div>
+      <p class="tip">Tap the panoramic to put the cross-sections there; scroll over a cross-section to step along the arch. In each cross-section the cheek or lip side (B) is on the left and the tongue side (L) on the right; ticks every millimetre, numbers every 5 mm from the arch curve and the scan’s height.</p>` },
+    { id: 'tooth', title: 'Donor tooth', optional: true, html: `
+      <p class="lead" id="dLead">Tap the donor tooth in a slice, near the middle of its crown.</p>
+      <div class="row"><label>Region</label><div class="seg" id="dShape"><button data-v="cyl" type="button" title="A cylinder round the tooth">Cylinder</button><button data-v="box" type="button" title="A box round the tooth">Box</button></div></div>
+      <div class="row"><label>Width</label><input type="range" id="dR" min="3" max="12" step="0.25" value="7"><span class="val"></span></div>
+      <div class="row"><label>Above the tap</label><input type="range" id="dUp" min="2" max="30" step="0.5" value="20"><span class="val"></span></div>
+      <div class="row"><label>Below the tap</label><input type="range" id="dDown" min="2" max="30" step="0.5" value="20"><span class="val"></span></div>
+      <div class="row"><label>Threshold</label><input type="range" id="dT" step="1"><span class="val"></span></div>
+      <div class="row"><label>Smoothing</label><input type="range" id="dSmooth" min="0" max="0.4" step="0.05" value="0.15"><span class="val"></span></div>
+      <div class="row"><label>Eraser size</label><input type="range" id="dBrush" min="0.3" max="3" step="0.1" value="1"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="dFit" type="button" title="Fit the region round the tooth found">Fit the region</button><button class="btn" id="dUndo" type="button" title="Undo the last change">Undo</button><button class="btn" id="dClear" type="button" title="Pick the tooth again">Start again</button></div>
+      <div id="dOut"></div>
+      <p class="tip">The tooth is everything at or above the threshold inside the region that is reached from your tap before it is reached from the region’s edge, taking the thickest and brightest parts first: the two meet in the dark ligament space round the root and at the narrow neck of a contact. If it leaks into the bone or the next tooth, tap there with “Not tooth”, cut the bridge with the eraser, raise the threshold, or narrow the region. Pulp spaces are filled. This works best on a scan with small voxels (0.3 mm or less, as from a small field of view): with larger voxels the ligament space may not show, and the tooth runs into the bone.</p>` },
+    { id: 'replica', title: 'Replica', optional: true, html: `
+      <p class="lead">A printable replica of the donor tooth, to shape the socket and try it in before the tooth is moved, so it is out of the mouth for less time.</p>
+      <div class="row"><label>Enlarge by</label><input type="range" id="rPdl" min="0" max="0.5" step="0.05" value="0"><span class="val"></span></div>
+      <label class="check"><input type="checkbox" id="rHandle"> A handle on the crown</label>
+      <div class="row" id="rHdRow"><label>Handle diameter</label><input type="range" id="rHd" min="2" max="5" step="0.5" value="3"><span class="val"></span></div>
+      <div class="row" id="rHlRow"><label>Handle length</label><input type="range" id="rHl" min="4" max="14" step="1" value="8"><span class="val"></span></div>
+      <div class="row"><label>Tooth (for the file name)</label><select id="rFdi" title="The tooth number, used only in the file name">${fdiOpts}</select></div>
+      <div class="btns"><button class="btn pri" id="rMake" type="button" title="Make the replica as a closed, smooth surface">Make the replica</button><button class="btn" id="rStl" type="button" title="Download the replica as an STL file, in the scan’s coordinates">Download STL</button></div>
+      <div id="rOut"></div>
+      <p class="tip">“Enlarge by” adds the same thickness all over (0 to 0.5 mm), for example to allow for the ligament space. The replica is a planning aid made from the CBCT, not certified medical-device software: compare it with the scan and check its fit before using it, and follow your printing resin’s instructions for anything that goes in the mouth.</p>` },
+  ],
+});
+if (N.EMBED) $('empty').innerHTML = EMPTY;
+shell.setEmpty(true);
+
+// ───────────── the views ─────────────
+const grid = N.el('div', { id: 'cb', hidden: '' }, `
+  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><span class="sp"></span><span class="rd" id="cbRead"></span></div>
+  <div id="cbGrid" class="mpr">
+    ${['ax', 'co', 'sa'].map((v) => `<div class="vp" data-v="${v}" data-a="${v}" style="grid-area:${v}"></div>`).join('')}
+    <div class="vp r3" data-v="r3" data-a="r3" style="grid-area:r3"></div>
+    <div class="vp" data-v="pan" data-a="pan" style="grid-area:pan"></div>
+    <div id="xsRow" data-a="xs" style="grid-area:xs"></div>
+  </div>`);
+shell.view.appendChild(grid);
+const gridEl = $('cbGrid'), DPR = () => Math.min(window.devicePixelRatio || 1, 2);
+const views = {};                                                // id → view (2D)
+function makeView(id, kind, cell, m = 0) {
+  const cv = N.el('canvas', { tabindex: '0' }), lab = N.el('div', { class: 'vl' }), vx = N.el('div', { class: 'vx' }, `<button type="button" data-max="${id}" title="Make this view fill the space (again to go back)">⤢</button>`);
+  cell.append(cv, lab, vx);
+  const v = { id, kind, m, cell, cv, ctx: cv.getContext('2d'), lab, z: 1, cx: 0, cy: 0, fitted: false, off: document.createElement('canvas'), offKey: '', w: 1, h: 1 };
+  if (kind === 'ax' || kind === 'co' || kind === 'sa') { const s = N.el('input', { type: 'range', class: 'vs', min: '0', max: '1', step: '1', title: 'Move through the slices' }); cell.appendChild(s); v.slider = s; s.addEventListener('input', () => { const a = axisOf(kind); S.cur[a] = +s.value; crossChanged(); }); }
+  views[id] = v; hookView(v); return v;
+}
+const axisOf = (kind) => (kind === 'ax' ? 2 : kind === 'co' ? 1 : 0);
+for (const k of ['ax', 'co', 'sa']) makeView(k, k, grid.querySelector(`.vp[data-v=${k}]`));
+makeView('pan', 'pan', grid.querySelector('.vp[data-v=pan]'));
+function ensureXs(n) {
+  const row = $('xsRow');
+  while (row.children.length > n) { const c = row.lastElementChild, id = c.dataset.v; delete views[id]; c.remove(); }
+  while (row.children.length < n) { const i = row.children.length, id = 'xs' + i, c = N.el('div', { class: 'vp', 'data-v': id }); row.appendChild(c); makeView(id, 'xs', c, i); }
+}
+ensureXs(3);
+grid.addEventListener('click', (e) => { const b = e.target.closest('[data-max]'); if (!b) return; S.max = S.max === b.dataset.max ? null : b.dataset.max; applyLayout(); });
+
+// the 3D view (core's viewer) in its cell
+const r3cell = grid.querySelector('.vp[data-v=r3]');
+const viewer = N.createViewer(r3cell);
+r3cell.append(N.el('div', { class: 'vl' }, `<i style="background:#94a3b8"></i>3D`), N.el('div', { class: 'vx' }, '<button type="button" data-max="r3" title="Make this view fill the space (again to go back)">⤢</button>'),
+  N.el('div', { class: 'r3b' }, '<button type="button" data-r3="front" title="From the front">Front</button><button type="button" data-r3="top" title="From above">Top</button><button type="button" data-r3="right" title="From the patient’s right">Side</button><button type="button" data-r3="fit" title="Fit in view">Fit</button>'));
+r3cell.addEventListener('click', (e) => { const b = e.target.closest('[data-r3]'); if (!b) return; if (b.dataset.r3 === 'fit') fit3D(); else { viewer.setView(b.dataset.r3); } });
+
+// ───────────── geometry of each view ─────────────
+// Each 2D view shows an image of cols × rows pixels, pixel size su × sv mm; (a, b) are millimetres across and down that image.
+const vol = () => S.vol;
+function geom(v) {
+  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing;
+  if (v.kind === 'ax') return { cols: nx, rows: ny, su: sx, sv: sy, key: 'ax:' + Math.round(S.cur[2]) };
+  if (v.kind === 'co') return { cols: nx, rows: nz, su: sx, sv: sz, key: 'co:' + Math.round(S.cur[1]) };
+  if (v.kind === 'sa') return { cols: ny, rows: nz, su: sy, sv: sz, key: 'sa:' + Math.round(S.cur[0]) };
+  if (v.kind === 'pan') return S.pano ? { cols: S.pano.cols, rows: S.pano.rows, su: S.pano.px, sv: S.pano.pz, key: 'pan:' + S.pano.key } : null;
+  const X = S.xs[v.m]; return X ? { cols: X.cols, rows: X.rows, su: X.px, sv: X.pz, key: 'xs:' + X.key } : null;
+}
+/** (a, b) on a view → voxel coordinates (fractional) */
+function toVox(v, a, b) {
+  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, k = nz - 0.5 - b / sz;
+  if (v.kind === 'ax') return [a / sx - 0.5, b / sy - 0.5, S.cur[2]];
+  if (v.kind === 'co') return [a / sx - 0.5, S.cur[1], k];
+  if (v.kind === 'sa') return [S.cur[0], a / sy - 0.5, k];
+  const c = S.arch.curve; if (!c) return null;
+  let p; if (v.kind === 'pan') p = c.at(a).p; else { const X = S.xs[v.m]; if (!X) return null; const t = X.width / 2 - a; p = [X.p[0] + t * X.n[0], X.p[1] + t * X.n[1]]; }
+  return [(p[0] - V.origin[0]) / sx, (p[1] - V.origin[1]) / sy, k];
+}
+/** voxel coordinates → (a, b) on a slice view */
+function fromVox(v, i, j, k) {
+  const V = S.vol, nz = V.dims[2], [sx, sy, sz] = V.spacing, b = (nz - 1 - k + 0.5) * sz;
+  if (v.kind === 'ax') return [(i + 0.5) * sx, (j + 0.5) * sy];
+  if (v.kind === 'co') return [(i + 0.5) * sx, b];
+  if (v.kind === 'sa') return [(j + 0.5) * sy, b];
+  return [0, b];
+}
+const w2v = (p) => D.voxelOf(S.vol, p[0], p[1], p[2]), v2w = (q) => D.worldOf(S.vol, q[0], q[1], q[2]);
+const toScreen = (v, a, b) => [v.w / 2 + (a - v.cx) * v.z, v.h / 2 + (b - v.cy) * v.z];
+const fromScreen = (v, X, Y) => [v.cx + (X - v.w / 2) / v.z, v.cy + (Y - v.h / 2) / v.z];
+function fitView(v) { const g = geom(v); if (!g) return; const W = g.cols * g.su, H = g.rows * g.sv; v.z = Math.max(1e-3, Math.min(v.w / W, v.h / H) * 0.96); v.cx = W / 2; v.cy = H / 2; v.fitted = true; }
+
+// ───────────── drawing ─────────────
+let LUT = null;
+function buildLUT() {
+  const V = S.vol, lo = V.min, n = V.max - lo + 1, a = S.win.l - S.win.w / 2, w = Math.max(1, S.win.w); LUT = new Uint32Array(n);
+  for (let q = 0; q < n; q++) { let g = ((lo + q - a) / w) * 255; g = g < 0 ? 0 : g > 255 ? 255 : g | 0; LUT[q] = 0xFF000000 | (g << 16) | (g << 8) | g; }
+}
+/** the values shown by a view (Int16Array, cols × rows) */
+const bufs = {};
+function imageData(v, g) {
+  const V = S.vol, [nx, ny, nz] = V.dims, d = V.data;
+  if (v.kind === 'ax') { const k = Math.round(S.cur[2]); return d.subarray(k * nx * ny, (k + 1) * nx * ny); }
+  if (v.kind === 'pan') return S.pano.data;
+  if (v.kind === 'xs') return S.xs[v.m].data;
+  const b = bufs[v.kind] && bufs[v.kind].length === g.cols * g.rows ? bufs[v.kind] : (bufs[v.kind] = new Int16Array(g.cols * g.rows));
+  if (v.kind === 'co') { const j = Math.round(S.cur[1]); for (let r = 0; r < nz; r++) { const src = nx * (j + ny * (nz - 1 - r)); b.set(d.subarray(src, src + nx), r * nx); } }
+  else { const i = Math.round(S.cur[0]); for (let r = 0; r < nz; r++) { const base = i + nx * ny * (nz - 1 - r); for (let j = 0; j < ny; j++) b[r * ny + j] = d[base + nx * j]; } }
+  return b;
+}
+/** the tooth found, tinted into a slice image (the tooth may have been found on a coarser copy of the scan: seg.vol) */
+function tint(v, px, g) {
+  const sg = S.tooth.seg; if (!sg || sg.error || !['ax', 'co', 'sa'].includes(v.kind)) return;
+  const V = S.vol, W = sg.vol || V, { lab, box } = sg, { i0, j0, k0, nx, ny, nz } = box, NZ = V.dims[2];
+  const c = (q) => { const p = px[q], r = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.5 + 0.55 * 166) | 0) << 16) | (((gg * 0.5 + 0.55 * 212) | 0) << 8) | ((r * 0.5 + 0.55 * 45) | 0); };
+  // the native voxel range the box covers, along each axis, and the box index of each native index
+  const map = (a, i0b, nb) => { const lo = Math.max(0, Math.floor((W.origin[a] + (i0b - 0.5) * W.spacing[a] - V.origin[a]) / V.spacing[a])), hi = Math.min(V.dims[a] - 1, Math.ceil((W.origin[a] + (i0b + nb - 0.5) * W.spacing[a] - V.origin[a]) / V.spacing[a])), m = new Int32Array(hi - lo + 1); for (let i = lo; i <= hi; i++) { const b = Math.round((V.origin[a] + i * V.spacing[a] - W.origin[a]) / W.spacing[a]) - i0b; m[i - lo] = b >= 0 && b < nb ? b : -1; } return { lo, hi, m }; };
+  const X = map(0, i0, nx), Y = map(1, j0, ny), Z = map(2, k0, nz), at = (i, j, k) => { const a = X.m[i - X.lo], b = Y.m[j - Y.lo], cc = Z.m[k - Z.lo]; return a >= 0 && b >= 0 && cc >= 0 && lab[a + nx * (b + ny * cc)]; };
+  const ci = Math.round(S.cur[0]), cj = Math.round(S.cur[1]), ck = Math.round(S.cur[2]);
+  if (v.kind === 'ax') { if (ck < Z.lo || ck > Z.hi) return; for (let j = Y.lo; j <= Y.hi; j++) for (let i = X.lo; i <= X.hi; i++) if (at(i, j, ck)) c(j * g.cols + i); }
+  else if (v.kind === 'co') { if (cj < Y.lo || cj > Y.hi) return; for (let k = Z.lo; k <= Z.hi; k++) for (let i = X.lo; i <= X.hi; i++) if (at(i, cj, k)) c((NZ - 1 - k) * g.cols + i); }
+  else { if (ci < X.lo || ci > X.hi) return; for (let k = Z.lo; k <= Z.hi; k++) for (let j = Y.lo; j <= Y.hi; j++) if (at(ci, j, k)) c((NZ - 1 - k) * g.cols + j); }
+}
+let segVer = 0;
+function drawView(v) {
+  const r = v.cell.getBoundingClientRect(), W = Math.max(1, Math.floor(r.width)), H = Math.max(1, Math.floor(r.height)), pr = DPR();
+  if (v.cv.width !== W * pr || v.cv.height !== H * pr) { v.cv.width = W * pr; v.cv.height = H * pr; }
+  const sizeChanged = v.w !== W || v.h !== H; v.w = W; v.h = H;
+  const ctx = v.ctx; ctx.setTransform(pr, 0, 0, pr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  if (!S.vol || v.cell.offsetParent === null) return;
+  const g = geom(v);
+  if (!g) { ctx.fillStyle = '#9fb6cf'; ctx.font = '13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(v.kind === 'pan' || v.kind === 'xs' ? 'Tap along the arch on the axial slice, or “Propose the arch”' : '', W / 2, H / 2); v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${TITLE[v.kind]}`; return; }
+  if (!v.fitted || (sizeChanged && v.autoFit !== false)) fitView(v);
+  const key = `${g.key}|${S.win.l}|${S.win.w}|${segVer}|${g.cols}x${g.rows}`;
+  if (v.offKey !== key) {
+    v.off.width = g.cols; v.off.height = g.rows; const oc = v.off.getContext('2d'), im = oc.createImageData(g.cols, g.rows), px = new Uint32Array(im.data.buffer), dat = imageData(v, g), lo = S.vol.min;
+    for (let q = 0; q < px.length; q++) px[q] = LUT[dat[q] - lo];
+    tint(v, px, g); oc.putImageData(im, 0, 0); v.offKey = key;
+  }
+  const [X0, Y0] = toScreen(v, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
+  ctx.drawImage(v.off, X0, Y0, g.cols * g.su * v.z, g.rows * g.sv * v.z);
+  overlays(v, g);
+}
+function line(ctx, pts, colour, w = 1, dash = null) { ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = w; if (dash) ctx.setLineDash(dash); ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke(); ctx.restore(); }
+function dot(ctx, p, colour, r = 4) { ctx.save(); ctx.fillStyle = colour; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 7); ctx.fill(); ctx.stroke(); ctx.restore(); }
+function tag(ctx, text, p, colour = 'rgba(15,42,68,.9)') { ctx.save(); ctx.font = '600 11px system-ui,sans-serif'; const w = ctx.measureText(text).width + 10; ctx.fillStyle = colour; ctx.fillRect(p[0] - w / 2, p[1] - 9, w, 18); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, p[0], p[1]); ctx.restore(); }
+function overlays(v, g) {
+  const ctx = v.ctx, V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, W = v.w, H = v.h, cur = S.cur, sc = (a, b) => toScreen(v, a, b);
+  // the cross-hair
+  if (v.kind === 'ax' || v.kind === 'co' || v.kind === 'sa') {
+    const [a, b] = fromVox(v, cur[0], cur[1], cur[2]), [X, Y] = sc(a, b), cv = v.kind === 'ax' ? [COL.sa, COL.co] : v.kind === 'co' ? [COL.sa, COL.ax] : [COL.co, COL.ax];
+    line(ctx, [[X, 0], [X, Y - 12]], cv[0]); line(ctx, [[X, Y + 12], [X, H]], cv[0]); line(ctx, [[0, Y], [X - 12, Y]], cv[1]); line(ctx, [[X + 12, Y], [W, Y]], cv[1]);
+  }
+  // the arch and where the cross-sections are
+  const c = S.arch.curve;
+  if (v.kind === 'ax' && (S.layout === 'pano' || shell.current === stepIx('pano'))) {
+    if (c) { line(ctx, c.pts.map((p) => sc((p[0] - V.origin[0]) / sx * sx + sx / 2, (p[1] - V.origin[1]) / sy * sy + sy / 2)), COL.pan, 2); for (const X of S.xs) { const h = X.width / 2, A = [X.p[0] + h * X.n[0], X.p[1] + h * X.n[1]], B = [X.p[0] - h * X.n[0], X.p[1] - h * X.n[1]]; line(ctx, [A, B].map((p) => sc(p[0] - V.origin[0] + sx / 2, p[1] - V.origin[1] + sy / 2)), '#fff', 1.2, [4, 3]); } }
+    S.arch.points.forEach((p) => dot(ctx, sc(p[0] - V.origin[0] + sx / 2, p[1] - V.origin[1] + sy / 2), COL.pan, 5));
+  }
+  if (v.kind === 'pan' && S.xs.length) {
+    for (const X of S.xs) { const [Xs] = sc(X.s, 0); line(ctx, [[Xs, 0], [Xs, H]], X === S.xs[(S.xs.length - 1) >> 1] ? '#fff' : 'rgba(255,255,255,.55)', 1, [5, 4]); }
+    const [, Y] = sc(0, (nz - 1 - cur[2] + 0.5) * sz); line(ctx, [[0, Y], [W, Y]], COL.ax, 1);
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '600 11px system-ui,sans-serif'; ctx.fillText('R', 6, H / 2); ctx.textAlign = 'right'; ctx.fillText('L', W - 6, H / 2); ctx.restore();
+  }
+  if (v.kind === 'xs') xsRulers(v, g);
+  // the donor tooth: taps, eraser marks and the region
+  if (['ax', 'co', 'sa'].includes(v.kind) && (shell.current === stepIx('tooth') || shell.current === stepIx('replica'))) toothOverlay(v);
+  // measurements on this view
+  for (const m of S.measures.concat(S.draft ? [S.draft] : [])) {
+    if (m.key !== g.key) continue; const P = m.pts.map((p) => sc(p[0], p[1]));
+    if (m.kind === 'dist') { if (P.length === 2) { line(ctx, P, COL.meas, 2); P.forEach((p) => dot(ctx, p, COL.meas, 3.5)); tag(ctx, mm(measureValue(m), 1), [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 - 14]); } else P.forEach((p) => dot(ctx, p, COL.meas, 3.5)); }
+    else { P.forEach((p) => dot(ctx, p, COL.meas, 3.5)); if (P.length >= 2) line(ctx, P, COL.meas, 2); if (P.length === 3) tag(ctx, measureValue(m).toFixed(1) + '°', [P[1][0], P[1][1] - 16]); }
+  }
+  // orientation letters and a 10 mm scale bar
+  const OR = { ax: ['A', 'P', 'R', 'L'], co: ['S', 'I', 'R', 'L'], sa: ['S', 'I', 'A', 'P'], pan: ['S', 'I', '', ''], xs: ['S', 'I', 'B', 'L'] }[v.kind];
+  ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '600 11px system-ui,sans-serif'; ctx.textAlign = 'center';
+  if (v.kind !== 'xs') { ctx.fillText(OR[0], W / 2, 34); ctx.fillText(OR[1], W / 2, H - 22); ctx.textAlign = 'left'; ctx.fillText(OR[2], 6, H / 2); ctx.textAlign = 'right'; ctx.fillText(OR[3], W - 6, H / 2); }
+  ctx.restore();
+  if (v.kind !== 'xs') { const L = 10 * v.z; line(ctx, [[12, H - 12], [12 + L, H - 12]], '#fff', 2); ctx.save(); ctx.fillStyle = '#fff'; ctx.font = '11px system-ui,sans-serif'; ctx.fillText('10 mm', 16 + L, H - 8); ctx.restore(); }
+  // the label
+  const lab = v.kind === 'ax' ? `Axial ${Math.round(cur[2]) + 1}/${nz} · z ${(V.origin[2] + Math.round(cur[2]) * sz).toFixed(1)}` : v.kind === 'co' ? `Coronal ${Math.round(cur[1]) + 1}/${ny} · y ${(V.origin[1] + Math.round(cur[1]) * sy).toFixed(1)}` : v.kind === 'sa' ? `Sagittal ${Math.round(cur[0]) + 1}/${nx} · x ${(V.origin[0] + Math.round(cur[0]) * sx).toFixed(1)}`
+    : v.kind === 'pan' ? `Panoramic · slab ${S.arch.slab} mm` : `${S.xs.length > 3 ? '' : 'Section '}${(S.xs[v.m].s).toFixed(1)} mm`;
+  v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${N.esc(lab)}`;
+}
+/** millimetre rulers on a cross-section: along the bottom (from the arch curve, buccal −, lingual +) and the left side (scan height) */
+function xsRulers(v, g) {
+  const ctx = v.ctx, X = S.xs[v.m], V = S.vol, nz = V.dims[2], sz = V.spacing[2], W = v.w, H = v.h;
+  const ax0 = X.width / 2;                                          // a of the arch curve
+  ctx.save(); ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 1; ctx.font = '10px system-ui,sans-serif'; ctx.textAlign = 'center';
+  const [Xc] = toScreen(v, ax0, 0); line(ctx, [[Xc, 24], [Xc, H - 20]], 'rgba(163,230,53,.55)', 1, [3, 4]);
+  for (let t = -Math.floor(ax0); t <= Math.floor(ax0); t++) { const [Xt] = toScreen(v, ax0 + t, 0); if (Xt < 0 || Xt > W) continue; const big = t % 5 === 0; ctx.beginPath(); ctx.moveTo(Xt, H); ctx.lineTo(Xt, H - (big ? 9 : 4)); ctx.stroke(); if (big && t && Xt > 30 && Xt < W - 12) ctx.fillText(String(Math.abs(t)), Xt, H - 11); }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const zTop = V.origin[2] + (nz - 1) * sz, z0 = Math.ceil(V.origin[2]), z1 = Math.floor(zTop);
+  for (let zz = z0; zz <= z1; zz++) { const b = (nz - 1 - (zz - V.origin[2]) / sz + 0.5) * sz, [, Y] = toScreen(v, 0, b); if (Y < 0 || Y > H) continue; const big = zz % 5 === 0; ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(big ? 9 : 4, Y); ctx.stroke(); if (big) ctx.fillText(String(zz), 11, Y); }
+  ctx.font = '600 12px system-ui,sans-serif'; ctx.textBaseline = 'alphabetic'; ctx.fillText('B', 18, H - 20); ctx.textAlign = 'right'; ctx.fillText('L', W - 8, H - 20);
+  const [, Yc] = toScreen(v, 0, (nz - 1 - S.cur[2] + 0.5) * sz); line(ctx, [[0, Yc], [W, Yc]], COL.ax, 1);
+  ctx.restore();
+}
+function toothOverlay(v) {
+  const ctx = v.ctx, T = S.tooth, V = S.vol, cur = S.cur, sc = (p) => { const q = w2v(p), [a, b] = fromVox(v, q[0], q[1], q[2]); return toScreen(v, a, b); };
+  const onPlane = (p, tol) => { const q = w2v(p), ax = axisOf(v.kind); return Math.abs(q[ax] - Math.round(cur[ax])) * V.spacing[ax] <= tol; };
+  if (T.roi) {
+    const R = T.roi, z0 = Math.min(R.z0, R.z1), z1 = Math.max(R.z0, R.z1), zc = V.origin[2] + Math.round(cur[2]) * V.spacing[2];
+    if (v.kind === 'ax' && zc >= z0 && zc <= z1) {
+      const C = sc([R.c[0], R.c[1], zc]), r = R.r * v.z; ctx.save(); ctx.strokeStyle = COL.roi; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); if (R.shape === 'box') ctx.rect(C[0] - r, C[1] - r, 2 * r, 2 * r); else ctx.arc(C[0], C[1], r, 0, 7); ctx.stroke(); ctx.restore();
+    } else if (v.kind !== 'ax') {
+      const across = v.kind === 'co' ? 0 : 1, here = v.kind === 'co' ? V.origin[1] + Math.round(cur[1]) * V.spacing[1] : V.origin[0] + Math.round(cur[0]) * V.spacing[0], d = here - R.c[1 - across];
+      const half = R.shape === 'box' ? (Math.abs(d) <= R.r ? R.r : -1) : (Math.abs(d) <= R.r ? Math.sqrt(R.r * R.r - d * d) : -1);
+      if (half > 0) { const lo = [R.c[0], R.c[1], z0], hi = [R.c[0], R.c[1], z1]; lo[across] -= half; hi[across] += half; const A = sc(lo), B = sc(hi); ctx.save(); ctx.strokeStyle = COL.roi; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.strokeRect(Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.abs(B[0] - A[0]), Math.abs(B[1] - A[1])); ctx.restore(); }
+    }
+  }
+  for (const e of T.erase) { const q = w2v(e.p), ax = axisOf(v.kind), dd = Math.abs(q[ax] - Math.round(cur[ax])) * V.spacing[ax]; if (dd >= e.r) continue; const P = sc(e.p), rr = Math.sqrt(e.r * e.r - dd * dd) * v.z; ctx.save(); ctx.strokeStyle = COL.not; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(P[0], P[1], rr, 0, 7); ctx.stroke(); ctx.restore(); }
+  for (const p of T.seeds) if (onPlane(p, 1.5)) dot(ctx, sc(p), COL.tooth, 5);
+  for (const p of T.not) if (onPlane(p, 1.5)) dot(ctx, sc(p), COL.not, 5);
+}
+// drawing on the next frame, only what changed
+const need = new Set(); let raf = 0;
+function invalidate(...ids) { for (const id of ids.length ? ids : Object.keys(views)) need.add(id); if (!raf) raf = requestAnimationFrame(() => { raf = 0; const ids2 = [...need]; need.clear(); for (const id of ids2) if (views[id]) drawView(views[id]); }); }
+new ResizeObserver(() => invalidate()).observe(gridEl);
+
+// ───────────── layout ─────────────
+function applyLayout() {
+  const L = S.max ? 'max' : S.layout; gridEl.className = L;
+  const shown = { mpr: ['ax', 'co', 'sa', 'r3'], big3d: ['r3', 'ax', 'co', 'sa'], pano: ['ax', 'xs', 'pan'] }[S.layout] || [];
+  for (const c of gridEl.children) { const a = c.dataset.a; if (S.max) { c.hidden = a !== S.max && !(S.max.startsWith('xs') && a === 'xs'); c.style.gridArea = c.hidden ? '' : 'm'; } else { c.hidden = !shown.includes(a); c.style.gridArea = a; } }
+  for (const v of Object.values(views)) v.fitted = false;
+  invalidate(); viewer.invalidate(); setTimeout(() => { invalidate(); viewer.invalidate(); }, 60);
+}
+
+// ───────────── the cross-hair, windows, read-out ─────────────
+function clampCur() { const n = S.vol.dims; for (let a = 0; a < 3; a++) S.cur[a] = N.clamp(S.cur[a], 0, n[a] - 1); }
+function crossChanged() {
+  if (!S.vol) return; clampCur();
+  for (const k of ['ax', 'co', 'sa']) { const v = views[k], a = axisOf(k); v.slider.max = String(S.vol.dims[a] - 1); v.slider.value = String(Math.round(S.cur[a])); }
+  const p = v2w(S.cur), q = S.cur.map(Math.round), val = S.vol.data[q[0] + S.vol.dims[0] * (q[1] + S.vol.dims[1] * q[2])] + (S.vol.shift || 0);
+  $('cbRead').textContent = `x ${p[0].toFixed(1)}  y ${p[1].toFixed(1)}  z ${p[2].toFixed(1)} mm · value ${val}`;
+  invalidate(); planes3D();
+}
+function setWindow(l, w, preset = null) {
+  S.win = { l: Math.round(l), w: Math.max(1, Math.round(w)) }; S.preset = preset; buildLUT(); RB.level.set(S.win.l); RB.width.set(S.win.w); SEG.preset(preset || ''); mipUniforms(); invalidate(); viewer.invalidate();
+}
+const stepIx = (id) => shell.steps.findIndex((s) => s.id === id);
+const stepId = () => (shell.current >= 0 ? shell.steps[shell.current].id : 'load');
+
+// ───────────── measuring ─────────────
+function measureValue(m) {
+  if (m.kind === 'dist') return Math.hypot(m.pts[1][0] - m.pts[0][0], m.pts[1][1] - m.pts[0][1]);
+  const [a, b, c] = m.pts, u = [a[0] - b[0], a[1] - b[1]], w = [c[0] - b[0], c[1] - b[1]];
+  return Math.acos(N.clamp((u[0] * w[0] + u[1] * w[1]) / ((Math.hypot(...u) * Math.hypot(...w)) || 1), -1, 1)) * 180 / Math.PI;
+}
+function measureTap(v, a, b) {
+  const g = geom(v); if (!g) return; const kind = S.tool, need = kind === 'dist' ? 2 : 3;
+  if (!S.draft || S.draft.key !== g.key || S.draft.kind !== kind) S.draft = { kind, key: g.key, view: v.id, pts: [] };
+  S.draft.pts.push([a, b]);
+  if (S.draft.pts.length >= need) { const m = S.draft; S.draft = null; m.value = measureValue(m); S.measures.push(m); shell.status(kind === 'dist' ? `Distance ${mm(m.value, 1)}` : `Angle ${m.value.toFixed(1)}°`); syncUI(); }
+  invalidate(v.id);
+}
+
+// ───────────── pointer and wheel on the slices ─────────────
+function hookView(v) {
+  const cv = v.cv, pts = new Map(); let drag = null, pinch = null;
+  const pos = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  cv.addEventListener('pointerdown', (e) => {
+    if (!S.vol) return; cv.focus({ preventScroll: true }); try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    const p = pos(e); pts.set(e.pointerId, p);
+    if (pts.size === 2) { const [A, B] = [...pts.values()]; pinch = { d: Math.hypot(A[0] - B[0], A[1] - B[1]), c: [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], z: v.z, cx: v.cx, cy: v.cy }; drag = null; return; }
+    if (pts.size > 2) return;
+    const [a, b] = fromScreen(v, p[0], p[1]), mode = e.button === 1 || e.button === 2 ? 'pan' : S.tool;
+    drag = { mode, p0: p, cx: v.cx, cy: v.cy, win: { ...S.win }, moved: false, a, b, id: e.pointerId };
+    if (mode === 'browse') setCursorFrom(v, a, b);
+    else if (mode === 'arch' && v.kind === 'ax') drag.arch = archDown(v, a, b);
+    else if (mode === 'erase' && ['ax', 'co', 'sa'].includes(v.kind)) eraseAt(v, a, b, true);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return; const p = pos(e); pts.set(e.pointerId, p);
+    if (pinch && pts.size === 2) { const [A, B] = [...pts.values()], d = Math.hypot(A[0] - B[0], A[1] - B[1]), c = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], z = N.clamp(pinch.z * d / Math.max(1, pinch.d), 0.05, 400); const [a0, b0] = [pinch.cx + (pinch.c[0] - v.w / 2) / pinch.z, pinch.cy + (pinch.c[1] - v.h / 2) / pinch.z]; v.z = z; v.cx = a0 - (c[0] - v.w / 2) / z; v.cy = b0 - (c[1] - v.h / 2) / z; v.autoFit = false; invalidate(v.id); return; }
+    if (!drag || drag.id !== e.pointerId) return; const dx = p[0] - drag.p0[0], dy = p[1] - drag.p0[1]; if (Math.hypot(dx, dy) > (e.pointerType === 'mouse' ? 4 : 9)) drag.moved = true;
+    const [a, b] = fromScreen(v, p[0], p[1]);
+    if (drag.mode === 'pan') { v.cx = drag.cx - dx / v.z; v.cy = drag.cy - dy / v.z; v.autoFit = false; invalidate(v.id); }
+    else if (drag.mode === 'window') { const span = Math.max(200, S.vol.max - S.vol.min); setWindow(drag.win.l - dy * span / 600, drag.win.w + dx * span / 600, null); }
+    else if (drag.mode === 'browse') setCursorFrom(v, a, b);
+    else if (drag.mode === 'arch' && drag.arch != null) archMove(drag.arch, a, b);
+    else if (drag.mode === 'erase' && ['ax', 'co', 'sa'].includes(v.kind)) eraseAt(v, a, b, false);
+  });
+  const up = (e) => {
+    if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); if (pts.size < 2) pinch = null;
+    if (!drag || drag.id !== e.pointerId) return; const d0 = drag; drag = null; const p = pos(e), [a, b] = fromScreen(v, p[0], p[1]);
+    if (e.type === 'pointercancel') return;
+    if (d0.mode === 'dist' || d0.mode === 'angle') { if (!d0.moved) measureTap(v, a, b); else if (d0.mode === 'dist') { S.draft = null; measureTap(v, d0.a, d0.b); measureTap(v, a, b); } }
+    else if (d0.mode === 'arch') { if (v.kind === 'ax') archUp(d0.arch, a, b, d0.moved); else if (!d0.moved) setCursorFrom(v, a, b); }
+    else if ((d0.mode === 'tooth' || d0.mode === 'not' || d0.mode === 'add') && !d0.moved) toothTap(v, a, b, d0.mode);
+    else if (d0.mode === 'erase') eraseDone();
+    else if (d0.mode === 'pan' && !d0.moved && (v.kind === 'pan')) setCursorFrom(v, a, b);
+  };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', (e) => {
+    if (!S.vol) return; e.preventDefault();
+    if (e.ctrlKey || e.metaKey) { const p = pos(e), [a, b] = fromScreen(v, p[0], p[1]), f = Math.exp(-e.deltaY * 0.0022); v.z = N.clamp(v.z * f, 0.05, 400); v.cx = a - (p[0] - v.w / 2) / v.z; v.cy = b - (p[1] - v.h / 2) / v.z; v.autoFit = false; invalidate(v.id); return; }
+    const st = Math.sign(e.deltaY) * (Math.abs(e.deltaY) > 150 ? 3 : 1);
+    if (['ax', 'co', 'sa'].includes(v.kind)) { S.cur[axisOf(v.kind)] -= st; crossChanged(); }
+    else if (S.arch.curve) { S.arch.s = N.clamp(S.arch.s + st * (v.kind === 'xs' ? S.arch.step : 1), 0, S.arch.curve.length); makeXs(); }
+  }, { passive: false });
+  cv.addEventListener('keydown', (e) => {
+    if (!S.vol) return; const k = e.key, st = k === 'PageUp' || k === 'ArrowUp' ? 1 : k === 'PageDown' || k === 'ArrowDown' ? -1 : 0; if (!st) return; e.preventDefault();
+    if (['ax', 'co', 'sa'].includes(v.kind)) { S.cur[axisOf(v.kind)] += st * (v.kind === 'ax' ? 1 : -1); crossChanged(); }
+  });
+}
+function setCursorFrom(v, a, b) {
+  const q = toVox(v, a, b); if (!q) return;
+  if (v.kind === 'pan' || v.kind === 'xs') { S.cur = q; if (v.kind === 'pan') { S.arch.s = N.clamp(a, 0, S.arch.curve.length); makeXs(); } }
+  else { const ax = axisOf(v.kind); for (let i = 0; i < 3; i++) if (i !== ax) S.cur[i] = q[i]; }
+  crossChanged();
+}
+
+// ───────────── the tool bar ─────────────
+const TOOLS = { browse: ['Point', 'Tap to move the cross-hair'], pan: ['Move', 'Drag to pan the view'], window: ['Window', 'Drag across for width, up and down for level'], dist: ['Distance', 'Tap two points'], angle: ['Angle', 'Tap three points: the angle is at the middle one'],
+  arch: ['Arch', 'Tap along the arch on the axial slice; drag a point to move it'], tooth: ['Pick tooth', 'Tap the donor tooth'], add: ['Tooth', 'Tap a part that should be tooth'], not: ['Not tooth', 'Tap where the tooth leaked into bone or a neighbour'], erase: ['Eraser', 'Drag over a bridge to cut it'] };
+function setTools() {
+  const id = stepId(), extra = id === 'pano' ? ['arch'] : id === 'tooth' ? (S.tooth.seg && !S.tooth.seg.error ? ['add', 'not', 'erase', 'tooth'] : ['tooth']) : [];
+  const list = ['browse', 'pan', 'window', 'dist', 'angle', ...extra]; if (!list.includes(S.tool)) S.tool = 'browse';
+  $('cbTool').innerHTML = list.map((t) => `<button type="button" data-v="${t}" title="${TOOLS[t][1]}"${t === S.tool ? ' class="on"' : ''}>${TOOLS[t][0]}</button>`).join('');
+  for (const v of Object.values(views)) v.cv.style.cursor = S.tool === 'pan' ? 'grab' : S.tool === 'window' ? 'ns-resize' : 'crosshair';
+}
+$('cbTool').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.tool = b.dataset.v; S.draft = null; setTools(); shell.hint(TOOLS[S.tool][1]); invalidate(); });
+$('cbClear').addEventListener('click', () => { S.measures = []; S.draft = null; invalidate(); syncUI(); });
+
+// ───────────── opening a scan ─────────────
+$('lFolder').addEventListener('click', () => $('lFolderIn').click());
+$('lFiles').addEventListener('click', () => $('lFilesIn').click());
+for (const id of ['lFolderIn', 'lFilesIn']) $(id).addEventListener('change', (e) => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) openFiles(fs); });
+$('lDemo').addEventListener('click', () => loadDemo());
+shell.view.addEventListener('drop', (e) => {                    // dropped files and folders (folders are walked through)
+  const items = [...((e.dataTransfer && e.dataTransfer.items) || [])].map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean), files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+  (async () => {
+    if (!items.length) return files.length && openFiles(files);
+    const out = [], walk = async (en) => { if (en.isFile) out.push(await new Promise((res, rej) => en.file(res, rej))); else if (en.isDirectory) { const rd = en.createReader(); for (;;) { const b = await new Promise((res, rej) => rd.readEntries(res, rej)); if (!b.length) break; for (const c of b) await walk(c); } } };
+    try { for (const en of items) await walk(en); } catch (_) { out.length = 0; out.push(...files); }
+    if (out.length) openFiles(out);
+  })();
+});
+function progress(f) { const p = $('lProg'); p.hidden = f == null; if (f != null) p.firstElementChild.style.width = `${Math.round(100 * N.clamp(f, 0, 1))}%`; }
+async function openFiles(files) {
+  if (S.busy) return; S.busy = true;
+  try {
+    await shell.busy('Reading the files…', async () => {
+      const list = [];
+      for (const f of files) { if (/\.zip$/i.test(f.name || '') || await D.looksLikeZip(f)) { try { list.push(...await D.zipEntries(f)); } catch (err) { shell.status(err.message, true); } } else list.push(f); }
+      const set = await D.scanSeries(list, (a, b) => { progress(a / b); shell.setBusyText(`Reading the files… ${a} of ${b}`); });
+      S.series = set.series; S.skipped = set.skipped; S.files = list.length; progress(null);
+      if (!set.series.length) throw new Error(`No CBCT or CT images were found in the ${list.length} file${list.length === 1 ? '' : 's'}.`);
+    });
+    const first = S.series.find((s) => !s.reason); syncSeries();
+    if (first) await loadSeries(first.id); else shell.status('This scan cannot be opened here: ' + S.series[0].reason, true);
+  } catch (err) { if (err && err.message) shell.status(err.message, true); }
+  finally { S.busy = false; progress(null); }
+}
+async function loadSeries(id) {
+  const s = S.series.find((x) => x.id === id); if (!s) return; S.seriesId = id; syncSeries();
+  let v;
+  try { v = await shell.busy('Opening the scan…', async () => D.loadVolume(s, (a, b) => { progress(a / b); shell.setBusyText(`Opening the scan… ${Math.round(100 * a / b)}%`); })); }
+  catch (err) { return; } finally { progress(null); }
+  S.demo = null; setVolume(v);
+}
+async function loadDemo() {
+  if (S.busy) return; S.busy = true;
+  try { const r = await shell.busy('Making the demo CBCT…', async () => { await N.sleep(30); return D.makePhantom({ voxel: 0.3 }); }); S.series = []; S.seriesId = null; S.skipped = 0; syncSeries(); S.demo = r.truth; setVolume(r.vol); shell.status('Demo CBCT: a made-up lower jaw'); }
+  finally { S.busy = false; }
+}
+function syncSeries() {
+  const el = $('lSeries');
+  if (!S.series.length) { el.innerHTML = ''; return; }
+  const head = S.series.length > 1 ? `<p class="note">${S.series.length} series found — the largest is opened. Choose another below.</p>` : '';
+  el.innerHTML = head + S.series.map((s) => `<button class="series${s.id === S.seriesId ? ' on' : ''}" type="button" data-id="${s.id}"${s.reason ? ' disabled' : ''} title="${s.reason ? 'Cannot be opened: ' + N.esc(s.reason) : 'Open this series'}"><b>${N.esc(s.modality || 'Scan')} · ${s.count} slice${s.count === 1 ? '' : 's'} of ${s.cols} × ${s.rows}</b><span>${N.esc(s.compression)}${s.date ? ' · ' + fmtDate(s.date) : ''}${s.reason ? ' — ' + N.esc(s.reason) : ''}</span></button>`).join('')
+    + (S.skipped ? `<p class="note">${S.skipped} file${S.skipped === 1 ? ' was' : 's were'} not images and passed over.</p>` : '');
+}
+$('lSeries').addEventListener('click', (e) => { const b = e.target.closest('.series'); if (b && !b.disabled && b.dataset.id !== S.seriesId) loadSeries(b.dataset.id); });
+const fmtDate = (d) => { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(d || ''); return m ? `${+m[3]} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1]} ${m[1]}` : ''; };
+function setVolume(v) {
+  S.vol = v; S.loads++; S.H = D.histogram(v); S.P = D.windowPresets(v, S.H);
+  S.cur = v.dims.map((n) => (n - 1) / 2); S.measures = []; S.draft = null;
+  S.arch = { ...S.arch, points: [], curve: null, ver: S.arch.ver + 1, s: 0 }; S.pano = null; S.xs = [];
+  S.surf.mesh = null; S.surf.info = null; S.tooth = { ...S.tooth, seeds: [], not: [], erase: [], roi: null, T: null, seg: null, hist: [], fitted: false }; S.rep.mesh = null; S.rep.info = null;
+  for (const id of Object.keys(bufs)) delete bufs[id];
+  const span = v.max - v.min;
+  for (const [k, rb] of [['level', RB.level], ['width', RB.width]]) { const inp = $(k === 'level' ? 'vLevel' : 'vWidth'); inp.min = k === 'level' ? v.min : 1; inp.max = k === 'level' ? v.max : Math.max(2, span * 1.5); }
+  $('tIso').min = v.min; $('tIso').max = v.max; $('dT').min = v.min; $('dT').max = v.max;
+  S.r3.iso = isoPreset('bone'); RB.iso.set(S.r3.iso);
+  grid.hidden = false; shell.setEmpty(false);
+  for (const vv of Object.values(views)) { vv.fitted = false; vv.autoFit = true; vv.offKey = ''; }
+  setWindow(S.P.bone.l, S.P.bone.w, 'bone');
+  build3D(); clear3DMeshes(); crossChanged(); applyLayout(); syncInfo(); setTools(); syncUI(); fit3D();
+  if (S.pending) applyPending();
+}
+function syncInfo() {
+  const v = S.vol; if (!v) { $('lInfo').innerHTML = ''; return; }
+  const ext = v.dims.map((n, a) => (n - 1) * v.spacing[a]), sp = v.spacing.map((s) => +s.toFixed(3));
+  $('lInfo').innerHTML = `<div class="sum"><h5>${S.demo ? 'Demo CBCT (made up)' : 'The scan'}<span class="okb${v.warnings.length ? ' warn' : ''}">${v.warnings.length ? 'check' : 'open'}</span></h5>
+    <div><span>Kind</span><b>${N.esc(v.modality || '—')}</b></div><div><span>Size</span><b>${v.dims.join(' × ')} voxels</b></div>
+    <div><span>Voxel size</span><b>${sp[0] === sp[1] && sp[1] === sp[2] ? sp[0] + ' mm' : sp.join(' × ') + ' mm'}</b></div><div><span>Covers</span><b>${ext.map((e) => e.toFixed(0)).join(' × ')} mm</b></div>
+    ${v.date ? `<div><span>Scan date</span><b>${fmtDate(v.date)}</b></div>` : ''}<div><span>Stored</span><b>${N.esc(v.compression || '')}</b></div><div><span>Memory</span><b>${(v.data.byteLength / 1048576).toFixed(0)} MB</b></div></div>
+    ${v.warnings.map((w) => `<p class="note warn">${N.esc(w)}</p>`).join('')}`;
+  shell.markDone('load', true);
+}
+
+// ───────────── 3D ─────────────
+let box3 = null, tex3 = null, ds3 = null;
+const r3objs = { surf: null, tooth: null, rep: null, planes: [], roi: null };
+const VSHADER = `out vec3 vO; out vec3 vD; uniform vec3 uCam; void main(){ vO = uCam; vD = position - uCam; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const FSHADER = `precision highp float; precision highp sampler3D;
+in vec3 vO; in vec3 vD; out vec4 col;
+uniform sampler3D uVol; uniform vec3 uSize; uniform float uLo; uniform float uHi; uniform float uIso; uniform int uMode; uniform float uStep; uniform vec3 uTexel;
+vec2 hitBox(vec3 o, vec3 d){ vec3 b0 = -uSize * 0.5, b1 = uSize * 0.5, inv = 1.0 / d, t0 = (b0 - o) * inv, t1 = (b1 - o) * inv, tn = min(t0, t1), tf = max(t0, t1); return vec2(max(max(tn.x, tn.y), tn.z), min(min(tf.x, tf.y), tf.z)); }
+float val(vec3 p){ return texture(uVol, p / uSize + 0.5).r; }
+void main(){
+  vec3 d = normalize(vD); vec2 b = hitBox(vO, d); if (b.x > b.y) discard; b.x = max(b.x, 0.0);
+  float t = b.x + uStep * fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);   // a jittered start hides the steps
+  if (uMode == 0) {
+    float m = 0.0; for (int i = 0; i < 4096; i++) { if (t > b.y) break; m = max(m, val(vO + d * t)); t += uStep; }
+    float g = clamp((m - uLo) / max(1e-4, uHi - uLo), 0.0, 1.0); if (g <= 0.002) discard; col = vec4(vec3(g), 1.0); return;
+  }
+  for (int i = 0; i < 4096; i++) {
+    if (t > b.y) break; vec3 p = vO + d * t;
+    if (val(p) >= uIso) {
+      float a = t - uStep, c = t; for (int k = 0; k < 6; k++) { float h = 0.5 * (a + c); if (val(vO + d * h) >= uIso) c = h; else a = h; }
+      p = vO + d * c; vec3 e = 1.5 * uTexel * uSize;
+      vec3 n = normalize(vec3(val(p - vec3(e.x, 0, 0)) - val(p + vec3(e.x, 0, 0)), val(p - vec3(0, e.y, 0)) - val(p + vec3(0, e.y, 0)), val(p - vec3(0, 0, e.z)) - val(p + vec3(0, 0, e.z))) + 1e-6);
+      float l = abs(dot(n, -d)); col = vec4(vec3(0.93, 0.89, 0.80) * (0.22 + 0.78 * l), 1.0); return;
+    }
+    t += uStep;
+  }
+  discard;
+}`;
+function build3D() {
+  if (box3) { viewer.remove(box3); box3.material.dispose(); } if (tex3) tex3.dispose();
+  const gl = viewer.renderer.getContext(), max3 = Math.min(512, gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) || 256);
+  ds3 = D.downsample(S.vol, { maxVoxels: 12e6, maxDim: max3, lo: Math.max(S.vol.min, S.H.pct(0.005)), hi: S.vol.max });
+  tex3 = new THREE.Data3DTexture(ds3.data, ...ds3.dims); tex3.format = THREE.RedFormat; tex3.type = THREE.UnsignedByteType; tex3.minFilter = tex3.magFilter = THREE.LinearFilter; tex3.unpackAlignment = 1; tex3.needsUpdate = true;
+  const size = new THREE.Vector3(...ds3.dims.map((n, a) => n * ds3.spacing[a]));
+  const mat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VSHADER, fragmentShader: FSHADER, side: THREE.BackSide, transparent: false,
+    uniforms: { uVol: { value: tex3 }, uSize: { value: size }, uLo: { value: 0 }, uHi: { value: 1 }, uIso: { value: 0.5 }, uMode: { value: 0 }, uStep: { value: Math.min(...ds3.spacing) * 0.6 }, uTexel: { value: new THREE.Vector3(...ds3.dims.map((n) => 1 / n)) }, uCam: { value: new THREE.Vector3() } } });
+  box3 = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), mat);
+  box3.position.set(...ds3.origin.map((o, a) => o + (ds3.dims[a] / 2 - 0.5) * ds3.spacing[a]));
+  box3.onBeforeRender = (r, sc, cam) => { mat.uniforms.uCam.value.copy(cam.position).sub(box3.position); };
+  viewer.add(box3); mipUniforms();
+}
+const norm3 = (v) => (v - ds3.lo) / Math.max(1, ds3.hi - ds3.lo);
+function mipUniforms() { if (!box3) return; const u = box3.material.uniforms; u.uLo.value = norm3(S.win.l - S.win.w / 2); u.uHi.value = norm3(S.win.l + S.win.w / 2); u.uIso.value = norm3(S.r3.iso); u.uMode.value = S.r3.mode === 'iso' ? 1 : 0; viewer.invalidate(); }
+function fit3D(obj) { const b = new THREE.Box3(); if (obj) b.setFromObject(obj); else if (box3) b.setFromObject(box3); if (!b.isEmpty()) viewer.fit(b, { dir: [0.35, -0.9, 0.45] }); }
+function planes3D() {
+  for (const l of r3objs.planes) l.dispose(); r3objs.planes = []; if (!S.vol) return;
+  const V = S.vol, [nx, ny, nz] = V.dims, w = (i, j, k) => new THREE.Vector3(...D.worldOf(V, i, j, k)), c = S.cur.map(Math.round);
+  const sets = [[COL.ax, [w(0, 0, c[2]), w(nx - 1, 0, c[2]), w(nx - 1, ny - 1, c[2]), w(0, ny - 1, c[2])]], [COL.co, [w(0, c[1], 0), w(nx - 1, c[1], 0), w(nx - 1, c[1], nz - 1), w(0, c[1], nz - 1)]], [COL.sa, [w(c[0], 0, 0), w(c[0], ny - 1, 0), w(c[0], ny - 1, nz - 1), w(c[0], 0, nz - 1)]]];
+  if (stepId() !== 'tooth' && stepId() !== 'replica') for (const [col, pts] of sets) r3objs.planes.push(viewer.line(pts, { color: new THREE.Color(col).getHex(), width: 1.5, closed: true }));
+  viewer.invalidate();
+}
+function meshObj(mesh, colour, opacity = 1) { const g = N.toGeometry(mesh); return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide, transparent: opacity < 1, opacity })); }
+function clear3DMeshes() { for (const k of ['surf', 'tooth', 'rep', 'roi']) if (r3objs[k]) { viewer.remove(r3objs[k]); r3objs[k] = null; } }
+function show3D() {
+  const id = stepId(); if (!box3) return;
+  const showVol = !((id === 'd3' && S.surf.mesh && S.r3.showSurf) || id === 'tooth' || id === 'replica');
+  box3.visible = showVol;
+  if (r3objs.surf) r3objs.surf.visible = id === 'd3' && S.r3.showSurf;
+  if (r3objs.tooth) r3objs.tooth.visible = id === 'tooth' || (id === 'replica' && !r3objs.rep);
+  if (r3objs.rep) r3objs.rep.visible = id === 'replica';
+  if (r3objs.roi) r3objs.roi.visible = id === 'tooth';
+  planes3D(); viewer.invalidate();
+}
+const isoPreset = (k) => { const P = S.P; return k === 'bone' ? Math.round(P.bone.l - P.bone.w * 0.1) : Math.round(P.teeth.l - P.teeth.w * 0.05); };
+
+// the surface model
+async function makeSurface() {
+  if (!S.vol) return; const V = S.vol, ext = V.dims.map((n, a) => (n - 1) * V.spacing[a]), T = S.r3.iso;
+  let h = Math.max(S.surf.detail, Math.min(...V.spacing)); const cells = (hh) => ext.reduce((p, e) => p * (e / hh + 1), 1); while (cells(h) > 12e6) h *= 1.1;
+  const t0 = performance.now();
+  const r = await shell.busy('Making the surface…', async () => {
+    await N.sleep(20); const f = D.surfaceField(V, T, h); shell.setBusyText('Building the triangles…'); await N.sleep(0);
+    let m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 30 }); if (!m.indices.length) throw new Error('Nothing at this threshold: lower it.');
+    if (S.surf.largest) m = N.splitParts(m)[0];
+    return { mesh: m, h };
+  });
+  S.surf.mesh = r.mesh; S.surf.T = T; const b = N.meshBounds(r.mesh);
+  S.surf.info = { tris: r.mesh.indices.length / 3, closed: N.isWatertight(r.mesh), volume: N.meshVolume(r.mesh), h: r.h, size: b.size, seconds: (performance.now() - t0) / 1000, T };
+  if (r3objs.surf) viewer.remove(r3objs.surf); r3objs.surf = meshObj(r.mesh, 0xe9dcc6); r3objs.surf.userData.noFit = true; viewer.add(r3objs.surf); S.r3.showSurf = true;
+  show3D(); syncUI(); shell.status(`Surface made: ${S.surf.info.tris.toLocaleString('en-GB')} triangles`);
+}
+
+// ───────────── panoramic ─────────────
+const archKey = () => N.crc32(new TextEncoder().encode(JSON.stringify(S.arch.points.map((p) => p.map((v) => +v.toFixed(3)))))).toString(36);   // (measurements on the panoramic stay with the curve they were made on, also in a reopened case)
+function archChanged(rebuild = true) {
+  const A = S.arch; A.ver++; A.curve = A.points.length >= 2 ? D.archCurve(A.points) : null;
+  if (A.curve) { A.s = A.s > 0 && A.s < A.curve.length ? A.s : A.curve.length / 2; } else { S.pano = null; S.xs = []; }
+  if (rebuild) schedulePano(); invalidate(); syncUI();
+}
+let panoT = 0;
+function schedulePano() { clearTimeout(panoT); panoT = setTimeout(makePano, 60); }
+function makePano() {
+  const A = S.arch; if (!A.curve || !S.vol) { S.pano = null; S.xs = []; invalidate(); return; }
+  const p = D.panorama(S.vol, A.curve, { slab: A.slab, mode: A.mode }); p.key = `${archKey()}|${A.slab}|${A.mode}`; S.pano = p;
+  views.pan.fitted = false; makeXs(); invalidate();
+}
+function makeXs() {
+  const A = S.arch; if (!A.curve || !S.vol) { S.xs = []; return; }
+  ensureXs(A.count); const half = (A.count - 1) / 2;
+  S.xs = []; for (let m = 0; m < A.count; m++) { const s = N.clamp(A.s + (m - half) * A.step, 0, A.curve.length), X = D.crossSection(S.vol, A.curve, s, { width: A.width }); X.key = `${archKey()}|${s.toFixed(3)}|${A.width}`; S.xs.push(X); }
+  for (const v of Object.values(views)) if (v.kind === 'xs' && !v.keepZoom) v.fitted = false;
+  invalidate(); syncPanoInfo();
+}
+const archPt = (v, a, b) => { const q = toVox(v, a, b); return [S.vol.origin[0] + q[0] * S.vol.spacing[0], S.vol.origin[1] + q[1] * S.vol.spacing[1]]; };
+function archDown(v, a, b) {
+  const P = S.arch.points, [X, Y] = toScreen(v, a, b); let best = -1, bd = 14;
+  P.forEach((p, i) => { const q = w2v([p[0], p[1], 0]), [pa, pb] = fromVox(v, q[0], q[1], 0), [px, py] = toScreen(v, pa, pb), d = Math.hypot(px - X, py - Y); if (d < bd) { bd = d; best = i; } });
+  return best >= 0 ? best : null;
+}
+function archMove(i, a, b) { S.arch.points[i] = archPt(views.ax, a, b); archChanged(); }
+function archUp(i, a, b, moved) {
+  if (i != null) { if (moved) archChanged(); return; }
+  if (moved) return; const p = archPt(views.ax, a, b), P = S.arch.points;
+  if (P.length < 2) P.push(p); else {                              // insert where it lengthens the line least (so a point can go between two others)
+    let best = P.length, bd = Infinity; const L = (u, w) => Math.hypot(u[0] - w[0], u[1] - w[1]);
+    for (let k = 0; k <= P.length; k++) { const d = k === 0 ? L(p, P[0]) : k === P.length ? L(P[k - 1], p) : L(P[k - 1], p) + L(p, P[k]) - L(P[k - 1], P[k]); if (d < bd - 1e-9) { bd = d; best = k; } }
+    P.splice(best, 0, p);
+  }
+  archChanged();
+}
+async function proposeArch() {
+  if (!S.vol) return; const r = await shell.busy('Looking for the arch…', async () => { await N.sleep(20); return D.proposeArch(S.vol, S.H); });
+  if (!r) return shell.status('No arch was found: tap along it on the axial slice instead.', true);
+  S.arch.points = r.points; S.cur[2] = N.clamp((r.z - S.vol.origin[2]) / S.vol.spacing[2], 0, S.vol.dims[2] - 1); S.arch.s = 0; archChanged(); crossChanged(); shell.status(`Arch proposed (${r.points.length} points): check it and drag any point that is off`);
+}
+function syncPanoInfo() {
+  const A = S.arch; $('pInfo').innerHTML = A.curve ? `<div class="sum"><h5>Arch curve<span class="okb">${A.points.length} points</span></h5><div><span>Length</span><b>${mm(A.curve.length)}</b></div><div><span>Cross-sections at</span><b>${S.xs.map((x) => x.s.toFixed(1)).join(', ')} mm</b></div></div>` : '';
+  shell.markDone('pano', !!A.curve);
+}
+
+// ───────────── the donor tooth ─────────────
+const T = () => S.tooth;
+function toothSnapshot() { const t = T(); return JSON.stringify({ seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T }); }
+function pushHist() { const t = T(); t.hist.push(toothSnapshot()); if (t.hist.length > 60) t.hist.shift(); }
+function defaultT(p) {
+  const V = S.vol, P = S.P, lim = (P.bone.l + P.soft.l) / 2, R = 2, q = w2v(p), vals = [];
+  for (let k = Math.round(q[2] - R / V.spacing[2]); k <= Math.round(q[2] + R / V.spacing[2]); k++) for (let j = Math.round(q[1] - R / V.spacing[1]); j <= Math.round(q[1] + R / V.spacing[1]); j++) for (let i = Math.round(q[0] - R / V.spacing[0]); i <= Math.round(q[0] + R / V.spacing[0]); i++) {
+    if (i < 0 || j < 0 || k < 0 || i >= V.dims[0] || j >= V.dims[1] || k >= V.dims[2]) continue; const v = V.data[i + V.dims[0] * (j + V.dims[1] * k)]; if (v > lim) vals.push(v);
+  }
+  vals.sort((a, b) => a - b); const ref = vals.length ? vals[vals.length >> 1] : P.teeth.l;
+  return Math.round(P.soft.l + 0.55 * (ref - P.soft.l));
+}
+function toothTap(v, a, b, mode) {
+  if (!['ax', 'co', 'sa'].includes(v.kind)) return; const q = toVox(v, a, b), p = v2w(q), t = T();
+  if (mode === 'tooth' || !t.seg || t.seg.error) {
+    t.seeds = [p]; t.not = []; t.erase = []; t.hist = []; t.fitted = false; t.framed = false; t.T = defaultT(p); RB.dT.set(t.T); RB.dR.set(7); RB.dUp.set(20); RB.dDown.set(20);   // a new tooth: a generous region first, then fitted round what is found
+    t.roi = { shape: SEGV.shape, c: [p[0], p[1]], r: RB.dR.get(), z0: p[2] - RB.dDown.get(), z1: p[2] + RB.dUp.get() };
+    S.cur = q.slice(); crossChanged();
+  } else { pushHist(); (mode === 'not' ? t.not : t.seeds).push(p); }
+  segment();
+}
+function eraseAt(v, a, b, start) { const q = toVox(v, a, b), p = v2w(q), t = T(); if (start) pushHist(); const last = t.erase[t.erase.length - 1]; if (!start && last && Math.hypot(p[0] - last.p[0], p[1] - last.p[1], p[2] - last.p[2]) < t.brush * 0.4) return; t.erase.push({ p, r: t.brush }); invalidate(); }
+function eraseDone() { segment(); }
+let segBusy = false, segAgain = false;
+async function segment(o = {}) {
+  const t = T(); if (!t.seeds.length || !t.roi) return;
+  if (segBusy) { segAgain = true; return; } segBusy = true;
+  try {
+    const run = () => D.segmentTooth(S.vol, { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T });
+    let sg = run();
+    if (!sg.error && !t.fitted && o.fit !== false) {                 // first time: fit the region round what was found (2 mm clear all round), then again
+      t.fitted = true; const c = [(sg.lo[0] + sg.hi[0]) / 2, (sg.lo[1] + sg.hi[1]) / 2], r = Math.max(sg.hi[0] - c[0], c[0] - sg.lo[0], sg.hi[1] - c[1], c[1] - sg.lo[1]) + 2;
+      t.roi = { ...t.roi, c, r: N.clamp(Math.round(r * 4) / 4, 3, 12), z0: sg.lo[2] - 2, z1: sg.hi[2] + 2 }; syncRoiSliders(); sg = run();
+    }
+    t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null;
+    if (!sg.error) { const f = D.replicaField(S.vol, sg, { smooth: t.smooth }); const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 2 }); D.taubin(m, 2); t.preview = m; }
+    if (r3objs.tooth) viewer.remove(r3objs.tooth); r3objs.tooth = null; if (r3objs.rep) { viewer.remove(r3objs.rep); r3objs.rep = null; }
+    if (t.preview) { r3objs.tooth = meshObj(t.preview, 0x5eead4); viewer.add(r3objs.tooth); if (o.frame !== false && !t.framed) { t.framed = true; fit3D(r3objs.tooth); } }
+    roi3D();
+  } finally { segBusy = false; }
+  if (segAgain) { segAgain = false; return segment(o); }
+  if (S.tool === 'tooth' && T().seg && !T().seg.error) S.tool = 'browse';
+  setTools(); show3D(); invalidate(); syncUI();
+}
+function roi3D() {
+  if (r3objs.roi) { viewer.remove(r3objs.roi); r3objs.roi = null; } const R = T().roi; if (!R) return;
+  const h = Math.abs(R.z1 - R.z0), g = R.shape === 'box' ? new THREE.BoxGeometry(2 * R.r, 2 * R.r, h) : new THREE.CylinderGeometry(R.r, R.r, h, 40, 1, true).rotateX(Math.PI / 2);
+  r3objs.roi = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20), new THREE.LineBasicMaterial({ color: COL.roi, transparent: true, opacity: 0.6 })); r3objs.roi.position.set(R.c[0], R.c[1], (R.z0 + R.z1) / 2); r3objs.roi.userData.noFit = true; viewer.add(r3objs.roi);
+}
+function syncRoiSliders() { const R = T().roi, s = T().seeds[0]; if (!R || !s) return; RB.dR.set(R.r); RB.dUp.set(N.clamp(R.z1 - s[2], 2, 30)); RB.dDown.set(N.clamp(s[2] - R.z0, 2, 30)); SEGV.setShape(R.shape); }
+function roiFromSliders() { const t = T(), s = t.seeds[0]; if (!t.roi || !s) return; pushHist(); t.roi = { ...t.roi, shape: SEGV.shape, r: RB.dR.get(), z0: s[2] - RB.dDown.get(), z1: s[2] + RB.dUp.get() }; t.fitted = true; segment(); }
+
+// the replica
+async function makeReplica() {
+  const t = T(); if (!t.seg || t.seg.error) return shell.status('Pick the donor tooth first (Donor tooth step)', true);
+  const R = S.rep, t0 = performance.now();
+  const mesh = await shell.busy('Making the replica…', async () => {
+    await N.sleep(20); const f = D.replicaField(S.vol, t.seg, { smooth: t.smooth, handle: R.handle ? { r: R.hd / 2 - R.pdl, length: R.hl - R.pdl } : null });
+    const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 5 }); if (!m.indices.length) throw new Error('Nothing to make: check the tooth on the Donor tooth step.');
+    D.taubin(m, 4); if (R.pdl > 0) D.offsetMesh(m, R.pdl); return m;
+  });
+  const sg = t.seg, b = N.meshBounds(mesh), parts = N.splitParts(mesh).length;
+  R.mesh = mesh; R.info = { volume: N.meshVolume(mesh), area: N.meshArea(mesh), tris: mesh.indices.length / 3, closed: N.isWatertight(mesh), parts, length: sg.length + (R.handle ? R.hl : 0), toothLength: sg.length, pdl: R.pdl, handle: R.handle, seconds: (performance.now() - t0) / 1000, size: b.size };
+  if (r3objs.rep) viewer.remove(r3objs.rep); r3objs.rep = meshObj(mesh, 0xf1e7d0); viewer.add(r3objs.rep); fit3D(r3objs.rep);
+  show3D(); syncUI(); shell.status(`Replica made: ${R.info.volume.toFixed(0)} mm³, ${R.info.closed ? 'closed' : 'not closed'}`);
+}
+async function download(name, mesh, header) { const r = await N.saveFile(name, N.stlBinary(mesh, null, header)); shell.status(r.message, !r.ok && r.code !== 'declined'); }
+
+// ───────────── controls ─────────────
+const RB = {
+  level: N.rangeBind('vLevel', (v, done) => { if (S.vol) setWindow(v, S.win.w, null); }, { fmt: (v) => String(Math.round(v)) }),
+  width: N.rangeBind('vWidth', (v) => { if (S.vol) setWindow(S.win.l, v, null); }, { fmt: (v) => String(Math.round(v)) }),
+  iso: N.rangeBind('tIso', (v) => { S.r3.iso = v; mipUniforms(); }, { fmt: (v) => String(Math.round(v)) }),
+  slab: N.rangeBind('pSlab', (v, done) => { S.arch.slab = v; if (done) schedulePano(); }, { fmt: (v) => mm(v) }),
+  step: N.rangeBind('pStep', (v, done) => { S.arch.step = v; if (done) makeXs(); }, { fmt: (v) => mm(v) }),
+  width2: N.rangeBind('pWidth', (v, done) => { S.arch.width = v; if (done) makeXs(); }, { fmt: (v) => mm(v, 0) }),
+  dR: N.rangeBind('dR', (v, done) => { if (done) roiFromSliders(); }, { fmt: (v) => mm(v) }),
+  dUp: N.rangeBind('dUp', (v, done) => { if (done) roiFromSliders(); }, { fmt: (v) => mm(v) }),
+  dDown: N.rangeBind('dDown', (v, done) => { if (done) roiFromSliders(); }, { fmt: (v) => mm(v) }),
+  dT: N.rangeBind('dT', (v, done) => { if (done && T().seeds.length) { pushHist(); T().T = Math.round(v); segment(); } }, { fmt: (v) => String(Math.round(v)) }),
+  dSmooth: N.rangeBind('dSmooth', (v, done) => { T().smooth = v; if (done && T().seg) segment({ frame: false }); }, { fmt: (v) => mm(v, 2) }),
+  dBrush: N.rangeBind('dBrush', (v) => { T().brush = v; }, { fmt: (v) => mm(v) }),
+  rPdl: N.rangeBind('rPdl', (v, done) => { S.rep.pdl = v; if (done && S.rep.mesh) makeReplica(); }, { fmt: (v) => mm(v, 2) }),
+  rHd: N.rangeBind('rHd', (v, done) => { S.rep.hd = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v) }),
+  rHl: N.rangeBind('rHl', (v, done) => { S.rep.hl = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v, 0) }),
+};
+const SEG = {
+  preset: N.segBind($('vPreset'), (v) => { if (S.vol) setWindow(S.P[v].l, S.P[v].w, v); }),
+  mode: N.segBind($('tMode'), (v) => { S.r3.mode = v; S.r3.showSurf = false; mipUniforms(); show3D(); syncUI(); }, 'mip'),
+  detail: N.segBind($('tDetail'), (v) => { S.surf.detail = +v; }, '0.5'),
+  pmode: N.segBind($('pMode'), (v) => { S.arch.mode = v; schedulePano(); }, 'mean'),
+  pcount: N.segBind($('pCount'), (v) => { S.arch.count = +v; makeXs(); }, '3'),
+};
+const SEGV = { shape: 'cyl', setShape: null };
+SEGV.setShape = N.segBind($('dShape'), (v) => { SEGV.shape = v; if (T().roi) roiFromSliders(); }, 'cyl');
+$('vFit').addEventListener('click', () => { for (const v of Object.values(views)) { v.fitted = false; v.autoFit = true; } invalidate(); });
+$('vCentre').addEventListener('click', () => { if (S.vol) { S.cur = S.vol.dims.map((n) => (n - 1) / 2); crossChanged(); } });
+$('tBone').addEventListener('click', () => { if (!S.vol) return; S.r3.iso = isoPreset('bone'); RB.iso.set(S.r3.iso); S.r3.mode = 'iso'; SEG.mode('iso'); S.r3.showSurf = false; mipUniforms(); show3D(); });
+$('tTeeth').addEventListener('click', () => { if (!S.vol) return; S.r3.iso = isoPreset('teeth'); RB.iso.set(S.r3.iso); S.r3.mode = 'iso'; SEG.mode('iso'); S.r3.showSurf = false; mipUniforms(); show3D(); });
+$('tLargest').addEventListener('change', (e) => { S.surf.largest = e.target.checked; });
+$('tShow').addEventListener('change', (e) => { S.r3.showSurf = e.target.checked; show3D(); });
+$('tMake').addEventListener('click', () => makeSurface().catch(() => {}));
+$('tStl').addEventListener('click', () => { if (!S.surf.mesh) return shell.status('Make the surface first', true); download(`cbct-surface-${Math.round(S.surf.T)}.stl`, S.surf.mesh, 'Notile CBCT surface, LPS mm'); });
+$('pPropose').addEventListener('click', () => proposeArch().catch(() => {}));
+$('pUndo').addEventListener('click', () => { S.arch.points.pop(); archChanged(); });
+$('pClear').addEventListener('click', () => { S.arch.points = []; archChanged(); });
+$('dFit').addEventListener('click', () => { const t = T(); if (!t.seg || t.seg.error) return; pushHist(); t.fitted = false; segment(); });
+$('dUndo').addEventListener('click', () => { const t = T(); const h = t.hist.pop(); if (!h) return; Object.assign(t, JSON.parse(h)); t.fitted = true; syncRoiSliders(); RB.dT.set(t.T); segment(); });
+$('dClear').addEventListener('click', () => { const t = T(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
+$('rHandle').addEventListener('change', (e) => { S.rep.handle = e.target.checked; syncUI(); if (S.rep.mesh) makeReplica(); });
+$('rFdi').addEventListener('change', (e) => { S.rep.fdi = /^[1-4][1-8]$/.test(e.target.value) ? e.target.value : ''; });
+$('rMake').addEventListener('click', () => makeReplica().catch(() => {}));
+$('rStl').addEventListener('click', () => { if (!S.rep.mesh) return shell.status('Make the replica first', true); download(`tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}.stl`, S.rep.mesh, `Notile CBCT tooth replica${S.rep.fdi ? ' ' + S.rep.fdi : ''}, LPS mm`); });
+
+// ───────────── what is shown on each step ─────────────
+function syncUI() {
+  const has = !!S.vol, id = stepId();
+  for (const b of ['vPreset', 'tMode', 'tDetail', 'pMode', 'pCount', 'dShape']) for (const x of $(b).querySelectorAll('button')) x.disabled = !has;
+  for (const b of ['tMake', 'tBone', 'tTeeth', 'pPropose', 'pUndo', 'pClear', 'dFit', 'dUndo', 'dClear', 'rMake', 'vFit', 'vCentre']) $(b).disabled = !has;
+  $('tStl').disabled = !S.surf.mesh; $('rStl').disabled = !S.rep.mesh; $('tShowRow').hidden = !S.surf.mesh; $('tShow').checked = !!S.r3.showSurf;
+  // the view step's read-out
+  if (has) { const V = S.vol; $('vInfo').innerHTML = `<div class="sum"><h5>Window</h5><div><span>Level / width</span><b>${S.win.l} / ${S.win.w}</b></div><div><span>Measurements</span><b>${S.measures.length}</b></div></div>`; }
+  // the surface
+  const si = S.surf.info;
+  $('tOut').innerHTML = si ? `<div class="sum"><h5>Surface at ${Math.round(si.T)}<span class="okb${si.closed ? '' : ' bad'}">${si.closed ? 'closed' : 'not closed'}</span></h5><div><span>Triangles</span><b>${si.tris.toLocaleString('en-GB')}</b></div><div><span>Grid</span><b>${mm(si.h, 2)}</b></div><div><span>Size</span><b>${si.size.map((v) => v.toFixed(0)).join(' × ')} mm</b></div><div><span>Made in</span><b>${si.seconds.toFixed(1)} s</b></div></div>` : '';
+  shell.markDone('d3', !!S.surf.mesh);
+  // the tooth
+  const t = T(), sg = t.seg;
+  $('dLead').textContent = !t.seeds.length ? 'Tap the donor tooth in a slice, near the middle of its crown.' : sg && sg.error ? sg.error : 'Check the tooth (teal) in all three slices. Fix any leak with the tools in the bar above the slices.';
+  let out = '';
+  if (sg && !sg.error) {
+    out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 ? ' warn' : ''}">${sg.touch > 20 ? 'reaches the edge' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div><div><span>Threshold</span><b>${t.T}</b></div><div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
+    if (sg.touch > 20) out += '<p class="note warn">The tooth touches the edge of the region: widen it or move it, or the crown or a root may be cut off.</p>';
+  }
+  $('dOut').innerHTML = out; shell.markDone('tooth', !!(sg && !sg.error));
+  // the replica
+  const ri = S.rep.info; $('rHdRow').hidden = $('rHlRow').hidden = !S.rep.handle;
+  $('rOut').innerHTML = ri ? `<div class="sum"><h5>Replica<span class="okb${ri.closed && ri.parts === 1 ? '' : ' bad'}">${ri.closed ? (ri.parts === 1 ? 'closed, one piece' : ri.parts + ' pieces') : 'not closed'}</span></h5><div><span>Volume</span><b>${ri.volume.toFixed(0)} mm³</b></div><div><span>Tooth length</span><b>${mm(ri.toothLength)}</b></div><div><span>Enlarged by</span><b>${mm(ri.pdl, 2)}</b></div><div><span>Handle</span><b>${ri.handle ? 'yes' : 'no'}</b></div><div><span>Triangles</span><b>${ri.tris.toLocaleString('en-GB')}</b></div></div>` : '';
+  shell.markDone('replica', !!S.rep.mesh); shell.markDone('view', has);
+}
+shell.onStepChange(() => {
+  const id = stepId(); S.draft = null;
+  S.layout = id === 'pano' ? 'pano' : id === 'd3' ? 'big3d' : 'mpr'; S.max = null;
+  if (id === 'pano') { S.tool = 'arch'; } else if (id === 'tooth') { S.tool = T().seg && !T().seg.error ? 'browse' : 'tooth'; } else if (S.tool === 'arch' || ['tooth', 'add', 'not', 'erase'].includes(S.tool)) S.tool = 'browse';
+  setTools(); applyLayout(); show3D(); syncUI();
+  shell.hint(S.vol ? TOOLS[S.tool][1] : '');
+  if (id === 'pano' && S.vol && !S.pano && S.arch.curve) makePano();
+});
+
+// ───────────── inside Scan Card: the case ─────────────
+// The volume itself is not kept in the case (it can be hundreds of megabytes, and it is the patient's scan): the case keeps
+// what was done on it — the arch, the measurements, the tooth's taps and region, the settings — with a fingerprint of the
+// volume (its size, voxel size and a checksum of some of its values, nothing identifying), and the replica as a mesh. When the
+// same scan is opened again, the work comes back.
+function fingerprint(v = S.vol) { if (!v) return null; const n = v.data.length, k = Math.max(1, Math.floor(n / 4096)), s = new Int16Array(Math.ceil(n / k)); for (let i = 0, q = 0; i < n; i += k) s[q++] = v.data[i]; return `${v.dims.join('x')}|${v.spacing.map((x) => x.toFixed(4)).join(',')}|${N.crc32(new Uint8Array(s.buffer))}`; }
+function extendCase(c) {
+  c.remove('cbct-replica');
+  const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
+  const t = T();
+  c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+  if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
+}
+function readCase(c) {
+  const d = c.data && c.data.cbct; if (!d) return;
+  S.pending = d; const it = c.get('cbct-replica');
+  if (it && !S.rep.mesh && (!S.vol || d.volume === fingerprint())) { S.rep.mesh = it.mesh; S.rep.info = { volume: N.meshVolume(it.mesh), area: N.meshArea(it.mesh), tris: it.mesh.indices.length / 3, closed: N.isWatertight(it.mesh), parts: 1, toothLength: 0, pdl: d.replica ? d.replica.pdl : 0, handle: !!(d.replica && d.replica.handle) }; }
+  if (S.vol) applyPending(); syncUI();
+}
+function applyPending() {
+  const d = S.pending; if (!d || !S.vol) return; S.pending = null;
+  if (d.volume !== fingerprint()) { shell.status('The saved CBCT work belongs to a different scan, so it was not applied', true); return; }
+  if (d.window) setWindow(d.window.l, d.window.w, null);
+  if (Array.isArray(d.arch) && d.arch.length >= 2) { S.arch.points = d.arch; S.arch.slab = d.slab ?? S.arch.slab; RB.slab.set(S.arch.slab); archChanged(); }
+  if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
+  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); segment({ fit: false }); }
+  if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
+  invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
+}
+if (N.EMBED) setTimeout(() => {
+  try {
+    N.HUB.register(window, {
+      app: 'CBCT Card',
+      importCase: async (blob) => { try { readCase(await N.DentalCase.fromBlob(blob)); } catch (e) { console.error(e); } },   // the hub's scans are not needed here: only this tool's own saved work is read
+      exportPart: async () => { const c = new N.DentalCase(); extendCase(c); return c.toBlob('CBCT Card', { compress: false }); },
+      clear: () => {}, hasScans: () => false,
+      step: () => stepId(), goto: (id) => { if (shell.steps.some((s) => s.id === id)) shell.goto(id); },
+    });
+  } catch (e) { console.error(e); }
+}, 0);
+
+setTools(); syncUI(); shell.goto(0);
+window.APP = { N, D, THREE, shell, viewer, S, views, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
+</script>
+</body>
+</html>

@@ -71,6 +71,7 @@ const shell = N.createShell({
     { id: 'teeth', title: 'Teeth', html: `
       <p class="lead" id="tLead"></p>
       <div class="count" id="tCount"></div>
+      <div class="row" id="tAutoRow"><label>Tap for me</label><select id="tFrom" title="First tooth of the range"></select><span>to</span><select id="tTo" title="Last tooth of the range"></select><button class="btn" id="tAuto" type="button" title="Find and number the teeth on the scan, then tap each tooth in this range for you. Check the taps; tap a number on the scan to correct it">Tap them</button></div>
       <div class="btns"><button class="btn" id="tUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="tClear" type="button" title="Start marking again">Start again</button><button class="btn" id="tPrep" type="button" title="Use the tooth and margin already marked on the Prep check tab" hidden>Use Prep check’s margin</button></div>
       <p class="tip" id="tTip"></p>` },
     { id: 'design', title: 'Design', html: `
@@ -109,7 +110,7 @@ const scans = N.createScanSet({
     c.data.shell = { version: 1, jaw, mode: P.mode, self: S.self, gap: P.gap, wall: P.wall, thick: P.thick, mgap: P.mgap, reach: P.reach, height: P.height, holes: P.holes, holeD: P.holeD, space: P.space, sreach: P.sreach, send: P.send, sheight: P.sheight, seed: P.seed, loop: P.loop, taps: P.taps, info: B ? B.info : null };
   },
   readCase: (c) => {
-    S = mkS(); B = null; const d = c.data.shell;
+    S = mkS(); B = null; AUTO.hist = []; AUTO.group = null; const d = c.data.shell;
     PREP = c.data.prep && c.data.prep.seed && c.data.prep.loop && c.data.prep.loop.length >= 3 ? c.data.prep : null;
     if (d) Object.assign(P, { jaw: d.jaw ?? P.jaw, mode: MODES[d.mode] ? d.mode : 'crown', gap: d.gap ?? P.gap, wall: d.wall ?? P.wall, thick: d.thick ?? P.thick, mgap: d.mgap ?? P.mgap, reach: d.reach ?? P.reach, height: d.height ?? P.height, holes: d.holes ?? P.holes, holeD: d.holeD ?? P.holeD, space: d.space ?? P.space, sreach: d.sreach ?? P.sreach, send: d.send ?? P.send, sheight: d.sheight ?? P.sheight, seed: d.seed || null, loop: d.loop || [], taps: d.taps || [] });
     S.self = !!(d && d.self);
@@ -408,13 +409,56 @@ const tapTool = {
   cursor: 'crosshair', onDown: () => false,
   onClick: (i) => {
     if (i.button !== 0 || !pickJaw()) return; const h = i.pick([scans[P.jaw].object]); if (!h) return; const p = toFile(h.point);
-    if (TAPS(P.mode)) P.taps.push(p); else if (!P.seed) P.seed = p; else P.loop.push(p);
+    if (TAPS(P.mode)) { P.taps.push(p); AUTO.hist.push(1); AUTO.group = null; } else if (!P.seed) P.seed = p; else P.loop.push(p);
     B = null; scans.touch(); syncUI(); refreshView();
   },
   onMove: () => {}, onUp: () => {},
 };
-$('tUndo').addEventListener('click', () => { if (TAPS(P.mode)) P.taps.pop(); else if (P.loop.length) P.loop.pop(); else P.seed = null; B = null; syncUI(); refreshView(); });
-$('tClear').addEventListener('click', () => { if (TAPS(P.mode)) P.taps = []; else { P.seed = null; P.loop = []; } B = null; syncUI(); refreshView(); });
+$('tUndo').addEventListener('click', () => { if (TAPS(P.mode)) { const n = Math.max(1, AUTO.hist.pop() || 1); P.taps.splice(Math.max(0, P.taps.length - n)); AUTO.group = null; } else if (P.loop.length) P.loop.pop(); else P.seed = null; B = null; syncUI(); refreshView(); });
+$('tClear').addEventListener('click', () => { if (TAPS(P.mode)) { P.taps = []; AUTO.hist = []; AUTO.group = null; } else { P.seed = null; P.loop = []; } B = null; syncUI(); refreshView(); });
+
+// ───────────── tapping the teeth automatically (N.findTeeth): the user picks a range, the taps land as if tapped by hand ─────────────
+// AUTO.ft: { key, jaw, base (findTeeth's result), res (with the user's corrections), pins }; AUTO.hist: how many taps each action added
+// (so Undo takes back a whole automatic group); AUTO.group: the last automatic group, while it is the last thing done
+const AUTO = { ft: null, hist: [], group: null, range: { upper: [13, 23], lower: [33, 43] } };
+const toothNums = N.toothLabels(viewer, { onChoose: ({ tooth, fdi }) => renumber(tooth, fdi) });
+function detectTeeth() {
+  const jaw = pickJaw(), key = mainKey(); if (AUTO.ft && AUTO.ft.key === key) return AUTO.ft;
+  const base = N.findTeeth(scans.framed(jaw), { jaw }); AUTO.ft = { key, jaw, base, res: base, pins: [] }; return AUTO.ft;
+}
+function rangeTeeth(res, jaw) { const SEQ = N.FDI_ORDER[jaw], [a, b] = AUTO.range[jaw], i0 = Math.min(SEQ.indexOf(a), SEQ.indexOf(b)), i1 = Math.max(SEQ.indexOf(a), SEQ.indexOf(b)), want = SEQ.slice(i0, i1 + 1); return { want, got: res.teeth.filter((t) => want.includes(t.fdi)) }; }
+function placeRange() {
+  const jaw = pickJaw(), { want, got } = rangeTeeth(AUTO.ft.res, jaw), have = P.taps.map(toCase); let added = 0;
+  for (const t of got) { const v = new THREE.Vector3(...t.tap); if (have.some((h) => Math.hypot(h.x - v.x, h.y - v.y) < 3)) continue; P.taps.push(toFile(v)); have.push(v); added++; }
+  AUTO.hist.push(added); AUTO.group = added ? { n: added } : null;
+  const missing = want.filter((f) => !got.some((t) => t.fdi === f)), unsure = got.filter((t) => t.confidence < 0.5).map((t) => t.fdi);
+  return { added, want, missing, unsure };
+}
+const sayRange = (r) => `${r.added} tooth tap${r.added === 1 ? '' : 's'} placed (${r.want[0]}–${r.want[r.want.length - 1]})` + (r.missing.length ? `; not found: ${r.missing.join(', ')} — tap ${r.missing.length === 1 ? 'it' : 'them'} yourself if there` : '') + (r.unsure.length ? `; check ${r.unsure.join(', ')}` : '') + '. Tap a number on the scan to correct it';
+async function autoTap() {
+  const jaw = pickJaw(); if (!jaw || !TAPS(P.mode)) return;
+  const fresh = !(AUTO.ft && AUTO.ft.key === mainKey()), ft = await shell.busy('Finding the teeth…', async () => { await N.sleep(30); return detectTeeth(); });
+  if (!ft.res.ok) { refreshView(); return shell.status(ft.res.note || 'No teeth found on this scan', true); }
+  if (fresh) viewer.fit(scans[jaw].object, { dir: jaw === 'upper' ? [0, -0.35, -1] : [0, -0.35, 1] });   // the first time: the arch from its biting side, to check the taps and numbers
+  const r = placeRange(); B = null; scans.touch(); syncUI(); refreshView(); shell.status(sayRange(r), !r.added);
+}
+function renumber(tooth, fdi) {
+  const ft = AUTO.ft; if (!ft || ft.key !== mainKey()) return;
+  ft.pins = ft.pins.filter((q) => Math.hypot(q.p[0] - tooth.centre[0], q.p[1] - tooth.centre[1]) > 2); ft.pins.push({ p: tooth.centre.slice(), fdi });
+  ft.res = ft.base.relabel(ft.pins);
+  let msg = fdi ? `Numbered ${fdi}` : 'Taken as not a tooth';
+  if (AUTO.group && AUTO.hist.length && AUTO.hist[AUTO.hist.length - 1] === AUTO.group.n) {    // the automatic taps were the last thing done: place them again with the new numbers
+    P.taps.splice(Math.max(0, P.taps.length - AUTO.group.n)); AUTO.hist.pop(); const r = placeRange(); msg += ' — ' + sayRange(r); B = null; scans.touch();
+  }
+  syncUI(); refreshView(); shell.status(msg);
+}
+function fillRangeSelects() {
+  const jaw = pickJaw() || 'upper', SEQ = N.FDI_ORDER[jaw].filter((f) => f % 10 !== 8), [a, b] = AUTO.range[jaw];
+  for (const [id, v] of [['tFrom', a], ['tTo', b]]) { const el = $(id), want = SEQ.map(String).join(','); if (el.dataset.seq !== want) { el.innerHTML = SEQ.map((f) => `<option value="${f}">${f}</option>`).join(''); el.dataset.seq = want; } el.value = String(v); }
+}
+$('tFrom').addEventListener('change', (e) => { const j = pickJaw(); if (j) AUTO.range[j][0] = +e.target.value; });
+$('tTo').addEventListener('change', (e) => { const j = pickJaw(); if (j) AUTO.range[j][1] = +e.target.value; });
+$('tAuto').addEventListener('click', autoTap);
 $('tPrep').addEventListener('click', () => {
   if (!PREP) return; if (PREP.jaw && scans.has(PREP.jaw)) P.jaw = PREP.jaw; const inv = scans[pickJaw()].matrix.clone().invert(), F = (p) => new THREE.Vector3(...p).applyMatrix4(inv).toArray();
   P.seed = F(PREP.seed); P.loop = PREP.loop.map(F); B = null; scans.touch(); syncUI(); refreshView(); shell.status(`Prep check’s tooth and ${P.loop.length} margin points used`);
@@ -442,7 +486,7 @@ const RB = {
 $('dHoles').addEventListener('change', (e) => { P.holes = e.target.checked; B = null; scans.touch(); syncUI(); refreshView(); });
 const SEG = {
   mode: N.segBind($('mkMode'), (v) => { const was = P.mode; P.mode = v; if (was !== v) B = null; scans.touch(); syncUI(); refreshView(); }, P.mode),
-  jaw: N.segBind($('mkJaw'), (v) => { if (!scans.has(v)) return syncUI(); if (v !== P.jaw) { P.jaw = v; P.seed = null; P.loop = []; P.taps = []; S = mkS(); B = null; } syncUI(); refreshView(); }),
+  jaw: N.segBind($('mkJaw'), (v) => { if (!scans.has(v)) return syncUI(); if (v !== P.jaw) { P.jaw = v; P.seed = null; P.loop = []; P.taps = []; AUTO.hist = []; AUTO.group = null; S = mkS(); B = null; } syncUI(); refreshView(); }),
 };
 $('xStl').addEventListener('click', async () => {
   if (!B) return shell.status('Make it first (Design step)', true);
@@ -468,10 +512,10 @@ function syncUI() {
   if ($('shGoModels')) $('shGoModels').onclick = () => N.HUB.goto('model');
   const fit = S.fit;
   $('shFit').innerHTML = S.self ? '<div class="sum"><h5>The scan already loaded is the wax-up</h5></div>' : S.shape ? `<div class="sum"><h5>${N.esc(S.shape.name || 'second scan')}<span class="okb${fit && fit.rms > 0.12 ? ' warn' : ''}">${fit && fit.rms > 0.12 ? 'check the fit' : 'lined up'}</span></h5>${fit ? `<div><span>Fit on the unchanged parts (rms)</span><b>${mm(fit.rms)}</b></div>` : ''}</div>` : '';
-  if (sp) { $('tLead').textContent = P.taps.length ? 'Tap the next waxed-up tooth, or go on to Design.' : 'Tap each waxed-up tooth, in the middle of its incisal edge or biting surface.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The spacer runs along the arch through your taps: across the teeth, and a set distance past the first and last tapped teeth (Design step), tapering off at its edges. Leave at least one unspaced tooth either side for the retainer to seat on.'; }
-  else if (mx) { $('tLead').textContent = P.taps.length ? 'Tap the next tooth, or go on to Design.' : 'Tap each tooth the matrix should cover, on its incisal edge or the middle of its biting surface. An injection hole goes there if you want one.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The matrix reaches the distance set on the Design step from each tap, so a tooth either side is covered too, which helps it seat.'; }
+  if (sp) { $('tLead').textContent = P.taps.length ? 'Tap the next waxed-up tooth, or go on to Design.' : 'Tap each waxed-up tooth, in the middle of its incisal edge or biting surface.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The spacer runs along the arch through your taps: across the teeth, and a set distance past the first and last tapped teeth (Design step), tapering off at its edges. Leave at least one unspaced tooth either side for the retainer to seat on. Tap for me finds and numbers the teeth and taps the range you pick; a number on the scan can be tapped to correct it.'; }
+  else if (mx) { $('tLead').textContent = P.taps.length ? 'Tap the next tooth, or go on to Design.' : 'Tap each tooth the matrix should cover, on its incisal edge or the middle of its biting surface. An injection hole goes there if you want one.'; $('tCount').textContent = `${P.taps.length} tooth tap${P.taps.length === 1 ? '' : 's'}`; $('tTip').textContent = 'The matrix reaches the distance set on the Design step from each tap, so a tooth either side is covered too, which helps it seat. Tap for me finds and numbers the teeth and taps the range you pick; a number on the scan can be tapped to correct it.'; }
   else { $('tLead').textContent = !P.seed ? 'Tap the middle of the prepared tooth.' : P.loop.length < 3 ? 'Now tap round the margin, in order, all the way round (8 or more points; more where it curves).' : 'Add points where the line leaves the margin, or go on to Design.'; $('tCount').textContent = P.seed ? `${P.loop.length} margin point${P.loop.length === 1 ? '' : 's'}` : ''; $('tTip').textContent = 'The margin is followed along the tooth’s surface between your points, so the provisional ends exactly there.'; }
-  shown('tPrep', !mx && !!PREP && (!PREP.jaw || PREP.jaw === jaw));
+  shown('tPrep', !mx && !!PREP && (!PREP.jaw || PREP.jaw === jaw)); shown('tAutoRow', tp && !!jaw); if (tp && jaw) fillRangeSelects();
   $('dLead').textContent = sp ? 'Set the spacer’s thickness (the thickness of clear silicone in the stent) and how far it reaches from each tap, then make it.' : P.mode === 'crown' ? 'Set the cement space, then make it. Thin areas show in red (under 0.5 mm).' : P.mode === 'shell' ? 'Set the shell’s thickness and the space it keeps from the preparation, then make it.' : 'Set the matrix’s thickness and how far it reaches, then make it.';
   for (const [id, on] of [['dGapRow', P.mode === 'crown' || P.mode === 'shell'], ['dWallRow', P.mode === 'shell'], ['dThickRow', mx], ['dMGapRow', mx], ['dReachRow', mx], ['dHeightRow', mx], ['dHolesRow', mx], ['dHoleDRow', mx && P.holes], ['dSpaceRow', sp], ['dSReachRow', sp], ['dSEndRow', sp], ['dSHeightRow', sp]]) shown(id, on);
   const i = B && B.info; let out = '';
@@ -502,6 +546,8 @@ function refreshView() {
   if (jaw && id === 'shape' && S.shape && S.rel && P.mode !== 'spacer') {                 // the second scan, in pink
     const o = new THREE.Mesh(N.toGeometry(shapeMesh()), new THREE.MeshStandardMaterial({ color: 0xe879f9, transparent: true, opacity: 0.45, roughness: 0.6, side: THREE.DoubleSide, depthWrite: false })); o.userData.noFit = true; viewer.add(o); extra.push(o);
   }
+  toothNums.clear();
+  if (jaw && id === 'teeth' && TAPS(P.mode) && AUTO.ft && AUTO.ft.key === mainKey()) toothNums.show(AUTO.ft.res, (p) => new THREE.Vector3(...p), { pinned: new Set(AUTO.ft.pins.filter((q) => q.fdi).map((q) => q.fdi)) });
   if (jaw && ['teeth', 'design', 'export'].includes(id)) {
     if (TAPS(P.mode)) for (const p of P.taps) marks.push({ m: viewer.marker(toCase(p), { color: 0xa21caf, px: 13 }) });
     else { const pts = P.loop.map(toCase); if (pts.length >= 2) marks.push({ m: viewer.line(pts, { color: 0xe879f9, width: 3, closed: pts.length >= 3, depthTest: false }) }); if (id === 'teeth') { for (const p of pts) marks.push({ m: viewer.marker(p, { color: 0xa21caf, px: 12 }) }); if (P.seed) marks.push({ m: viewer.marker(toCase(P.seed), { color: 0x0f2a44, px: 16 }) }); } }
@@ -530,7 +576,7 @@ function refreshView() {
 }
 shell.onStepChange(() => { syncUI(); refreshView(); });
 syncUI(); shell.goto(0);
-window.APP = { N, THREE, shell, viewer, scans, P, get S() { return S; }, get B() { return B; }, get PREP() { return PREP; }, lineUp, marginField, buildCrown, buildMatrix, refreshView, syncUI, RB, SEG, sd, mainSurf, shapeSurf, shapeMesh };
+window.APP = { N, THREE, shell, viewer, scans, P, get S() { return S; }, get B() { return B; }, get PREP() { return PREP; }, AUTO, autoTap, renumber, detectTeeth, toothNums, lineUp, marginField, buildCrown, buildMatrix, refreshView, syncUI, RB, SEG, sd, mainSurf, shapeSurf, shapeMesh };
 </script>
 </body>
 </html>

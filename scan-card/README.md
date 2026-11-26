@@ -58,6 +58,36 @@ off at its edges, and leaves every other tooth and the base exactly as they were
 model; the lab vacuum-forms a retainer on the spaced model, fills its spaced part with clear silicone (e.g. Exaclear) and
 seats it on the wax-up model.
 
+**Automatic tooth numbering (Shells, Analysis).** `findTeeth` in core.js finds the teeth on an arch scan or model and gives
+each its FDI number, by geometry (no trained model): the arch seen from the biting side, the tooth row straightened out,
+boundaries at the embrasures, and numbers from the midline by typical widths, allowing for missing teeth (hypodontia,
+extractions, closed spaces) and part arches. Shells' Teeth step has "Tap for me 13 to 23"; Analysis has "Find the teeth",
+which fills each tooth's contact points and marks skipped numbers missing. Tap a number on the scan to correct it. It is a
+first pass to check: crowded incisors, splinted or bridged teeth and closed spaces can come out a tooth out.
+
+**Articulator.** An average-value articulator: the arches mounted in their bite on a Bonwill triangle (101.6 mm) and
+Balkwill angle (26°, the values Splint uses), sagittal condylar guidance, Bennett angle and immediate side shift (left and
+right separately if wanted). Forward, side and back movements are guided by the teeth: at each step the condyles run down
+their paths and the jaw turns about the hinge axis until the teeth (or an appliance) touch. It shows the contacts, the
+working and non-working sides, canine guidance or group function, non-working-side interferences, the paths of the
+incisal point and canines and the opening. Either arch can be swapped for the Splint tab's splint, Shells' wax-up or an
+STL. Recorded jaw motion is not read yet. Saves `articulator` in the case.
+
+**Obturator.** On an upper scan of a maxillectomy defect: a path of insertion (or Survey's), the defect margin and the
+plate outline tapped, then a plate of set thickness and a bulb with set relief off the defect walls, a flat or domed top,
+and a closed hollow, an open top with a separate lid, or a solid bulb. The weight saved and the thinnest wall are shown.
+A surgical obturator variant gives a plate up to and past a resection line on a pre-op scan. A closed hollow needs a vent
+to print (not added); clasps are not added yet. Roles `obturator`, `obturator-lid`.
+
+**CBCT.** Opens DICOM on the device (a folder, files, multi-frame files or a zip; uncompressed, deflated, RLE and JPEG
+Lossless; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
+dates of birth and the like are never decoded. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
+surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
+angle. Donor tooth: tap the tooth, it is separated from bone and neighbours by a marker flood that meets in the ligament
+space, with fixes (not-tooth taps, eraser, threshold); then a closed replica STL, optionally enlarged and with a handle,
+for preparing the socket in autotransplantation. Needs voxels of about 0.4 mm or smaller. The case keeps the CBCT work
+and the replica (`cbct-replica`), never the CBCT itself.
+
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
 hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
 the cusp tips decide instead, and beyond 25° it warns. Raw scans are oriented exactly as before.
@@ -77,9 +107,11 @@ the arches come.
 scan-card/
   src/             the source: edit here
     index.html       the hub
-    model.html  analysis.html  splint.html  compare.html  prep.html
+    model.html  analysis.html  splint.html  compare.html  prep.html  survey.html  shell.html
+    articulator.html  obturator.html  cbct.html
     core.js          shared engine: shell, 3D viewer, mesh tools, scan loading, orientation, trim, case file, hub hand-off
     solid.js         scan to watertight solid, booleans, hollowing, lettering (Manifold, WebAssembly)
+    dicom.js         CBCT/DICOM reading (technical tags only), volume tools, the synthetic test phantom
   index.html  model/  analysis/  splint/  compare/  prep/  manifest.webmanifest     built for the site: do not edit
   dev/             test harness, tests and conventions (see dev/README.md)
 tools/build_scan_card.py     builds the site pages (and the artifact copy) from src/

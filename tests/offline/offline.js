@@ -73,12 +73,12 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
     ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
   }
-  for (const [id, test] of [['compare', () => window.__SUITE_APP === 'scan-compare' && !!window.APP && APP.scans.has('lower')], ['prep', () => window.__SUITE_APP === 'scan-prep' && !!window.APP && APP.scans.has('lower')], ['survey', () => window.__SUITE_APP === 'scan-survey' && !!window.APP && APP.scans.has('lower')], ['shell', () => window.__SUITE_APP === 'scan-shell' && !!window.APP && APP.scans.has('lower')]]) {
+  for (const [id, test] of [['compare', () => window.__SUITE_APP === 'scan-compare' && !!window.APP && APP.scans.has('lower')], ['prep', () => window.__SUITE_APP === 'scan-prep' && !!window.APP && APP.scans.has('lower')], ['survey', () => window.__SUITE_APP === 'scan-survey' && !!window.APP && APP.scans.has('lower')], ['shell', () => window.__SUITE_APP === 'scan-shell' && !!window.APP && APP.scans.has('lower')], ['articulator', () => window.__SUITE_APP === 'scan-articulator' && !!window.APP && APP.scans.has('lower')], ['obturator', () => window.__SUITE_APP === 'scan-obturator' && !!window.APP && APP.scans.has('upper')], ['cbct', () => window.__SUITE_APP === 'scan-cbct' && !!window.APP && !!APP.loadDemo]]) {
     await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
     ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
   }
   await hub.click('#tabs [data-tab=scans]'); await settle();
-  ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Survey,Shells,Trays,Wax-up', 'scan-card: all nine tools are working on the one pair of scans');
+  ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Survey,Shells,Articulator,Obturator,Trays,Wax-up', 'scan-card: all eleven tools that use the scans are working on the one pair of scans (CBCT opens its own files)');
   const [dc] = await Promise.all([p.waitForEvent('download'), hub.click('#topBtns button:nth-child(2)')]);
   ok(/^case-.*\.zip$/.test(dc.suggestedFilename()), 'scan-card: Save case works from inside the file (' + dc.suggestedFilename() + ')');
   await hub.click('#top a.brand'); await p.waitForTimeout(400);

@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obturator Card — obturators after a maxillectomy</title>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+ "three-mesh-bvh":"https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+ "manifold-3d/manifold.js":"https://cdn.jsdelivr.net/npm/manifold-3d@3.5.5/manifold.js"
+}}
+</script>
+<script src="manifold-wasm.js"></script>
+<style>
+button{touch-action:manipulation}
+.sum{border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden}
+.sum h5{margin:0;padding:6px 9px;background:#f8fafc;font-size:12px;color:var(--navy);display:flex;align-items:center;gap:6px}
+.sum h5 .okb{margin-left:auto;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:9px;background:var(--tealsoft);color:var(--teal2)}
+.sum h5 .okb.bad{background:#fee2e2;color:#991b1b}
+.sum h5 .okb.warn{background:#fef3c7;color:#92400e}
+.sum div{display:flex;padding:4px 9px;border-top:1px solid var(--line);font-size:12px}
+.sum div span{flex:1;color:var(--muted)}
+.sum div b{font-variant-numeric:tabular-nums;color:var(--navy);font-weight:600}
+.count{font-size:12px;color:var(--muted);margin:4px 0 8px}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0}
+</style>
+</head>
+<body>
+<script type="module">
+// Obturator Card — obturators after a partial maxillectomy, designed on the upper scan.
+//  • Hollow-bulb obturator (interim or definitive), from a scan taken after the resection that shows the defect (intraoral scan, or a
+//    scanned impression or model): a palatal plate of set thickness out to the outline you tap, carrying a bulb that fills the defect up to
+//    a set height above its margin, a set relief off its walls, with a closed top (flat or domed) that seals; hollowed to a set wall
+//    thickness, either sealed inside or open at the top with a separate lid that plugs in.
+//  • Surgical obturator, from a scan taken before the operation: a plate over the palate up to the planned resection line and a set
+//    distance beyond it.
+// Everything is designed along a path of insertion. The scan seen along the path is a height field (0.1 mm): its upper envelope is the
+// tissue with every undercut blocked out, on the teeth and in the defect, so the result goes in and comes out along that path. The bulb
+// may be allowed to engage a set amount of the defect's undercut.
+// The prosthesis is a signed-distance field on a grid in the path's frame — distance to the blocked-out tissue (per slice by a distance
+// transform, then exactly near the surfaces from the triangulated height field), to the outlines, to the cap and to a smooth surface
+// spanning the defect — closed into a surface with surface nets. The bulb's own field is an intersection of true distances, so its hollow
+// (the bulb field below −wall) keeps the wall thickness everywhere by construction; the walls are then measured.
+import * as N from './core.js';
+import * as SOL from './solid.js';
+const THREE = N.THREE, $ = N.$, RHO = 1.19;                       // g/cm³: heat-cured PMMA denture base (printed denture-base resins are much the same)
+const MODES = { hollow: 'Hollow-bulb obturator', surgical: 'Surgical obturator' }, INSIDE = { closed: 'Closed hollow', open: 'Open top with a lid', solid: 'Solid bulb' };
+const mm = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) + ' mm' : '–'), gr = (v) => (Number.isFinite(v) ? v.toFixed(1) + ' g' : '–');
+const P = { mode: 'hollow', ap: 0, lat: 0, margin: [], outline: [], cut: [], side: 'left', plate: 2.0, prelief: 0, height: 12, brelief: 0.5, wall: 2.0, top: 'flat', dome: 3, hollow: 'closed', under: 0, beyond: 3 };   // taps in the scan's own file coordinates
+const KEYS = Object.keys(P);
+const V = { section: false, cutAt: 0.5, lift: false };          // how the result is shown (not saved)
+let B = null, SURV = null, PC = null;                            // B: the result; SURV: Survey's path, when the case has one; PC: the scan seen along the path
+
+const shell = N.createShell({
+  name: 'Obturator Card', tagline: 'Obturators after a maxillectomy', title: document.title,
+  emptyHtml: '<div><b>Load the upper scan</b>Drop it here, or use the demo.</div>',
+  onDropFiles: (f) => scans.loadFiles(f),
+  steps: [
+    { id: 'load', title: 'Load scans', html: '' },
+    { id: 'orient', title: 'Check orientation', html: '' },
+    { id: 'make', title: 'What to make', html: `
+      <div class="seg" id="mkMode"><button data-v="hollow" type="button" title="An interim or definitive obturator from a scan that shows the defect: a palatal plate carrying a hollow bulb">Hollow-bulb obturator</button><button data-v="surgical" type="button" title="A plate for the operation, from a scan taken before it: the palate up to the planned resection line and a little beyond">Surgical obturator</button></div>
+      <p class="lead" id="mkLead"></p>
+      <div id="mkNote"></div>
+      <p class="tip">A design aid for the maxillofacial lab and clinic. Check the result on the model and in the mouth before it is used. Clasps on the remaining teeth are not added here.</p>` },
+    { id: 'path', title: 'Path of insertion', html: `
+      <p class="lead">The obturator goes in and comes out along this path. Undercuts on the teeth and in the defect are blocked out along it (blue).</p>
+      <div class="row"><label>Front / back</label><input type="range" id="pAp" min="-25" max="25" step="0.5" value="0"><span class="val"></span></div>
+      <div class="row"><label>Left / right</label><input type="range" id="pLat" min="-25" max="25" step="0.5" value="0"><span class="val"></span></div>
+      <div class="btns"><button class="btn" id="pView" type="button" title="Turn the model until you look straight up the path you want, then press this">Use this view</button><button class="btn" id="pLevel" type="button" title="Back to square to the biting surfaces">Level</button><button class="btn" id="pSurvey" type="button" title="Use the path set on the Survey tab" hidden>Use Survey’s path</button></div>
+      <div id="pInfo"></div>
+      <p class="tip">Tilting works as on a surveyor table (left and right are the patient’s). A path that brings the bulb in along the defect’s widest opening keeps more of the defect for the bulb; the plate then follows the palate as far as the blocked-out teeth allow.</p>` },
+    { id: 'margin', title: 'Defect margin', html: `
+      <p class="lead" id="mLead"></p>
+      <div class="row" id="mSideRow"><label>Side to be removed</label><div class="seg" id="mSide"><button data-v="right" type="button" title="The resection is on the patient’s right">Patient’s right</button><button data-v="left" type="button" title="The resection is on the patient’s left">Patient’s left</button></div></div>
+      <div class="count" id="mCount"></div>
+      <div class="btns"><button class="btn" id="mUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="mClear" type="button" title="Start this line again">Start again</button></div>
+      <p class="tip" id="mTip"></p>` },
+    { id: 'outline', title: 'Plate outline', html: `
+      <p class="lead" id="oLead"></p>
+      <div class="count" id="oCount"></div>
+      <div class="btns"><button class="btn" id="oUndo" type="button" title="Take back the last point">Undo point</button><button class="btn" id="oClear" type="button" title="Start the outline again">Start again</button></div>
+      <p class="tip" id="oTip"></p>` },
+    { id: 'design', title: 'Design', html: `
+      <p class="lead" id="dLead"></p>
+      <div class="h4">Plate</div>
+      <div class="row"><label>Thickness</label><input type="range" id="dPlate" min="1.5" max="3.5" step="0.1" value="2"><span class="val"></span></div>
+      <div class="row"><label>Relief off the palate</label><input type="range" id="dPRelief" min="0" max="0.5" step="0.05" value="0"><span class="val"></span></div>
+      <div class="row" id="dBeyondRow"><label>Past the resection line</label><input type="range" id="dBeyond" min="0" max="10" step="0.5" value="3"><span class="val"></span></div>
+      <div id="dBulbBox">
+      <div class="h4">Bulb</div>
+      <div class="row"><label>Height above the margin</label><input type="range" id="dHeight" min="4" max="30" step="0.5" value="12"><span class="val"></span></div>
+      <div class="row"><label>Relief off the walls</label><input type="range" id="dBRelief" min="0" max="1.5" step="0.05" value="0.5"><span class="val"></span></div>
+      <div class="row"><label>Undercut it may engage</label><input type="range" id="dUnder" min="0" max="1.5" step="0.1" value="0"><span class="val"></span></div>
+      <div class="row"><label>Top</label><div class="seg" id="dTop"><button data-v="flat" type="button" title="A flat top, square to the path">Flat</button><button data-v="dome" type="button" title="A top that rises in the middle, so secretions run off it">Domed</button></div></div>
+      <div class="row" id="dDomeRow"><label>Dome height</label><input type="range" id="dDome" min="1" max="6" step="0.5" value="3"><span class="val"></span></div>
+      <div class="row"><label>Inside</label><div class="seg" id="dHollow"><button data-v="closed" type="button" title="Hollow and sealed (one piece)">Closed hollow</button><button data-v="open" type="button" title="Hollow, open at the top, with a separate lid that plugs in">Open + lid</button><button data-v="solid" type="button" title="Not hollowed">Solid</button></div></div>
+      <div class="row" id="dWallRow"><label>Wall thickness</label><input type="range" id="dWall" min="1" max="3.5" step="0.1" value="2"><span class="val"></span></div>
+      </div>
+      <div class="btns"><button class="btn pri" id="dBuild" type="button" title="Work out the obturator">Make it</button></div>
+      <div id="dOut"></div>
+      <p class="tip">The plate is a layer of the thickness set on the palate (blocked out along the path), ending in a rounded edge at the outline; near the outline it does not climb the teeth. The bulb fills the defect from a smooth surface spanning it, level with the plate, up to the height set; its relief off the walls comes in over the first 1.5 mm into the defect. Its hollow keeps the wall thickness everywhere (the thinnest wall is measured and marked). “Undercut it may engage” lets the bulb reach that far into undercuts in the defect, keeping the relief off the tissue; it then has to be eased past them, as with a soft lining. Surfaces are worked out on a grid of about 0.2 mm: sharp edges of the scan are rounded by up to about 0.1 mm.</p>
+      <div id="dView" hidden>
+        <label class="check"><input type="checkbox" id="dSection"> Show a section through it</label>
+        <div class="row" id="dCutRow"><label>Section</label><input type="range" id="dCut" min="0" max="1" step="0.01" value="0.5"><span class="val"></span></div>
+        <label class="check" id="dLiftRow"><input type="checkbox" id="dLift"> Lift the lid off</label>
+      </div>` },
+    { id: 'export', title: 'Download', html: `
+      <p class="lead">Download for printing, in the same position as the scan, or keep everything in the case file.</p>
+      <div class="btns"><button class="btn pri" id="xStl" type="button" title="Download the obturator as an STL file">Download STL</button><button class="btn" id="xLid" type="button" title="Download the lid as its own STL file" hidden>Download the lid</button><button class="btn" id="xCase" type="button" title="Save the scans, the design and the result as one case file">Save case</button></div>
+      <p class="tip" id="xTip"></p>` },
+  ],
+});
+const viewer = N.createViewer(shell.view);
+N.addViewButtons(shell, viewer);
+viewer.renderer.localClippingEnabled = true;
+const legend = shell.panel('', 'legend'); legend.hidden = true;
+const scans = N.createScanSet({
+  shell, viewer, appName: 'Obturator Card', loadStep: 'load', orientStep: 'orient',
+  onChange: (what) => { if (what === 'visibility' || what === 'case') return; PC = null; dropOverlay(); if (B && B.key !== scanKey()) B = null; syncUI(); refreshView(); },
+  extendCase: (c) => {
+    c.remove('obturator'); c.remove('obturator-lid'); const sc = scans.upper;
+    if (B && sc && B.key === scanKey()) {
+      const inv = sc.matrix.clone().invert();
+      c.add({ role: 'obturator', name: fileBase(), mesh: N.transformMesh(B.mesh, inv), matrix: sc.matrix.clone(), meta: { jaw: 'upper', mode: P.mode, kind: B.info.kind } });
+      if (B.lid) c.add({ role: 'obturator-lid', name: 'obturator-lid', mesh: N.transformMesh(B.lid, inv), matrix: sc.matrix.clone(), meta: { jaw: 'upper' } });
+    }
+    const d = { version: 1 }; for (const k of KEYS) d[k] = P[k]; d.info = B ? B.info : null; c.data.obturator = d;
+  },
+  readCase: (c) => {
+    B = null; PC = null; dropOverlay(); const d = c.data.obturator;
+    if (d) for (const k of KEYS) if (d[k] !== undefined) P[k] = Array.isArray(P[k]) ? (d[k] || []).map((p) => p.slice()) : d[k];
+    const s = c.data.survey; SURV = s && s.jaw === 'upper' && s.tilt ? { ap: +s.tilt.ap || 0, lat: +s.tilt.lat || 0 } : null;
+    const it = c.get('obturator'), lid = c.get('obturator-lid');
+    if (it && scans.upper) { B = { mesh: N.transformMesh(it.mesh, it.matrix), lid: lid ? N.transformMesh(lid.mesh, lid.matrix) : null, info: (d && d.info) || {}, key: scanKey() }; B.part = classify(B.mesh); }
+    paramsToUI();
+  },
+});
+const scanKey = () => { const sc = scans.upper; return sc ? sc.raw.positions.length + ':' + N.crc32(new Uint8Array(sc.raw.positions.buffer, sc.raw.positions.byteOffset, Math.min(sc.raw.positions.byteLength, 120000))) + ':' + sc.matrix.elements.join(',') : null; };
+const toFile = (v) => v.clone().applyMatrix4(scans.upper.matrix.clone().invert()).toArray().map((x) => Math.round(x * 1000) / 1000);
+const step = () => (shell.current >= 0 ? shell.steps[shell.current].id : 'load');
+const fileBase = () => (P.mode === 'surgical' ? 'surgical-obturator' : P.hollow === 'open' ? 'obturator-body' : 'obturator') + '-upper';
+
+// ───────────── the path: the scan seen along it ─────────────
+/** out of the teeth along the path (case frame), tilted as on a surveyor table — as Survey's dirOf for the upper arch */
+function dirOf(ap, lat) { const r = Math.PI / 180; return new THREE.Vector3(Math.tan(lat * r), -Math.tan(ap * r), -1).normalize(); }
+/** case frame → path frame: the path along +Z (the teeth point up, the tissue lies below), the arch turned over first (as Survey) */
+function frameOf(d) { const F = N.rotationAbout('y', 180), fd = d.clone().transformDirection(F); return new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(fd, new THREE.Vector3(0, 0, 1))).multiply(F); }
+/** The scan's upper envelope on a grid (as core's rasterHeightfield in 'max' mode), but a vertex is only dropped onto its nearest node where
+ *  no triangle covers that node: dropping every vertex lifts a steep wall's envelope by its slope times the snap (on a 6° wall, 0.05 mm
+ *  of snap is half a millimetre of height), which would move the defect's walls inwards and thicken the relief. */
+function rasterTop(mesh, cell, pad) {
+  const b = N.meshBounds(mesh), x0 = b.min[0] - pad, y0 = b.min[1] - pad, nx = Math.ceil((b.max[0] + pad - x0) / cell) + 1, ny = Math.ceil((b.max[1] + pad - y0) / cell) + 1, z = new Float32Array(nx * ny).fill(-Infinity), P = mesh.positions, I = mesh.indices, inv = 1 / cell;
+  for (let t = 0; t < I.length; t += 3) {
+    const a = I[t] * 3, bI = I[t + 1] * 3, c = I[t + 2] * 3, ax = (P[a] - x0) * inv, ay = (P[a + 1] - y0) * inv, az = P[a + 2], bx = (P[bI] - x0) * inv, by = (P[bI + 1] - y0) * inv, bz = P[bI + 2], cx = (P[c] - x0) * inv, cy = (P[c + 1] - y0) * inv, cz = P[c + 2];
+    const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy); if (Math.abs(den) < 1e-12) continue;
+    const i0 = Math.max(0, Math.ceil(Math.min(ax, bx, cx))), i1 = Math.min(nx - 1, Math.floor(Math.max(ax, bx, cx))), j0 = Math.max(0, Math.ceil(Math.min(ay, by, cy))), j1 = Math.min(ny - 1, Math.floor(Math.max(ay, by, cy))), id = 1 / den;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const w0 = ((by - cy) * (i - cx) + (cx - bx) * (j - cy)) * id, w1 = ((cy - ay) * (i - cx) + (ax - cx) * (j - cy)) * id, w2 = 1 - w0 - w1;
+      if (w0 < -1e-7 || w1 < -1e-7 || w2 < -1e-7) continue; const v = w0 * az + w1 * bz + w2 * cz, k = j * nx + i; if (v > z[k]) z[k] = v;
+    }
+  }
+  const z0 = Float32Array.from(z);                               // nodes no triangle covered (slivers): the nearest vertex's height
+  for (let v = 0; v < P.length; v += 3) { const i = Math.round((P[v] - x0) * inv), j = Math.round((P[v + 1] - y0) * inv); if (i < 0 || j < 0 || i >= nx || j >= ny) continue; const k = j * nx + i; if (z0[k] === -Infinity && P[v + 2] > z[k]) z[k] = P[v + 2]; }
+  return { nx, ny, x0, y0, cell, z, mode: 'max' };
+}
+function pathCache() {
+  const sc = scans.upper; if (!sc) return null; const key = scanKey() + '|' + P.ap + '|' + P.lat; if (PC && PC.key === key) return PC;
+  const d = dirOf(P.ap, P.lat), Q = frameOf(d), Qi = Q.clone().invert(), framed = scans.framed('upper'), mesh = N.transformMesh(framed, Q);
+  const hf = rasterTop(mesh, 0.1, 3), Pm = mesh.positions, nV = Pm.length / 3, blocked = new Uint8Array(nV); let nb = 0;
+  for (let v = 0; v < nV; v++) { const z = N.sampleField(hf, Pm[3 * v], Pm[3 * v + 1]); if (z > Pm[3 * v + 2] + 0.08) { blocked[v] = 1; nb++; } }   // hidden from the path: an undercut, blocked out
+  PC = { key, d, Q, Qi, mesh, framed, hf, blocked, share: nb / nV }; return PC;
+}
+
+// ───────────── curves in plan ─────────────
+/** Barry–Goldman form of a centripetal Catmull–Rom segment between p1 and p2 at knot t */
+function crPoint(p0, p1, p2, p3, t0, t1, t2, t3, t) {
+  const L = (a, b, ta, tb) => [0, 1, 2].map((k) => ((tb - t) * a[k] + (t - ta) * b[k]) / (tb - ta));
+  const A1 = L(p0, p1, t0, t1), A2 = L(p1, p2, t1, t2), A3 = L(p2, p3, t2, t3), B1 = L(A1, A2, t0, t2), B2 = L(A2, A3, t1, t3); return L(B1, B2, t1, t2);
+}
+/** a smooth curve through the taps (centripetal Catmull–Rom in plan; z follows), every `step` mm → [[x, y, z]…] */
+function smoothCurve(pts, closed, stepMm = 0.4) {
+  const A = pts.map((p) => (p.isVector3 ? [p.x, p.y, p.z] : p.slice())), n = A.length; if (n < 2) return A;
+  const get = (i) => (closed ? A[((i % n) + n) % n] : i < 0 ? A[0].map((v, k) => 2 * v - A[1][k]) : i >= n ? A[n - 1].map((v, k) => 2 * v - A[n - 2][k]) : A[i]);
+  const kn = (a, b) => Math.max(1e-3, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1]))), out = [];
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const p0 = get(i - 1), p1 = get(i), p2 = get(i + 1), p3 = get(i + 2), t1 = kn(p0, p1), t2 = t1 + kn(p1, p2), t3 = t2 + kn(p2, p3), m = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / stepMm));
+    for (let s = 0; s < m; s++) out.push(crPoint(p0, p1, p2, p3, 0, t1, t2, t3, t1 + (t2 - t1) * s / m));
+  }
+  if (!closed) out.push(A[n - 1].slice());
+  return out;
+}
+/** an open line carried on straight past both ends */
+function extendLine(cv, L) { const n = cv.length, a = cv[0], a1 = cv[Math.min(1, n - 1)], b = cv[n - 1], b1 = cv[Math.max(0, n - 2)], u = (p, q) => { const l = Math.hypot(p[0] - q[0], p[1] - q[1]) || 1; return [(p[0] - q[0]) / l, (p[1] - q[1]) / l]; }, ua = u(a, a1), ub = u(b, b1); return [[a[0] + ua[0] * L, a[1] + ua[1] * L, a[2]], ...cv, [b[0] + ub[0] * L, b[1] + ub[1] * L, b[2]]]; }
+function inPoly(cv, x, y) { let c = false; for (let i = 0, j = cv.length - 1; i < cv.length; j = i++) { const a = cv[i], b = cv[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
+/** per column of the grid: distance to the curve in plan (closed: negative inside; open: signed by side, + on the side of `ref`), and the curve's z at the nearest point */
+function curveField(cv, closed, G, ref) {
+  const { nx, ny, X0, Y0, h } = G, n = cv.length, ns = closed ? n : n - 1, e = new Float32Array(nx * ny), zc = new Float32Array(nx * ny);
+  const ax = new Float64Array(ns), ay = new Float64Array(ns), dx = new Float64Array(ns), dy = new Float64Array(ns), l2 = new Float64Array(ns), az = new Float64Array(ns), dz = new Float64Array(ns), nxs = new Float64Array(ns), nys = new Float64Array(ns);
+  for (let s = 0; s < ns; s++) { const a = cv[s], b = cv[(s + 1) % n]; ax[s] = a[0]; ay[s] = a[1]; dx[s] = b[0] - a[0]; dy[s] = b[1] - a[1]; l2[s] = dx[s] * dx[s] + dy[s] * dy[s] || 1e-12; az[s] = a[2]; dz[s] = b[2] - a[2]; const l = Math.sqrt(l2[s]); nxs[s] = -dy[s] / l; nys[s] = dx[s] / l; }
+  const sideAt = (x, y, s, t) => {                                // which side of an open line, by the normal of the nearest feature (the mean of both segments' at a vertex)
+    let nX = nxs[s], nY = nys[s]; if (t <= 1e-9 && s > 0) { nX += nxs[s - 1]; nY += nys[s - 1]; } else if (t >= 1 - 1e-9 && s < ns - 1) { nX += nxs[s + 1]; nY += nys[s + 1]; }
+    return (x - ax[s] - t * dx[s]) * nX + (y - ay[s] - t * dy[s]) * nY >= 0 ? 1 : -1;
+  };
+  const near = (x, y) => { let best = Infinity, bs = 0, bt = 0; for (let s = 0; s < ns; s++) { let t = ((x - ax[s]) * dx[s] + (y - ay[s]) * dy[s]) / l2[s]; t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax[s] - t * dx[s], ey = y - ay[s] - t * dy[s], d2 = ex * ex + ey * ey; if (d2 < best) { best = d2; bs = s; bt = t; } } return [Math.sqrt(best), bs, bt]; };
+  const refSide = !closed && ref ? (() => { const r = near(ref[0], ref[1]); return sideAt(ref[0], ref[1], r[1], r[2]); })() : 1;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = X0 + i * h, y = Y0 + j * h, [d, s, t] = near(x, y), c = j * nx + i;
+    e[c] = closed ? (inPoly(cv, x, y) ? -d : d) : d * sideAt(x, y, s, t) * refSide; zc[c] = az[s] + t * dz[s];
+  }
+  return { e, z: zc };
+}
+
+/** the curve's height near each column, blended along the curve (Gaussian, sigma mm): the nearest point's height jumps where the nearest
+ *  point changes (at a concave bend of the line), and a height that jumps would put a step in the field; far from the curve: `near` */
+function blendedZ(cv, closed, G, near, sigma) {
+  const { nx, ny, X0, Y0, h } = G, n = cv.length, out = Float32Array.from(near), lim = 9 * sigma * sigma, k2 = 1 / (2 * sigma * sigma), len = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const a = cv[(i - 1 + n) % n], b = cv[(i + 1) % n]; len[i] = (closed || (i > 0 && i < n - 1)) ? Math.hypot(b[0] - a[0], b[1] - a[1]) / 2 : Math.hypot(b[0] - a[0], b[1] - a[1]) / 4; }
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = X0 + i * h, y = Y0 + j * h; let sw = 0, sz = 0;
+    for (let k = 0; k < n; k++) { const dx = cv[k][0] - x, dy = cv[k][1] - y, d2 = dx * dx + dy * dy; if (d2 > lim) continue; const wt = Math.exp(-d2 * k2) * len[k]; sw += wt; sz += wt * cv[k][2]; }
+    if (sw > 1e-6) { const c = j * nx + i, f = Math.min(1, sw / (sigma * 0.5)); out[c] = f * (sz / sw) + (1 - f) * near[c]; }
+  }
+  return out;
+}
+// ───────────── distances: the blocked-out tissue (a height field), and the scan itself ─────────────
+/** The height field triangulated (every cell split along the same diagonal) over a plan box; empty cells sit at `floor`.
+ *  at(x, y): its height there, exactly as the triangles have it (so "above it" is the same test as the distance's side). */
+function heightMesh(hf, X0, X1, Y0, Y1, floor) {
+  const c = hf.cell, i0 = Math.max(0, Math.floor((X0 - hf.x0) / c)), i1 = Math.min(hf.nx - 1, Math.ceil((X1 - hf.x0) / c)), j0 = Math.max(0, Math.floor((Y0 - hf.y0) / c)), j1 = Math.min(hf.ny - 1, Math.ceil((Y1 - hf.y0) / c));
+  const ni = i1 - i0 + 1, nj = j1 - j0 + 1, Z = new Float32Array(ni * nj), empty = new Uint8Array(ni * nj), pos = new Float32Array(ni * nj * 3), idx = new Uint32Array((ni - 1) * (nj - 1) * 6), x0 = hf.x0 + i0 * c, y0 = hf.y0 + j0 * c;
+  for (let j = 0; j < nj; j++) for (let i = 0; i < ni; i++) { const v = hf.z[(j0 + j) * hf.nx + i0 + i], q = j * ni + i; if (v > -1e30) Z[q] = v; else { Z[q] = floor; empty[q] = 1; } pos[3 * q] = x0 + i * c; pos[3 * q + 1] = y0 + j * c; pos[3 * q + 2] = Z[q]; }
+  let t = 0; for (let j = 0; j < nj - 1; j++) for (let i = 0; i < ni - 1; i++) { const a = j * ni + i, b = a + 1, cc = a + ni + 1, d = a + ni; idx[t++] = a; idx[t++] = b; idx[t++] = cc; idx[t++] = a; idx[t++] = cc; idx[t++] = d; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+  const bvh = new N.MeshBVH(g);
+  const at = (x, y) => {
+    let fx = (x - x0) / c, fy = (y - y0) / c; fx = fx < 0 ? 0 : fx > ni - 1.000001 ? ni - 1.000001 : fx; fy = fy < 0 ? 0 : fy > nj - 1.000001 ? nj - 1.000001 : fy;
+    const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, a = Z[j * ni + i], b = Z[j * ni + i + 1], cc = Z[(j + 1) * ni + i + 1], d = Z[(j + 1) * ni + i];
+    return u >= v ? a + u * (b - a) + v * (cc - b) : a + u * (cc - d) + v * (d - a);
+  };
+  const isEmpty = (x, y) => { const i = Math.round((x - x0) / c), j = Math.round((y - y0) / c); return i < 0 || j < 0 || i >= ni || j >= nj || empty[j * ni + i] === 1; };
+  return { Z, ni, nj, x0, y0, c, bvh, at, isEmpty };
+}
+/** The scan itself, for signed distances (+ out of the tissue). The side is judged by the normal of the nearest feature (the triangle's,
+ *  the two triangles' on an edge, the angle-weighted normal at a vertex), as in Shells, so a point just off a sharp edge is not misjudged. */
+let REAL = null;
+function realSurf() {
+  const key = scanKey(); if (REAL && REAL.key === key) return REAL;
+  const mesh = scans.framed('upper'), Pm = mesh.positions, idx = Uint32Array.from(mesh.indices), g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(Pm, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+  const bvh = new N.MeshBVH(g), nF = idx.length / 3, nV = Pm.length / 3, fu = new Float32Array(nF * 3), vn = new Float32Array(nV * 3), edge = new Map();
+  for (let f = 0; f < nF; f++) {
+    const a = idx[3 * f] * 3, b = idx[3 * f + 1] * 3, c = idx[3 * f + 2] * 3, ux = Pm[b] - Pm[a], uy = Pm[b + 1] - Pm[a + 1], uz = Pm[b + 2] - Pm[a + 2], wx = Pm[c] - Pm[a], wy = Pm[c + 1] - Pm[a + 1], wz = Pm[c + 2] - Pm[a + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, L = Math.hypot(nx, ny, nz) || 1; fu[3 * f] = nx / L; fu[3 * f + 1] = ny / L; fu[3 * f + 2] = nz / L;
+    for (let k = 0; k < 3; k++) {
+      const p = idx[3 * f + k], q = idx[3 * f + (k + 1) % 3], r = idx[3 * f + (k + 2) % 3];
+      const ex = Pm[3 * q] - Pm[3 * p], ey = Pm[3 * q + 1] - Pm[3 * p + 1], ez = Pm[3 * q + 2] - Pm[3 * p + 2], fx = Pm[3 * r] - Pm[3 * p], fy = Pm[3 * r + 1] - Pm[3 * p + 1], fz = Pm[3 * r + 2] - Pm[3 * p + 2];
+      const ang = Math.acos(Math.max(-1, Math.min(1, (ex * fx + ey * fy + ez * fz) / ((Math.hypot(ex, ey, ez) * Math.hypot(fx, fy, fz)) || 1))));
+      vn[3 * p] += ang * fu[3 * f]; vn[3 * p + 1] += ang * fu[3 * f + 1]; vn[3 * p + 2] += ang * fu[3 * f + 2];
+      const ek = p < q ? p * nV + q : q * nV + p, e = edge.get(ek); if (e) { e[0] += fu[3 * f]; e[1] += fu[3 * f + 1]; e[2] += fu[3 * f + 2]; } else edge.set(ek, [fu[3 * f], fu[3 * f + 1], fu[3 * f + 2]]);
+    }
+  }
+  // which way this file's triangles face: out of the tissue is towards the teeth's biting side (−Z for the upper), judged near the teeth
+  let zt = Infinity; for (let i = 2; i < Pm.length; i += 3) if (Pm[i] < zt) zt = Pm[i];
+  let s = 0; for (let f = 0; f < nF; f++) { const a = idx[3 * f] * 3, b = idx[3 * f + 1] * 3, c = idx[3 * f + 2] * 3; if ((Pm[a + 2] + Pm[b + 2] + Pm[c + 2]) / 3 > zt + 2.5) continue; s -= fu[3 * f + 2]; }
+  REAL = { key, bvh, idx, Pm, fu, vn, edge, nV, or: s >= 0 ? 1 : -1 }; return REAL;
+}
+function realSd(o, q, hit, maxD = Infinity) {
+  if (!o.bvh.closestPointToPoint(q, hit, 0, maxD)) return 1e9; const f = hit.faceIndex, P0 = o.Pm, a = o.idx[3 * f], b = o.idx[3 * f + 1], c = o.idx[3 * f + 2], p = hit.point;
+  const ax = P0[3 * a], ay = P0[3 * a + 1], az = P0[3 * a + 2], e0x = P0[3 * b] - ax, e0y = P0[3 * b + 1] - ay, e0z = P0[3 * b + 2] - az, e1x = P0[3 * c] - ax, e1y = P0[3 * c + 1] - ay, e1z = P0[3 * c + 2] - az, px = p.x - ax, py = p.y - ay, pz = p.z - az;
+  const d00 = e0x * e0x + e0y * e0y + e0z * e0z, d01 = e0x * e1x + e0y * e1y + e0z * e1z, d11 = e1x * e1x + e1y * e1y + e1z * e1z, d20 = px * e0x + py * e0y + pz * e0z, d21 = px * e1x + py * e1y + pz * e1z, den = d00 * d11 - d01 * d01;
+  let nx = o.fu[3 * f], ny = o.fu[3 * f + 1], nz = o.fu[3 * f + 2];
+  if (Math.abs(den) > 1e-18) {
+    const w1 = (d11 * d20 - d01 * d21) / den, w2 = (d00 * d21 - d01 * d20) / den, w0 = 1 - w1 - w2, eps = 1e-4, z0 = w0 < eps, z1 = w1 < eps, z2 = w2 < eps, k = z0 + z1 + z2;
+    if (k >= 2) { const v = !z0 ? a : !z1 ? b : c; nx = o.vn[3 * v]; ny = o.vn[3 * v + 1]; nz = o.vn[3 * v + 2]; }
+    else if (k === 1) { const [u, v] = z0 ? [b, c] : z1 ? [a, c] : [a, b], e = o.edge.get(u < v ? u * o.nV + v : v * o.nV + u); if (e) { nx = e[0]; ny = e[1]; nz = e[2]; } }
+  }
+  return ((q.x - p.x) * nx + (q.y - p.y) * ny + (q.z - p.z) * nz) * o.or >= 0 ? hit.distance : -hit.distance;
+}
+
+// ───────────── fields on a grid ─────────────
+const BIG = 1e12;
+function edt1d(f, n, d, v, z) {                                  // Felzenszwalb–Huttenlocher squared distance transform of a sampled function
+  let k = 0; v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+  for (let q = 1; q < n; q++) { let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); } k++; v[k] = q; z[k] = s; z[k + 1] = 1e20; }
+  k = 0; for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; const p = v[k]; d[q] = (q - p) * (q - p) + f[p]; }
+}
+function edt2d(F, nx, ny, T, b) {
+  for (let j = 0; j < ny; j++) { const r = j * nx; for (let i = 0; i < nx; i++) b.f[i] = F[r + i]; edt1d(b.f, nx, b.d, b.v, b.z); for (let i = 0; i < nx; i++) T[r + i] = b.d[i]; }
+  for (let i = 0; i < nx; i++) { for (let j = 0; j < ny; j++) b.f[j] = T[j * nx + i]; edt1d(b.f, ny, b.d, b.v, b.z); for (let j = 0; j < ny; j++) T[j * nx + i] = b.d[j]; }
+}
+let SIDE = 0;                                                    // a field function's second value (the solid version), read straight after the call
+/**
+ * Sample fn(column, z, d, dReal) over a box of the grid's columns and levels. d is the signed distance to the blocked-out tissue
+ * (+ above it): first for every node from the columns' heights, slice by slice with a 2D distance transform (each column a vertical
+ * ray of tissue; exact to about a cell), then exactly (the triangulated height field, by BVH) wherever the field is near zero.
+ * o.second: keep fn's SIDE value too.  o.zone(c, z, f): also redo these nodes exactly, with the distance to the scan itself (dReal).
+ */
+async function sampleGrid(G, box, fn, o = {}) {
+  const { i0, j0, ni, nj, k0, nk } = box, nxy = ni * nj, F = new Float32Array(nxy * nk), Fs = o.second ? new Float32Array(nxy * nk) : null, D = new Float32Array(nxy * nk);
+  const fT = new Float64Array(nxy), fA = new Float64Array(nxy), tT = new Float64Array(nxy), tA = new Float64Array(nxy), L = Math.max(ni, nj), buf = { f: new Float64Array(L), d: new Float64Array(L), v: new Int32Array(L), z: new Float64Array(L + 1) };
+  const h = G.h, hh = h * h, Hc = new Float32Array(nxy), col = new Int32Array(nxy);
+  for (let j = 0; j < nj; j++) for (let i = 0; i < ni; i++) { const c = (j0 + j) * G.nx + i0 + i; col[j * ni + i] = c; Hc[j * ni + i] = G.Hn[c]; }
+  for (let k = 0; k < nk; k++) {
+    const z = G.zlo + (k0 + k) * h;
+    for (let q = 0; q < nxy; q++) { const dz = z - Hc[q]; if (dz >= 0) { fT[q] = Math.min(BIG, dz * dz / hh); fA[q] = 0; } else { fT[q] = 0; fA[q] = Math.min(BIG, dz * dz / hh); } }
+    edt2d(fT, ni, nj, tT, buf); edt2d(fA, ni, nj, tA, buf);
+    for (let q = 0; q < nxy; q++) { const d = (Math.sqrt(tT[q]) - Math.sqrt(tA[q])) * h, id = k * nxy + q; D[id] = d; F[id] = fn(col[q], z, d, null); if (Fs) Fs[id] = SIDE; }
+    if (k % 6 === 0) { shell.setBusyText(`${o.label || 'Working it out'}… ${Math.round(40 * k / nk)}%`); await N.sleep(0); }
+  }
+  // Near a surface the distance is to the blocked-out field joined with the scan itself: the field is triangulated between its nodes, and where
+  // a crown's height of contour (or a sharp edge) falls between two nodes the slanted triangle across the drop shaves up to a cell off the
+  // real tissue. The scan lies inside the blocked-out tissue everywhere else, so the join changes nothing but those slivers.
+  const band = 0.3 + 2 * h, HM = G.HM, q3 = new THREE.Vector3(), hit = {}, hr = {}, R = realSurf(), Qi = G.Qi; let nRef = 0, nReal = 0;
+  for (let k = 0; k < nk; k++) {
+    const z = G.zlo + (k0 + k) * h;
+    for (let q = 0; q < nxy; q++) {
+      const id = k * nxy + q, f = F[id], c = col[q], zone = o.zone ? o.zone(c, z, f) : false;
+      if (!(Math.abs(f) < band || (Fs && Math.abs(Fs[id]) < band) || zone)) continue;
+      const x = G.X0 + (c % G.nx) * h, y = G.Y0 + Math.floor(c / G.nx) * h, dc = D[id]; q3.set(x, y, z);
+      let r = HM.bvh.closestPointToPoint(q3, hit, 0, Math.abs(dc) + 2 * h + 0.5); if (!r) r = HM.bvh.closestPointToPoint(q3, hit);
+      let d = z >= HM.at(x, y) ? hit.distance : -hit.distance; q3.applyMatrix4(Qi); let dR = realSd(R, q3, hr, zone ? Infinity : Math.abs(dc) + 2 * h + 0.6); nReal++;
+      if (dR > -0.4 && dR < 1e8) d = Math.min(d, dR); if (!zone) dR = null;   // (a scan's side can be misjudged far behind it: only a little inside counts)
+      F[id] = fn(c, z, d, dR); if (Fs) Fs[id] = SIDE; nRef++;
+    }
+    if (k % 3 === 0) { shell.setBusyText(`${o.label || 'Working it out'}… ${40 + Math.round(55 * k / nk)}%`); await N.sleep(0); }
+  }
+  return { F, Fs, ni, nj, nk, origin: [G.X0 + i0 * h, G.Y0 + j0 * h, G.zlo + k0 * h], refined: nRef, real: nReal };
+}
+/** the closed surface of a sampled field, keeping every piece of 1 mm³ or more inside or out (a hollow's inside is a piece of its own) */
+function surfaceOf(S, h) {
+  const m = N.isoMesh(S.F, S.ni, S.nj, S.nk, S.origin, h, { minVolume: -Infinity });
+  if (!m.indices.length) return m; const parts = N.splitParts(m), keep = parts.filter((p) => Math.abs(N.meshVolume(p)) >= 1);
+  return keep.length === parts.length ? m : keep.length ? N.mergeMeshes(keep) : { positions: new Float32Array(0), indices: new Uint32Array(0) };
+}
+const roundI = (a, b, r) => Math.min(-r, Math.max(a, b)) + Math.hypot(Math.max(r + a, 0), Math.max(r + b, 0));   // intersection with a rounded edge of radius r
+const ramp = (u) => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+
+// ───────────── making it ─────────────
+async function buildIt() {
+  const t0 = performance.now(), sc = scans.upper; if (!sc) throw new Error('This needs the upper scan.');
+  const hollowMode = P.mode === 'hollow', pc = pathCache(), { Q, Qi, hf } = pc, FtoP = new THREE.Matrix4().multiplyMatrices(Q, sc.matrix), toP = (f) => new THREE.Vector3(...f).applyMatrix4(FtoP);
+  if (P.outline.length < 4) throw new Error('Tap round the plate outline first (at least 4 points).');
+  if (hollowMode && P.margin.length < 4) throw new Error('Tap round the margin of the defect first (at least 4 points).');
+  if (!hollowMode && P.cut.length < 2) throw new Error('Tap along the planned resection line first (at least 2 points).');
+  const O = smoothCurve(P.outline.map(toP), true, 0.5), mT = hollowMode ? P.margin.map(toP) : null, M = hollowMode ? smoothCurve(mT, true, 0.4) : null;
+  const C = hollowMode ? null : extendLine(smoothCurve(P.cut.map(toP), false, 0.5), 60);
+  const t = P.plate, rp = P.prelief, rb = P.brelief, w = P.wall, g = hollowMode ? P.under : 0, beyond = P.beyond, kind = hollowMode ? P.hollow : 'plate', open = kind === 'open', hollowIn = kind === 'closed' || kind === 'open';
+  const d1 = 0.5, d2 = 1.0, rc = Math.min(1.5, 0.75 * w), domeH = hollowMode && P.top === 'dome' ? P.dome : 0, clr = 0.15, plugH = Math.max(1.5, w);
+  let zm = 0, zmLo = Infinity, zmHi = -Infinity; if (hollowMode) for (const p of mT) { zm += p.z / mT.length; zmLo = Math.min(zmLo, p.z); zmHi = Math.max(zmHi, p.z); }
+  const zcap = zm - P.height, zcut = zcap + w, notes = [];
+  if (hollowMode && M.some((p) => !inPoly(O, p[0], p[1]))) throw new Error('The plate outline has to go round the whole defect: tap it outside the margin all the way round.');
+  if (hollowMode && P.height < (zm - zmLo) + 2) notes.push('The bulb is not much higher than the margin’s deepest point: consider a taller bulb.');
+  // plan box, and the heights the plate covers (on a 1 mm grid; the defect's floor does not count)
+  const pad = t + 2.5; let X0 = Infinity, X1 = -Infinity, Y0 = Infinity, Y1 = -Infinity; for (const p of O) { X0 = Math.min(X0, p[0]); X1 = Math.max(X1, p[0]); Y0 = Math.min(Y0, p[1]); Y1 = Math.max(Y1, p[1]); } X0 -= pad; X1 += pad; Y0 -= pad; Y1 += pad;
+  let hLo = Infinity, hHi = -Infinity, off = 0, nIn = 0;
+  for (let y = Y0; y <= Y1; y += 1) for (let x = X0; x <= X1; x += 1) { if (!inPoly(O, x, y) || (M && inPoly(M, x, y))) continue; nIn++; const z = N.sampleField(hf, x, y); if (!Number.isFinite(z)) { off++; continue; } hLo = Math.min(hLo, z); hHi = Math.max(hHi, z); }
+  if (!nIn || off > 0.02 * nIn) throw new Error('The plate outline runs off the scan: tap it inside the scanned area.');
+  const zhi = hHi + rp + t + 1.5, zlo = Math.min(hLo - 1.5, hollowMode ? zcap - domeH - 2 : Infinity), vol = (X1 - X0) * (Y1 - Y0) * (zhi - zlo), h = N.clamp(Math.cbrt(vol / 6.5e6), 0.15, 0.35);
+  const nx = Math.ceil((X1 - X0) / h) + 1, ny = Math.ceil((Y1 - Y0) / h) + 1, nz = Math.ceil((zhi - zlo) / h) + 1, nxy = nx * ny;
+  shell.setBusyText('Seeing the scan along the path…'); await N.sleep(0);
+  const HM = heightMesh(hf, X0 - 1.5, X0 + (nx - 1) * h + 1.5, Y0 - 1.5, Y0 + (ny - 1) * h + 1.5, zlo - 4);
+  const G = { nx, ny, nz, X0, Y0, zlo, h, HM, Qi, Hn: new Float32Array(nxy) };
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) G.Hn[j * nx + i] = HM.at(X0 + i * h, Y0 + j * h);
+  shell.setBusyText('Outlines…'); await N.sleep(0);
+  const of = curveField(O, true, G), eO = of.e, zO = blendedZ(O, true, G, of.z, 2.5);
+  let eM = null, zmLoc = null, eR = null, inOm = null, top = null, gT = null, cap = null, gC = null, topI = null, gTI = null, capI = null, gCI = null;
+  if (hollowMode) {
+    const mf = curveField(M, true, G); eM = mf.e; zmLoc = mf.z;
+    // the bulb's oral surface: a smooth surface spanning the defect (Laplace), meeting the plate's oral surface round it — the blocked-out
+    // tissue with a ball of radius relief + thickness rolled over it
+    inOm = new Uint8Array(nxy); top = new Float32Array(nxy); gT = new Float32Array(nxy).fill(1); const ring = new Uint8Array(nxy), Rb = rp + t, Rc = Math.ceil(Rb / HM.c), om = [];
+    for (let c = 0; c < nxy; c++) { if (eM[c] < d2) { inOm[c] = 1; om.push(c); } else if (eM[c] < d2 + 1.2) ring[c] = 1; }
+    let ringMean = 0, nRing = 0;
+    for (let c = 0; c < nxy; c++) {
+      if (!ring[c]) continue; const x = X0 + (c % nx) * h, y = Y0 + Math.floor(c / nx) * h, fi = Math.round((x - HM.x0) / HM.c), fj = Math.round((y - HM.y0) / HM.c); let best = -Infinity;
+      for (let dj = -Rc; dj <= Rc; dj++) { const jj = fj + dj; if (jj < 0 || jj >= HM.nj) continue; for (let di = -Rc; di <= Rc; di++) { const ii = fi + di; if (ii < 0 || ii >= HM.ni) continue; const ex = HM.x0 + ii * HM.c - x, ey = HM.y0 + jj * HM.c - y, r2 = ex * ex + ey * ey; if (r2 > Rb * Rb) continue; const v = HM.Z[jj * HM.ni + ii] + Math.sqrt(Rb * Rb - r2); if (v > best) best = v; } }
+      top[c] = best; ringMean += best; nRing++;
+    }
+    ringMean /= nRing || 1; for (const c of om) top[c] = ringMean;
+    for (let it = 0; it < 6000; it++) {
+      let ch = 0;
+      for (const c of om) { const i = c % nx; let s = 0, n = 0; for (const nb of [i > 0 ? c - 1 : -1, i < nx - 1 ? c + 1 : -1, c - nx, c + nx]) { if (nb < 0 || nb >= nxy || !(inOm[nb] || ring[nb])) continue; s += top[nb]; n++; } if (!n) continue; const nv = top[c] + 1.9 * (s / n - top[c]); ch = Math.max(ch, Math.abs(nv - top[c])); top[c] = nv; }
+      if (ch < 2e-5) break;
+    }
+    for (const c of om) { const i = c % nx, tv = (nb) => (nb >= 0 && nb < nxy && (inOm[nb] || ring[nb]) ? top[nb] : top[c]), gx = (tv(i < nx - 1 ? c + 1 : -1) - tv(i > 0 ? c - 1 : -1)) / (2 * h), gy = (tv(c + nx) - tv(c - nx)) / (2 * h); gT[c] = 1 / Math.sqrt(1 + gx * gx + gy * gy); }
+    // the cap: flat, or domed (deepest in the middle of the defect as seen along the path)
+    let Rin = 0; for (const c of om) Rin = Math.max(Rin, -eM[c]); cap = new Float32Array(nxy).fill(zcap); gC = new Float32Array(nxy).fill(1);
+    if (domeH > 0 && Rin > 0) {
+      for (let c = 0; c < nxy; c++) { const u = N.clamp(-eM[c] / Rin, 0, 1); cap[c] = zcap - domeH * u * (2 - u); }
+      for (let c = 0; c < nxy; c++) { const i = c % nx, cv = (nb) => (nb >= 0 && nb < nxy ? cap[nb] : cap[c]), gx = (cv(i < nx - 1 ? c + 1 : c) - cv(i > 0 ? c - 1 : c)) / (2 * h), gy = (cv(c + nx) - cv(c - nx)) / (2 * h); gC[c] = 1 / Math.sqrt(1 + gx * gx + gy * gy); }
+    }
+    // the hollow's own top and floor: the spanning surface and the cap offset inwards by the wall, exactly (a ball rolled under / over them
+    // on the columns), so the wall under a curved top or a dome is the wall set — not just its vertical share
+    const rW = Math.ceil(w / h), offs = []; for (let dj = -rW; dj <= rW; dj++) for (let di = -rW; di <= rW; di++) { const r2 = (di * di + dj * dj) * h * h; if (r2 <= w * w) offs.push(di, dj, Math.sqrt(w * w - r2)); }
+    topI = new Float32Array(nxy).fill(-1e9); gTI = new Float32Array(nxy).fill(1); capI = new Float32Array(nxy).fill(zcap + w); gCI = new Float32Array(nxy).fill(1);
+    for (const c of om) { const i = c % nx, j = Math.floor(c / nx); let lo = Infinity; for (let k = 0; k < offs.length; k += 3) { const ii = i + offs[k], jj = j + offs[k + 1]; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const nb = jj * nx + ii; if (!(inOm[nb] || ring[nb])) continue; const v = top[nb] - offs[k + 2]; if (v < lo) lo = v; } topI[c] = lo; }
+    for (const c of om) { const i = c % nx, tv = (nb) => (nb >= 0 && nb < nxy && inOm[nb] ? topI[nb] : topI[c]), gx = (tv(i < nx - 1 ? c + 1 : -1) - tv(i > 0 ? c - 1 : -1)) / (2 * h), gy = (tv(c + nx) - tv(c - nx)) / (2 * h); gTI[c] = 1 / Math.sqrt(1 + gx * gx + gy * gy); }
+    if (domeH > 0) {
+      for (const c of om) { const i = c % nx, j = Math.floor(c / nx); let hi = -Infinity; for (let k = 0; k < offs.length; k += 3) { const ii = i + offs[k], jj = j + offs[k + 1]; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const v = cap[jj * nx + ii] + offs[k + 2]; if (v > hi) hi = v; } capI[c] = hi; }
+      for (const c of om) { const i = c % nx, cv = (nb) => (nb >= 0 && nb < nxy && inOm[nb] ? capI[nb] : capI[c]), gx = (cv(i < nx - 1 ? c + 1 : -1) - cv(i > 0 ? c - 1 : -1)) / (2 * h), gy = (cv(c + nx) - cv(c - nx)) / (2 * h); gCI[c] = 1 / Math.sqrt(1 + gx * gx + gy * gy); }
+    }
+    for (const c of om) if (eM[c] < -1 && HM.isEmpty(X0 + (c % nx) * h, Y0 + Math.floor(c / nx) * h)) { notes.push('The scan does not reach as deep into the defect as the bulb: beyond what was scanned the bulb follows the last part scanned straight on. Check its height against the defect.'); break; }
+  } else {
+    const b = N.meshBounds(scans.framed('upper')), ref = new THREE.Vector3(P.side === 'left' ? 80 : -80, b.center[1], b.center[2]).applyMatrix4(Q);   // a point far out on the side to be removed
+    eR = curveField(C, false, G, [ref.x, ref.y]).e;
+  }
+  // the fields (path frame, + outside): plate = a layer on the blocked-out tissue, cut at the outline with a rounded edge; bulb = an
+  // intersection of true distances (relief off the walls, the cap, the spanning surface, the margin seen along the path)
+  const half = t / 2, mid = rp + half;
+  // (in the hollow mode the plate stops just inside the margin, and does not run down the defect's walls more than 1 mm below the margin
+  // where the tapped line falls a little inside the true rim: the bulb, which reaches d2 past the line, fills that)
+  // Near its outline the plate does not climb the teeth: its top stays below the outline's own height (on the gingiva) plus the plate,
+  // rising inwards at 0.6 mm per mm — so it does not run up the palatal surfaces or fill the embrasures towards the biting surfaces.
+  const kO = 0.6, nO = 1 / Math.sqrt(1 + kO * kO);
+  const plateF = (c, z, d) => {
+    const a = Math.abs(d - mid) - half, capO = (z - (zO[c] + 0.5 + rp + t + kO * Math.max(0, -eO[c]))) * nO, p = roundI(roundI(a, capO, half), eO[c], half);
+    return hollowMode ? Math.max(p, -eM[c] - d1, Math.min(zmLoc[c] - 1 - z, d2 - 0.05 - eM[c])) : roundI(p, eR[c] - beyond, half);
+  };
+  const bulbParts = (c, z, d) => { const rbe = rp + (rb - rp) * ramp((zmLoc[c] - z) / 1.5); return [rbe - d, inOm[c] ? (z - top[c]) * gT[c] : -1e9, (cap[c] - z) * gC[c], eM[c] - d2]; };
+  // the hollow (negative inside): the full relief plus the wall off the walls, the spanning surface and the cap offset inwards, the margin
+  // seen along the path less the wall; withCap false → open at the top (the open bulb's cavity runs out through the cut)
+  // (the hollow's edge at the cap is rounded with the same radius as the outside's: where the wall and a dome meet at an obtuse angle a
+  // rounding cuts deeper into the corner than at a right angle, and a sharp inner corner would then come closer than the wall set)
+  const rcI = rc, cavityF = (c, z, d, withCap) => { const a1 = rb + w - d, a2 = inOm[c] ? (z - topI[c]) * gTI[c] : -1e9, a4 = eM[c] - d2 + w; if (!withCap) return Math.max(a1, a2, a4); const a3 = (capI[c] - z) * gCI[c]; return Math.max(rcI > 0 ? roundI(a1, a3, rcI) : Math.max(a1, a3), a2, a4); };
+  let FB = 0;
+  const field = (c, z, d, dR) => {
+    const fp = plateF(c, z, d); if (!hollowMode || eM[c] > d2 + g + 1) { SIDE = fp; FB = 1e9; return fp; }
+    const [a1, a2, a3, a4] = bulbParts(c, z, d), fb = Math.max(roundI(a1, a3, rc), a2, a4); FB = fb;
+
+    let fg = fb; if (g > 0) fg = Math.min(fb, Math.max(fb - g, rb - (dR == null ? d : dR), z - (zmLoc[c] - 1), a3));   // may grow up to g into the defect's real free space (undercut)
+    const fs = Math.min(fp, fg); SIDE = fs;
+    if (!hollowIn) return fs; if (!open) return Math.max(fs, -cavityF(c, z, d, true));
+    return Math.max(fs, -cavityF(c, z, d, false), zcut - z);                     // open: the body stops at the cut, where the cavity comes through
+  };
+  const band = 0.3 + 2 * h, zone = g > 0 ? (c, z, f) => eM[c] < d2 + g + 0.5 && z > cap[c] - 0.5 && z < zmLoc[c] - 0.5 && f < g + band : null;
+  const S = await sampleGrid(G, { i0: 0, j0: 0, ni: nx, nj: ny, k0: 0, nk: nz }, field, { second: open, zone, label: 'Working out the obturator' });
+  shell.setBusyText('Building the surface…'); await N.sleep(0);
+  const meshP = surfaceOf(S, h); let lidP = null, solidV = null;
+  if (!meshP.indices.length) throw new Error('Nothing to make: check the outline goes round the palate and the margin round the defect.');
+  if (open) {
+    const solidM = surfaceOf({ ...S, F: S.Fs }, h); solidV = N.meshVolume(solidM); S.F = null; S.Fs = null;
+    // the lid: the bulb below the cut, and a plug that fits the opening with a small clearance
+    let a = nx, b = -1, cy0 = ny, cy1 = -1; for (let c = 0; c < nxy; c++) if (eM[c] < d2) { const i = c % nx, j = Math.floor(c / nx); a = Math.min(a, i); b = Math.max(b, i); cy0 = Math.min(cy0, j); cy1 = Math.max(cy1, j); }
+    const pd = Math.ceil(3 / h), i0 = Math.max(0, a - pd), i1 = Math.min(nx - 1, b + pd), j0 = Math.max(0, cy0 - pd), j1 = Math.min(ny - 1, cy1 + pd), k0 = Math.max(0, Math.floor((zcap - domeH - 1.5 - zlo) / h)), k1 = Math.min(nz - 1, Math.ceil((zcut + plugH + 1 - zlo) / h));
+    const lidF = (c, z, d) => { if (eM[c] > d2 + 1) return 1; const [a1, a2, a3, a4] = bulbParts(c, z, d), fb = Math.max(roundI(a1, a3, rc), a2, a4), fbN = cavityF(c, z, d, false); return Math.min(Math.max(fb, z - zcut), Math.max(fbN + clr, z - (zcut + plugH), zcut - w / 2 - z)); };
+    const SL = await sampleGrid(G, { i0, j0, ni: i1 - i0 + 1, nj: j1 - j0 + 1, k0, nk: k1 - k0 + 1 }, lidF, { label: 'Working out the lid' });
+    lidP = surfaceOf(SL, h);
+  }
+  // ── measuring it (path frame)
+  shell.setBusyText('Checking it…'); await N.sleep(0);
+  const colAt = (arr, x, y) => { let fx = (x - X0) / h, fy = (y - Y0) / h; fx = N.clamp(fx, 0, nx - 1.0001); fy = N.clamp(fy, 0, ny - 1.0001); const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, c = j * nx + i; return (arr[c] * (1 - u) + arr[c + 1] * u) * (1 - v) + (arr[c + nx] * (1 - u) + arr[c + nx + 1] * u) * v; };
+  const hit = {}, q3 = new THREE.Vector3(), dAt = (x, y, z) => { q3.set(x, y, z); HM.bvh.closestPointToPoint(q3, hit); return z >= HM.at(x, y) ? hit.distance : -hit.distance; };
+  const Pm = meshP.positions, nV = Pm.length / 3, part = new Uint8Array(nV);       // 0 plate, 1 bulb
+  if (hollowMode) for (let v = 0; v < nV; v++) part[v] = colAt(eM, Pm[3 * v], Pm[3 * v + 1]) < 0 ? 1 : 0;
+  const info = { mode: P.mode, kind, grid: h, refined: S.refined, notes };
+  // plate thickness, on the palate away from its edges (and the defect / the resection line)
+  { const th = []; for (let v = 0; v < nV; v += 2) { const x = Pm[3 * v], y = Pm[3 * v + 1], z = Pm[3 * v + 2]; if (colAt(eO, x, y) > -(t + 1.5) || (hollowMode ? colAt(eM, x, y) < 3 : colAt(eR, x, y) > -3)) continue; const d = dAt(x, y, z); if (d > rp + half) th.push(d - rp); } th.sort((a, b) => a - b); info.plate = th.length ? th[th.length >> 1] : null; }
+  // the bulb's walls: from each point of the hollow's inside to the outer surface
+  if (hollowIn) {
+    let inner = null, outerT = null;
+    if (!open) {
+      const parts = N.splitParts(meshP); let big = 0; parts.forEach((p, i) => { if (N.meshVolume(p) > N.meshVolume(parts[big])) big = i; });
+      inner = parts.filter((p, i) => i !== big && N.meshVolume(p) < 0); outerT = parts[big];
+      info.cavity = inner.reduce((s, p) => s - N.meshVolume(p), 0); info.shells = parts.length;
+    } else {                                                      // open: the outer surface is where the solid version's field is 0; inside it (the cavity, the cut rim) it is about −wall
+      const I = meshP.indices, outer = new Uint8Array(nV), keepT = [], cavP = [], R = g > 0 ? realSurf() : null, hr = {}, qq = new THREE.Vector3();
+      for (let v = 0; v < nV; v++) {
+        const x = Pm[3 * v], y = Pm[3 * v + 1], z = Pm[3 * v + 2], c = N.clamp(Math.round((y - Y0) / h), 0, ny - 1) * nx + N.clamp(Math.round((x - X0) / h), 0, nx - 1), d = dAt(x, y, z);
+        field(c, z, d, R ? realSd(R, qq.set(x, y, z).applyMatrix4(Qi), hr) : null); if (Math.abs(SIDE) < 0.4) outer[v] = 1; else if (z > zcut + 0.5) cavP.push(x, y, z);
+      }
+      const onCut = (v) => Math.abs(Pm[3 * v + 2] - zcut) < 0.15;   // (the rim's cut face, where the lid sits, and its edges are neither the walls' outside nor the hollow)
+      for (let f = 0; f < I.length; f += 3) { const a = I[f], b = I[f + 1], c = I[f + 2]; if (outer[a] && outer[b] && outer[c] && !(onCut(a) || onCut(b) || onCut(c))) keepT.push(a, b, c); }
+      outerT = { positions: Pm, indices: Uint32Array.from(keepT) }; inner = [{ positions: Float32Array.from(cavP), indices: new Uint32Array(0) }];
+      info.cavity = solidV - N.meshVolume(meshP) - N.meshVolume(lidP);
+    }
+    const og = new THREE.BufferGeometry(); og.setAttribute('position', new THREE.BufferAttribute(outerT.positions, 3)); og.setIndex(new THREE.BufferAttribute(Uint32Array.from(outerT.indices), 1)); const obvh = new N.MeshBVH(og), oh = {}, all = [];
+    let tmin = Infinity, at = null;
+    for (const p of inner) { const Q3 = p.positions; for (let v = 0; v < Q3.length / 3; v++) { q3.set(Q3[3 * v], Q3[3 * v + 1], Q3[3 * v + 2]); obvh.closestPointToPoint(q3, oh); all.push(oh.distance); if (oh.distance < tmin) { tmin = oh.distance; at = q3.clone(); } } }
+    all.sort((a, b) => a - b); info.thinnest = Number.isFinite(tmin) ? tmin : null; info.wallMedian = all.length ? all[all.length >> 1] : null; info.thinAt = at ? at.applyMatrix4(Qi).toArray() : null; info.wall = w;
+  }
+  // depth of the bulb, volumes and weights
+  if (hollowMode) { let zb = Infinity; for (let v = 0; v < nV; v++) if (part[v] && Pm[3 * v + 2] < zb) zb = Pm[3 * v + 2]; if (lidP) for (let v = 0; v < lidP.positions.length / 3; v++) zb = Math.min(zb, lidP.positions[3 * v + 2]); info.bulbHeight = zm - zb; info.marginSpan = zmHi - zmLo; info.relief = rb; info.under = g; }
+  const mesh = N.transformMesh(meshP, Qi), lid = lidP ? N.transformMesh(lidP, Qi) : null;
+  info.closed = N.isWatertight(mesh) && (!lid || N.isWatertight(lid)); info.tris = mesh.indices.length / 3 + (lid ? lid.indices.length / 3 : 0);
+  info.volume = N.meshVolume(mesh) + (lid ? N.meshVolume(lid) : 0);
+  info.solidVolume = !hollowIn ? info.volume : open ? solidV : info.volume + info.cavity;
+  info.weight = info.volume * RHO / 1000; info.solidWeight = info.solidVolume * RHO / 1000; info.saving = info.solidWeight - info.weight; info.savingPct = info.solidWeight > 0 ? 100 * info.saving / info.solidWeight : 0;
+  if (lid) info.lidVolume = N.meshVolume(lid);
+  await SOL.ready(); info.manifold = true; for (const m of [mesh, lid]) { if (!m) continue; let man = null; try { man = SOL.toManifold(m); } catch (_) { info.manifold = false; } SOL.free(man); }
+  info.seconds = (performance.now() - t0) / 1000;
+  return { mesh, lid, part, info, key: scanKey(), focus: true };
+}
+/** which part each vertex of a result belongs to (0 plate, 1 bulb): inside the margin seen along the path */
+function classify(mesh) {
+  const part = new Uint8Array(mesh.positions.length / 3); if (P.mode !== 'hollow' || P.margin.length < 3 || !scans.upper) return part;
+  const pc = pathCache(), FtoP = new THREE.Matrix4().multiplyMatrices(pc.Q, scans.upper.matrix), M = smoothCurve(P.margin.map((f) => new THREE.Vector3(...f).applyMatrix4(FtoP)), true, 0.4), Pm = N.transformMesh(mesh, pc.Q).positions;
+  for (let v = 0; v < part.length; v++) part[v] = inPoly(M, Pm[3 * v], Pm[3 * v + 1]) ? 1 : 0;
+  return part;
+}
+$('dBuild').addEventListener('click', async () => {
+  if (!scans.upper) return shell.status('Load the upper scan first', true);
+  try { B = await shell.busy('Working out the obturator…', () => buildIt()); scans.touch(); const i = B.info; shell.status(`${MODES[P.mode]} made: ${i.volume.toFixed(0)} mm³, ${i.closed ? 'closed' : 'not closed'}`); }
+  catch (err) { B = null; shell.status(String((err && err.message) || err), true); }
+  syncUI(); refreshView();
+});
+
+// ───────────── tapping ─────────────
+const tapList = () => { const id = step(); return id === 'margin' ? (P.mode === 'hollow' ? P.margin : P.cut) : id === 'outline' ? P.outline : null; };
+const tapTool = {
+  cursor: 'crosshair', onDown: () => false, onMove: () => {}, onUp: () => {},
+  onClick: (i) => { if (i.button !== 0 || !overlay) return; const list = tapList(); if (!list) return; const h = i.pick([overlay]); if (!h) return; list.push(toFile(h.point)); B = null; scans.touch(); syncUI(); refreshView(); },
+};
+const edit = (fn) => () => { const list = tapList(); if (!list) return; fn(list); B = null; scans.touch(); syncUI(); refreshView(); };
+$('mUndo').addEventListener('click', edit((l) => l.pop())); $('mClear').addEventListener('click', edit((l) => { l.length = 0; }));
+$('oUndo').addEventListener('click', edit((l) => l.pop())); $('oClear').addEventListener('click', edit((l) => { l.length = 0; }));
+
+// ───────────── controls ─────────────
+const changed = () => { B = null; scans.touch(); syncUI(); refreshView(); };
+const ch = (k) => (v, done) => { P[k] = v; if (done) changed(); };
+const fmtAp = (v) => (Math.abs(v) < 0.05 ? 'level' : (v > 0 ? 'front up ' : 'back up ') + Math.abs(v).toFixed(1) + '°'), fmtLat = (v) => (Math.abs(v) < 0.05 ? 'level' : (v > 0 ? 'left up ' : 'right up ') + Math.abs(v).toFixed(1) + '°');
+const RB = {
+  ap: N.rangeBind('pAp', (v, done) => { P.ap = v; if (done) { PC = null; dropOverlay(); changed(); } }, { fmt: fmtAp }), lat: N.rangeBind('pLat', (v, done) => { P.lat = v; if (done) { PC = null; dropOverlay(); changed(); } }, { fmt: fmtLat }),
+  plate: N.rangeBind('dPlate', ch('plate'), { fmt: (v) => v.toFixed(1) + ' mm' }), prelief: N.rangeBind('dPRelief', ch('prelief'), { fmt: (v) => (v ? v.toFixed(2) + ' mm' : 'none') }),
+  beyond: N.rangeBind('dBeyond', ch('beyond'), { fmt: (v) => v.toFixed(1) + ' mm' }), height: N.rangeBind('dHeight', ch('height'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+  brelief: N.rangeBind('dBRelief', ch('brelief'), { fmt: (v) => (v ? v.toFixed(2) + ' mm' : 'none') }), under: N.rangeBind('dUnder', ch('under'), { fmt: (v) => (v ? v.toFixed(1) + ' mm' : 'none (blocked out)') }),
+  dome: N.rangeBind('dDome', ch('dome'), { fmt: (v) => v.toFixed(1) + ' mm' }), wall: N.rangeBind('dWall', ch('wall'), { fmt: (v) => v.toFixed(1) + ' mm' }),
+};
+const cutBind = N.rangeBind('dCut', (v) => { V.cutAt = v; refreshView(); }, { fmt: (v) => Math.round(v * 100) + '%' });
+const SEG = {
+  mode: N.segBind($('mkMode'), (v) => { if (v !== P.mode) { P.mode = v; changed(); } }, P.mode),
+  side: N.segBind($('mSide'), (v) => { P.side = v; changed(); }, P.side),
+  top: N.segBind($('dTop'), (v) => { P.top = v; changed(); }, P.top),
+  hollow: N.segBind($('dHollow'), (v) => { P.hollow = v; changed(); }, P.hollow),
+};
+function setTilt(ap, lat) { P.ap = Math.round(N.clamp(ap, -25, 25) * 2) / 2; P.lat = Math.round(N.clamp(lat, -25, 25) * 2) / 2; RB.ap.set(P.ap); RB.lat.set(P.lat); PC = null; dropOverlay(); changed(); }
+$('pView').addEventListener('click', () => {
+  if (!scans.upper) return shell.status('Load the upper scan first', true);
+  const v = viewer.camera.position.clone().sub(viewer.controls.target).normalize(), c = -v.z;
+  if (c < Math.cos(35 * Math.PI / 180)) return shell.status('Look at the upper teeth from their biting side first (within 35° of square to them)', true);
+  setTilt(Math.atan2(-v.y, c) * 180 / Math.PI, Math.atan2(v.x, c) * 180 / Math.PI); shell.status('Path set from this view');
+});
+$('pLevel').addEventListener('click', () => setTilt(0, 0));
+$('pSurvey').addEventListener('click', () => { if (SURV) { setTilt(SURV.ap, SURV.lat); shell.status('Survey’s path used'); } });
+$('dSection').addEventListener('change', (e) => {
+  V.section = e.target.checked;
+  if (V.section && B) { const Pm = B.mesh.positions, part = B.part, any = part && part.some((x) => x), bb = new THREE.Box3(), v3 = new THREE.Vector3(); for (let v = 0; v < Pm.length / 3; v++) if (!any || part[v]) bb.expandByPoint(v3.set(Pm[3 * v], Pm[3 * v + 1], Pm[3 * v + 2])); viewer.fit(bb.expandByScalar(any ? 5 : 2), { dir: [0, -1, 0.02] }); }
+  syncUI(); refreshView();
+});
+$('dLift').addEventListener('change', (e) => { V.lift = e.target.checked; refreshView(); });
+function paramsToUI() { for (const [k, r] of Object.entries(RB)) r.set(P[k]); for (const k of ['mode', 'side', 'top', 'hollow']) SEG[k](P[k]); }
+async function download(m, name, what) {
+  const sc = scans.upper; if (!m || !sc) return shell.status('Make it first (Design step)', true);
+  const r = await N.saveFile(name, N.stlBinary(N.transformMesh(m, sc.matrix.clone().invert()), null, `Obturator Card ${what}, mm`)); shell.status(r.message, !r.ok && r.code !== 'declined');
+}
+$('xStl').addEventListener('click', () => download(B && B.mesh, fileBase() + '.stl', P.mode === 'surgical' ? 'surgical obturator' : P.hollow === 'open' ? 'obturator body' : 'obturator'));
+$('xLid').addEventListener('click', () => download(B && B.lid, 'obturator-lid-upper.stl', 'obturator lid'));
+$('xCase').addEventListener('click', () => scans.saveCase());
+
+// ───────────── what is shown ─────────────
+function syncUI() {
+  const up = !!scans.upper, hol = P.mode === 'hollow', shown = (id, on) => { const e = $(id); if (e) e.hidden = !on; }, title = (id, t) => { shell.stepEl(id).querySelector('h3 span:nth-child(2)').textContent = t; };
+  SEG.mode(P.mode);
+  $('mkLead').textContent = hol ? 'An interim or definitive obturator from a scan taken after the resection that shows the defect (intraoral scan, or a scanned impression or model): a palatal plate carrying a bulb that fills the defect and seals it from the nose and sinus. The bulb is hollow to make it lighter.'
+    : 'A surgical (immediate) obturator from a scan taken before the operation: a plate over the palate up to the planned resection line and a little beyond, to carry the packing and seal the mouth from the day of surgery.';
+  $('mkNote').innerHTML = up ? '' : `<div class="note warn">${scans.lower ? 'This is for the upper arch: load the upper scan (the maxilla).' : 'Load the upper scan first.'}</div>`;
+  const pc = up && step() === 'path' ? pathCache() : PC;
+  $('pInfo').innerHTML = !up ? '<div class="note warn">Load the upper scan first.</div>' : `<div class="sum"><h5>Path of insertion<span class="okb">${Math.abs(P.ap) < 0.05 && Math.abs(P.lat) < 0.05 ? 'level' : 'tilted'}</span></h5><div><span>Front / back</span><b>${fmtAp(P.ap)}</b></div><div><span>Left / right</span><b>${fmtLat(P.lat)}</b></div>${pc ? `<div><span>Scan blocked out on this path</span><b>${(pc.share * 100).toFixed(1)}%</b></div>` : ''}</div>`;
+  shown('pSurvey', !!SURV);
+  title('margin', hol ? 'Defect margin' : 'Resection line'); shown('mSideRow', !hol);
+  const ml = hol ? P.margin : P.cut;
+  $('mLead').textContent = hol ? (ml.length < 4 ? 'Tap round the rim of the defect, in order, all the way round (8 or more points; more where it curves).' : 'Add points where the line leaves the rim, or go on.') : (ml.length < 2 ? 'Tap along the planned resection line, from one end to the other (front to back).' : 'Add points where the line bends, or go on.');
+  $('mCount').textContent = `${ml.length} point${ml.length === 1 ? '' : 's'}`;
+  $('mTip').textContent = hol ? 'A smooth line through your points is the margin: the bulb fills the defect inside it, and its height is measured from the margin’s mean level. The line need not be exact — the bulb follows the defect’s own walls.' : 'Say which side is to be removed. The plate covers the other side of the palate and carries on past the line by the distance set on the Design step.';
+  $('oLead').textContent = P.outline.length < 4 ? `Tap round the outline of the plate, in order, all the way round${hol ? ', outside the defect margin' : ''}.` : 'Add points to refine it, or go on.';
+  $('oCount').textContent = `${P.outline.length} point${P.outline.length === 1 ? '' : 's'}`;
+  $('oTip').textContent = hol ? 'Usually on the palatal gingiva of the remaining teeth (or over their cingula), along the vibrating line at the back, and a few millimetres past the defect margin on its side, so the plate seals round it.' : 'Usually on the palatal gingiva of the teeth all round and along the vibrating line at the back; the plate stops at the resection line plus the distance past it.';
+  $('dLead').textContent = hol ? 'Set the plate and the bulb, then make it. The plate lies on the palate; the bulb fills the defect up to the height set, a set relief off its walls.' : 'Set the plate’s thickness and how far it goes past the resection line, then make it.';
+  shown('dBeyondRow', !hol); shown('dBulbBox', hol); shown('dDomeRow', P.top === 'dome'); shown('dWallRow', P.hollow !== 'solid');
+  const i = B && B.info; let out = '';
+  if (i) {
+    const thinBad = i.thinnest != null && i.thinnest < i.wall - 0.1;
+    out = `<div class="sum"><h5>${MODES[i.mode] || 'Result'}<span class="okb${!i.closed ? ' bad' : thinBad ? ' warn' : ''}">${!i.closed ? 'not closed' : thinBad ? 'thin wall' : 'closed solid'}</span></h5>`
+      + `<div><span>Volume${i.lidVolume ? ' (body and lid)' : ''}</span><b>${i.volume.toFixed(0)} mm³ · ${gr(i.weight)}</b></div>`
+      + (i.kind === 'closed' || i.kind === 'open' ? `<div><span>With a solid bulb</span><b>${i.solidVolume.toFixed(0)} mm³ · ${gr(i.solidWeight)}</b></div><div><span>Saved by hollowing</span><b>${gr(i.saving)} (${i.savingPct.toFixed(0)}%)</b></div><div><span>Thinnest bulb wall (set ${mm(i.wall, 1)})</span><b>${mm(i.thinnest)}</b></div>` : '')
+      + (i.plate != null ? `<div><span>Plate thickness (typical)</span><b>${mm(i.plate)}</b></div>` : '')
+      + (i.bulbHeight != null ? `<div><span>Bulb height above the margin’s mean level</span><b>${mm(i.bulbHeight, 1)}</b></div>` : '')
+      + (i.lidVolume ? `<div><span>Lid</span><b>${i.lidVolume.toFixed(0)} mm³</b></div>` : '')
+      + `<div><span>Triangles</span><b>${i.tris.toLocaleString('en-GB')}</b></div>` + (i.seconds ? `<div><span>Made in</span><b>${i.seconds.toFixed(1)} s</b></div>` : '') + '</div>'
+      + `<p class="note">Weights for heat-cured acrylic (${RHO} g/cm³); printed denture-base resins are about the same.</p>`
+      + (i.notes || []).map((n) => `<p class="note warn">${N.esc(n)}</p>`).join('');
+  }
+  $('dOut').innerHTML = out; shown('dView', !!B); shown('dCutRow', V.section); shown('dLiftRow', !!(B && B.lid));
+  shown('xLid', !!(B && B.lid)); $('xStl').textContent = B && B.lid ? 'Download the body' : 'Download STL';
+  $('xTip').textContent = P.mode === 'surgical' ? 'Print in a denture-base or splint resin. Check it on the model before surgery; holes for wiring or screws are not added.' : P.hollow === 'open' ? 'Print the body and the lid in a denture-base resin; the lid’s plug fits the opening with 0.15 mm all round. Bond the lid on after a try-in and check the seal.' : P.hollow === 'closed' ? 'A closed hollow traps liquid resin when printed: drain and seal a small vent, or choose the open top with a lid. For processing in acrylic, use the shape as the guide for the hollow.' : 'Print in a denture-base resin.';
+  shell.markDone('make', up); shell.markDone('path', up); shell.markDone('margin', hol ? P.margin.length >= 4 : P.cut.length >= 2); shell.markDone('outline', P.outline.length >= 4); shell.markDone('design', !!B);
+}
+let overlay = null, extra = [], marks = [];
+const SCAN = new THREE.Color(0xeadfcb), WAX = new THREE.Color(0x60a5fa), PLATE = new THREE.Color(0xf4a3b5), BULB = new THREE.Color(0x2dd4bf), LID = new THREE.Color(0xf59e0b);
+function dropOverlay() { if (overlay) { viewer.remove(overlay); overlay = null; } }
+function ensureOverlay(tint) {
+  const pc = pathCache(); if (!pc) return null;
+  if (!overlay || overlay.userData.key !== pc.key) {
+    dropOverlay(); const m = pc.framed, g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3)); g.setIndex(new THREE.BufferAttribute(m.indices, 1)); g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(m.positions.length), 3)); g.computeVertexNormals(); g.computeBoundsTree({ indirect: true }); g.computeBoundingSphere();
+    overlay = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02, side: THREE.DoubleSide })); overlay.userData = { key: pc.key, tint: null }; viewer.add(overlay);
+  }
+  if (overlay.userData.tint !== tint) { const a = overlay.geometry.attributes.color; for (let v = 0; v < a.count; v++) { const c = tint && pc.blocked[v] ? WAX : SCAN; a.setXYZ(v, c.r, c.g, c.b); } a.needsUpdate = true; overlay.userData.tint = tint; }
+  return overlay;
+}
+/** a line in plan through the taps, drawn on the scan as seen along the path */
+function drawnCurve(taps, closed) {
+  const pc = pathCache(), FtoP = new THREE.Matrix4().multiplyMatrices(pc.Q, scans.upper.matrix), pts = taps.map((f) => new THREE.Vector3(...f).applyMatrix4(FtoP)); if (pts.length < 2) return [];
+  const cv = smoothCurve(pts, closed && pts.length >= 3, 0.5), ray = new THREE.Ray(), down = pc.d.clone().negate(), bvh = overlay && overlay.geometry.boundsTree, out = [];
+  for (const p of cv) { const c = new THREE.Vector3(p[0], p[1], p[2]).applyMatrix4(pc.Qi); let q = c; if (bvh) { ray.origin.copy(c).addScaledVector(pc.d, 40); ray.direction.copy(down); const h = bvh.raycastFirst(ray, THREE.DoubleSide); if (h && Math.abs(h.distance - 40) < 1.5) q = h.point.clone(); } out.push(q.addScaledVector(pc.d, 0.05)); }
+  return out;
+}
+/** the result drawn with its outside coloured and its inside dark: through a section the cut walls read as dark bands round the hollow */
+function resultObject(m, colours, clip) {
+  const g = N.toGeometry(m, { bvh: false }), col = new Float32Array(m.positions.length); for (let v = 0; v < col.length / 3; v++) { const c = colours(v); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const front = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.02, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, clippingPlanes: clip }));
+  const back = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x1e3a5f, side: THREE.BackSide, clippingPlanes: clip })); front.add(back); front.userData.noFit = back.userData.noFit = true; return front;
+}
+function refreshView() {
+  for (const o of extra) viewer.remove(o); extra = []; for (const m of marks) { if (m.m.dispose) m.m.dispose(); else viewer.scene.remove(m.m); if (m.l) m.l.remove(); } marks = [];
+  const id = step(), up = !!scans.upper, work = up && ['path', 'margin', 'outline', 'design', 'export'].includes(id);
+  for (const j of ['upper', 'lower']) if (scans[j]) { const want = !work; if (scans[j].object.visible !== want) scans.setVisible(j, want); }
+  const res = !!B && ['design', 'export'].includes(id);
+  if (work) {
+    const ov = ensureOverlay(id === 'path'), mat = ov.material, see = res && !V.section;
+    if (ov.userData.framed !== true && !res) { ov.userData.framed = true; viewer.fit(ov, { dir: [0.2, -0.55, -1] }); }   // the palate is seen from below
+    ov.visible = true; if (mat.transparent !== see) { mat.transparent = see; mat.opacity = see ? 0.3 : 1; mat.depthWrite = !see; mat.needsUpdate = true; }
+    const hol = P.mode === 'hollow', mList = hol ? P.margin : P.cut, onTaps = id === 'margin' || id === 'outline';
+    if (id !== 'path' && !res) {
+      const mc = drawnCurve(mList, hol), oc = drawnCurve(P.outline, true);
+      if (mc.length >= 2) marks.push({ m: viewer.line(mc, { color: hol ? 0xc026d3 : 0xdc2626, width: id === 'margin' ? 3 : 2, closed: false, depthTest: false }) });
+      if (oc.length >= 2 && id !== 'margin') marks.push({ m: viewer.line(oc, { color: 0x0f766e, width: id === 'outline' ? 3 : 2, closed: false, depthTest: false }) });
+      if (onTaps) { const list = tapList(), M = scans.upper.matrix; for (const f of list) marks.push({ m: viewer.marker(new THREE.Vector3(...f).applyMatrix4(M), { color: id === 'margin' ? 0xa21caf : 0x0f2a44, px: 12 }) }); }
+    }
+  } else if (overlay) overlay.visible = false;
+  const clip = V.section && res ? [sectionPlane()] : null;
+  if (overlay) { overlay.material.clippingPlanes = clip; overlay.material.needsUpdate = true; }
+  legend.hidden = true;
+  if (res) {
+    const part = B.part || new Uint8Array(B.mesh.positions.length / 3), o = resultObject(B.mesh, (v) => (part[v] ? BULB : PLATE), clip); viewer.add(o); extra.push(o);
+    if (B.lid) { const l = resultObject(B.lid, () => LID, clip); if (V.lift) { const d = pathCache().d; l.position.copy(d).multiplyScalar(-8); } viewer.add(l); extra.push(l); }
+    legend.hidden = false; legend.innerHTML = `<div><i style="background:#f4a3b5"></i>plate</div>${P.mode === 'hollow' ? '<div><i style="background:#2dd4bf"></i>bulb</div>' : ''}${B.lid ? '<div><i style="background:#f59e0b"></i>lid</div>' : ''}<div><i style="background:#eadfcb;opacity:.6"></i>the scan (see-through)</div>`;
+    if (B.info && B.info.thinAt) { const v = new THREE.Vector3(...B.info.thinAt); marks.push({ m: viewer.marker(v, { color: 0x0f2a44, px: 10 }), l: viewer.label(`thinnest wall ${mm(B.info.thinnest)}`, v, { dy: -16 }) }); }
+    if (B.focus) { B.focus = false; const bb = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(B.mesh.positions, 3)); viewer.fit(bb.expandByScalar(6), { dir: [0.5, -0.75, -0.6] }); }
+  }
+  if (['margin', 'outline'].includes(id) && up) { if (viewer.tool !== tapTool) viewer.setTool(tapTool); shell.hint(id === 'outline' ? 'Tap round the plate outline' : P.mode === 'hollow' ? 'Tap round the defect’s rim' : 'Tap along the resection line'); }
+  else if (viewer.tool === tapTool) { viewer.setTool(null); shell.hint(''); }
+  viewer.invalidate();
+}
+/** a section across the result, square to front–back, through the bulb (or the plate) — the part behind it is shown */
+function sectionPlane() {
+  const Pm = B.mesh.positions, part = B.part; let lo = Infinity, hi = -Infinity; const any = part && part.some((x) => x);
+  for (let v = 0; v < Pm.length / 3; v++) if (!any || part[v]) { lo = Math.min(lo, Pm[3 * v + 1]); hi = Math.max(hi, Pm[3 * v + 1]); }
+  const y = lo + (hi - lo) * V.cutAt; return new THREE.Plane(new THREE.Vector3(0, 1, 0), -y);
+}
+shell.onStepChange(() => { syncUI(); refreshView(); });
+paramsToUI(); syncUI(); shell.goto(0);
+window.APP = { N, THREE, SOL, shell, viewer, scans, P, V, get B() { return B; }, get PC() { return PC; }, get SURV() { return SURV; }, pathCache, buildIt, classify, smoothCurve, refreshView, syncUI, paramsToUI, RB, SEG, dirOf, frameOf, realSurf, realSd, setTilt };
+</script>
+</body>
+</html>
