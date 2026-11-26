@@ -1,7 +1,8 @@
 // Shell Card's spaced model on an upper model with a sharp-edged base, solid and hollow (mkshell.mjs), canine to canine, defaults.
 // Before the fix, points just off the base's edges were judged inside and sheets of false material ran out along its faces (up to
 // 22 mm off the model); a hollow model's cavity also took a layer of spacer. Checks: closed; nothing stands further off the model
-// than the spacer's thickness; the hollow model takes no more spacer than the solid one; the first premolars are untouched.
+// than the spacer's thickness; the hollow model takes no more spacer than the solid one; the first premolars are untouched; the result
+// is drawn with sharp creases (the long thin triangles at the join used to smear light and colour along it, so it looked ragged).
 const { openApp } = require('/home/claude/suite/dev/pw.cjs');
 const fs = require('fs'), DATA = '/home/claude/suite/dev/data/', OUT = '/home/claude/suite/dev/out/shell-card/';
 const U = JSON.parse(fs.readFileSync(DATA + 'shell-upper-truth.json'));
@@ -24,6 +25,11 @@ const ok = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) proce
     ok(r && r.closed && r.space === 3, `${which} upper model: spaced model made with the defaults (${r && r.space} mm), closed, ${r && r.added.toFixed(0)} mm³ added, in ${r && r.sec.toFixed(1)} s`);
     ok(r && r.maxOff <= r.space + 0.12, `${which}: nothing stands further off the model than the spacer (furthest ${r && r.maxOff.toFixed(2)} mm) — no sheets off the base’s edges`);
     ok(r && r.nb.every((d) => d < 0.02), `${which}: the first premolars beside the canines are untouched (${r && r.nb.map((d) => d.toFixed(3)).join(' and ')} mm)`);
+    const dr = await page.evaluate(() => { let o = null; APP.viewer.scene.traverse((m) => { if (m.isMesh && m.material && m.material.vertexColors && m.geometry.attributes.normal && !m.geometry.index && m.geometry.attributes.position.count > 10000) o = m; }); if (!o) return null;
+      const P = o.geometry.attributes.position.array, Nn = o.geometry.attributes.normal.array; let worst = 0;
+      for (let f = 0; f < P.length; f += 9) { const ux = P[f + 3] - P[f], uy = P[f + 4] - P[f + 1], uz = P[f + 5] - P[f + 2], wx = P[f + 6] - P[f], wy = P[f + 7] - P[f + 1], wz = P[f + 8] - P[f + 2]; let x = uy * wz - uz * wy, y = uz * wx - ux * wz, z = ux * wy - uy * wx; const l = Math.hypot(x, y, z); if (l < 1e-9) continue; x /= l; y /= l; z /= l;
+        for (let k = 0; k < 9; k += 3) worst = Math.max(worst, Math.acos(Math.min(1, x * Nn[f + k] + y * Nn[f + k + 1] + z * Nn[f + k + 2])) * 180 / Math.PI); } return { worst }; });
+    ok(dr && dr.worst < 36, `${which}: drawn with its creases kept (no corner’s shading more than ${dr && dr.worst.toFixed(0)}° off its face, so the join is not smeared)`);
     await page.evaluate(() => APP.viewer.setView('front')); await page.waitForTimeout(300); await shot(OUT + `t3-${which}.png`);
     ok(errors.length === 0, `${which}: no page errors ` + errors.slice(0, 2).join(' | ')); await close();
   }
