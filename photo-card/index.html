@@ -350,7 +350,9 @@ footer{font-size:.85rem;color:var(--muted);max-width:80ch}
   <div class="f"><span class="lbl">My series order</span><p class="hint">Tick the views you take and put them in the order you take them. On import, Photo Card can label the photos after each slate in this order.</p><div id="mySeries"></div></div>
   <hr style="border:0;border-top:1px solid var(--line);margin:2px 0">
   <div class="f"><span class="lbl">Backup</span><div class="row"><button class="btn ghost" id="zipAll" type="button">Download all cases as ZIP</button></div></div>
-  <div class="f"><span class="lbl">Storage</span><p class="hint" id="storeMsg"></p></div>
+  <div class="f"><span class="lbl">Storage</span><p class="hint" id="storeMsg"></p>
+    <label class="row" style="gap:8px;align-items:flex-start"><input type="checkbox" id="keepOrig" style="width:20px;height:20px;accent-color:var(--teal);flex:none;margin-top:2px"> <span>Keep full-size originals on this device<br><span class="hint">Off keeps a screen-sized copy instead, about 0.5 MB rather than 7 MB a photo: fine for viewing, before/after and collages. The full-size photos stay in Google Drive.</span></span></label>
+    <div class="row"><button class="btn ghost" id="dropOrig" type="button" hidden>Remove full-size originals from this device</button></div></div>
   <div class="row"><button class="btn danger" id="eraseAll" type="button">Erase everything on this device</button></div>
 </div><div class="dbtns"><button class="btn" id="setClose" type="button">Done</button></div></dialog>
 
@@ -415,10 +417,13 @@ const CASES=new Map(),PHOTOS=new Map();
 async function saveCase(c){c.updated=Date.now();CASES.set(c.id,c);await DB.put('cases',c)}
 async function savePhoto(p){p.updated=Date.now();PHOTOS.set(p.id,p);await DB.put('photos',p)}
 async function addPhoto(p,orig,disp,thumb){p.updated=p.created=Date.now();
-  await DB.run(['photos','orig','disp','thumb'],'readwrite',t=>{t.objectStore('photos').put(p);t.objectStore('orig').put(orig,p.id);t.objectStore('disp').put(disp,p.id);t.objectStore('thumb').put(thumb,p.id)});PHOTOS.set(p.id,p)}
+  await DB.run(['photos','orig','disp','thumb'],'readwrite',t=>{t.objectStore('photos').put(p);if(orig)t.objectStore('orig').put(orig,p.id);t.objectStore('disp').put(disp,p.id);t.objectStore('thumb').put(thumb,p.id)});PHOTOS.set(p.id,p)}
 async function deletePhotos(ids){if(!ids.length)return;await DB.run(['photos','orig','disp','thumb'],'readwrite',t=>{ids.forEach(id=>['photos','orig','disp','thumb'].forEach(s=>t.objectStore(s).delete(id)))});
   ids.forEach(id=>{PHOTOS.delete(id);const u=THUMB.get(id);if(u){URL.revokeObjectURL(u);THUMB.delete(id)}})}
 const THUMB=new Map();
+// the full-size original if this device keeps it, otherwise the screen copy (about 1800 px); the originals stay in Drive
+async function photoBlob(p){return (await DB.get('orig',p.id))||(await DB.get('disp',p.id))}
+const keepOrig=()=>store.get('keepOrig',!matchMedia('(hover:none) and (pointer:coarse)').matches);
 async function thumbUrl(id){if(THUMB.has(id))return THUMB.get(id);const b=await DB.get('thumb',id);if(!b)return '';const u=URL.createObjectURL(b);THUMB.set(id,u);return u}
 // fill <img data-th> placeholders once their thumbnails are read
 function hydrate(root){root.querySelectorAll('img[data-th]').forEach(async img=>{const id=img.dataset.th;img.removeAttribute('data-th');const u=await thumbUrl(id);if(u)img.src=u})}
@@ -500,7 +505,7 @@ function exportPath(p,c,used){const st=SNAME[p.stage]||'Unsorted',num=pad((VORDE
   let n=`${safeName(c?c.name+(c.label?' - '+c.label:''):'Unsorted')}/${safeName(base)}/${num} ${safeName(VSHORT[p.view]||'Photo')} - ${safeName((p.name||'photo').replace(/\.[^.]+$/,''))}${(/\.[a-z0-9]{2,5}$/i.exec(p.name||'')||['.jpg'])[0].toLowerCase()}`;
   if(used){let k=n,i=2;while(used.has(k)){k=n.replace(/(\.[a-z0-9]+)$/i,` (${i++})$1`)}used.add(k);n=k}return n}
 async function zipPhotos(list,zipName){if(!list.length)return toast('No photos to save');toast('Making the ZIP…',60000);const used=new Set(),files=[];
-  for(const p of sortPhotos(list.slice())){const b=await DB.get('orig',p.id);if(b)files.push({path:exportPath(p,CASES.get(p.caseId),used),blob:b})}
+  for(const p of sortPhotos(list.slice())){const b=await photoBlob(p);if(b)files.push({path:exportPath(p,CASES.get(p.caseId),used),blob:b})}
   const z=await makeZip(files);toast(`ZIP ready: ${plural(files.length,'photo')}`);
   if(/iPhone|iPad/.test(navigator.userAgent)&&canShareFiles([new File([z],zipName,{type:'application/zip'})]))return shareFiles([new File([z],zipName,{type:'application/zip'})],zipName);
   download(z,zipName)}
@@ -508,7 +513,7 @@ const canFolder=!!window.showDirectoryPicker&&window.isSecureContext;
 let FOLDER=null;
 async function folderReady(ask){if(!FOLDER)return false;try{const o={mode:'readwrite'};if(await FOLDER.queryPermission(o)==='granted')return true;if(ask&&await FOLDER.requestPermission(o)==='granted')return true}catch(e){}return false}
 async function writeToFolder(list,silent){if(!FOLDER||!list.length)return 0;let n=0;const used=new Set();
-  for(const p of sortPhotos(list.slice())){const b=await DB.get('orig',p.id);if(!b)continue;const parts=exportPath(p,CASES.get(p.caseId),used).split('/');let dir=FOLDER;
+  for(const p of sortPhotos(list.slice())){const b=await photoBlob(p);if(!b)continue;const parts=exportPath(p,CASES.get(p.caseId),used).split('/');let dir=FOLDER;
     for(const d of parts.slice(0,-1))dir=await dir.getDirectoryHandle(d,{create:true});
     const fh=await dir.getFileHandle(parts[parts.length-1],{create:true}),w=await fh.createWritable();await w.write(b);await w.close();
     p.saved=FOLDER.name;await savePhoto(p);n++}
@@ -582,7 +587,7 @@ $('sStage').addEventListener('click',()=>pick('Set the stage for '+plural(S.sel.
 $('sMove').addEventListener('click',()=>pickCase('Move '+plural(S.sel.size,'photo')+' to',async id=>{for(const p of selPhotos()){p.caseId=id||null;await savePhoto(p)}setSelecting(false);renderCase();toast('Moved')}));
 $('sDel').addEventListener('click',async()=>{const ps=selPhotos();if(!ps.length)return;if($('sDel').dataset.armed!=='1'){$('sDel').dataset.armed='1';$('sDel').textContent='Tap again to delete';setTimeout(()=>{$('sDel').dataset.armed='';$('sDel').textContent='Delete'},4000);return}
   $('sDel').dataset.armed='';$('sDel').textContent='Delete';await deletePhotos(ps.map(p=>p.id));setSelecting(false);renderCase();toast(`Deleted ${plural(ps.length,'photo')}`)});
-$('sShare').addEventListener('click',async()=>{const files=[];for(const p of sortPhotos(selPhotos())){const b=await DB.get('orig',p.id);if(b)files.push(new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'}))}
+$('sShare').addEventListener('click',async()=>{const files=[];for(const p of sortPhotos(selPhotos())){const b=await photoBlob(p);if(b)files.push(new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'}))}
   if(!canShareFiles(files))return toast('This browser cannot share photos. Download a ZIP instead.',3200);shareFiles(files,'Photos')});
 // pickers
 let pickCb=null;
@@ -698,10 +703,11 @@ async function saveImport(auto,info){
   const autoFolder=canFolder&&FOLDER&&store.get('folderAuto',false)&&await folderReady(!auto); // asks while the click still counts as a gesture
   if(auto)assignViews();
   $('impSave').disabled=true;let saved=0;const added=[];
+  const keep=keepOrig();
   const commit=async(items,target,stage,slate)=>{if(target==='skip')return;let caseId=target||null;
     if(target==='slate'&&slate){if(!CASES.has(slate.id))await saveCase({id:slate.id,name:slate.name,label:slate.label,tags:[],notes:'',created:Date.now()});caseId=slate.id}
-    for(const it of items){if(!it.include)continue;const p={id:it.id,caseId,stage,view:it.slate?'other':(it.view||''),taken:it.taken,date:isoDate(it.taken),name:it.name,size:it.size,w:it.w,h:it.h,teeth:[],tags:it.slate?['slate']:[],note:'',rot:0,fh:false,fv:false,star:false};
-      await addPhoto(p,it.file,it.disp,it.thumb);added.push(p);saved++;if(!auto)$('impSummary').textContent=`Saving… ${saved}`;await yieldUI()}};
+    for(const it of items){if(!it.include)continue;const p={id:it.id,caseId,stage,view:it.slate?'other':(it.view||''),taken:it.taken,date:isoDate(it.taken),name:it.name,size:it.size,w:it.w,h:it.h,teeth:[],tags:it.slate?['slate']:[],note:'',rot:0,fh:false,fv:false,star:false,orig:keep};
+      await addPhoto(p,keep?it.file:null,it.disp,it.thumb);added.push(p);saved++;if(!auto)$('impSummary').textContent=`Saving… ${saved}`;await yieldUI()}};
   try{const evs=store.get('slates',[]);
     for(const g of IMP.groups){await commit(g.slate?[g.slateItem,...g.items]:g.items,g.target,g.stage,g.slate);
       const cid=g.target==='slate'&&g.slate?g.slate.id:g.target;if(g.slate&&cid&&cid!=='skip')evs.push({t:g.slateItem.taken,caseId:cid,stage:g.stage})}
@@ -741,7 +747,7 @@ const V={id:null,list:[]};
 function fillSelects(){$('vView').innerHTML='<option value="">Not labelled</option>'+VIEWS.map(v=>`<option value="${v[0]}">${esc(v[1])}</option>`).join('');$('vStageSel').innerHTML=STAGES.map(([k,n])=>`<option value="${k}">${n}</option>`).join('')}
 async function openViewer(id,list){V.id=id;V.list=list||[id];if(!$('dView').open)$('dView').showModal();await showPhoto()}
 async function showPhoto(){const p=PHOTOS.get(V.id);if(!p){$('dView').close();return}const c=CASES.get(p.caseId),i=V.list.indexOf(p.id);
-  $('vTitle').textContent=(c?c.name:'Unsorted')+(V.list.length>1?` · ${i+1} of ${V.list.length}`:'');$('vInfo').textContent=[p.name,p.w&&p.h?`${p.w}×${p.h}`:'',p.taken?new Date(p.taken).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}):'',p.saved?'Saved to '+p.saved:''].filter(Boolean).join(' · ');
+  $('vTitle').textContent=(c?c.name:'Unsorted')+(V.list.length>1?` · ${i+1} of ${V.list.length}`:'');$('vInfo').textContent=[p.name,p.w&&p.h?`${p.w}×${p.h}`:'',p.taken?new Date(p.taken).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}):'',p.orig===false?'Screen copy on this device; the full-size photo is in Drive':'',p.saved?'Saved to '+p.saved:''].filter(Boolean).join(' · ');
   $('vView').value=p.view||'';$('vStageSel').value=p.stage||'pre';$('vDate').value=p.date||'';$('vTeeth').value=(p.teeth||[]).join(', ');$('vTags').value=(p.tags||[]).join(', ');$('vNote').value=p.note||'';$('vStar').checked=!!p.star;
   $('vPrev').hidden=$('vNext').hidden=V.list.length<2;$('vShare').hidden=!navigator.share;await drawViewer()}
 async function drawViewer(){const p=PHOTOS.get(V.id),bm=await dispBitmap(V.id);if(!bm||!p)return;const o=oriented(p,bm),cv=$('vCanvas');cv.width=o.w;cv.height=o.h;const x=cv.getContext('2d');x.fillStyle='#000';x.fillRect(0,0,o.w,o.h);drawPhoto(x,p,bm,0,0,o.w,o.h,false)}
@@ -763,8 +769,8 @@ $('vTeeth').addEventListener('change',()=>edit(p=>{p.teeth=teethList($('vTeeth')
 $('vTags').addEventListener('change',()=>edit(p=>p.tags=splitList($('vTags').value)));
 $('vNote').addEventListener('change',()=>edit(p=>p.note=$('vNote').value.trim().slice(0,1000)));
 $('vStar').addEventListener('change',()=>edit(p=>p.star=$('vStar').checked));
-$('vDown').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await DB.get('orig',p.id);if(b)download(b,p.name||'photo.jpg')});
-$('vShare').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await DB.get('orig',p.id);const f=[new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'})];if(canShareFiles(f))shareFiles(f,'Photo');else toast('This browser cannot share photos.')});
+$('vDown').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await photoBlob(p);if(b)download(b,p.name||'photo.jpg')});
+$('vShare').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await photoBlob(p);const f=[new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'})];if(canShareFiles(f))shareFiles(f,'Photo');else toast('This browser cannot share photos.')});
 $('vMove').addEventListener('click',()=>pickCase('Move this photo to',async id=>{await edit(p=>p.caseId=id||null);toast('Moved');showPhoto()}));
 $('vDel').addEventListener('click',async()=>{const b=$('vDel');if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='Tap again to delete';setTimeout(()=>{b.dataset.armed='';b.textContent='Delete'},4000);return}
   b.dataset.armed='';b.textContent='Delete';const id=V.id,i=V.list.indexOf(id);await deletePhotos([id]);V.list=V.list.filter(x=>x!==id);if(!V.list.length){$('dView').close();return}V.id=V.list[Math.min(i,V.list.length-1)];showPhoto();toast('Photo deleted')});
@@ -873,11 +879,15 @@ async function loadGS(){if(GS)return GS;try{const r=await fetch('PhotoCardSorter
 $('gsCopy').addEventListener('click',async()=>{const t=GS||await loadGS();if(!t)return toast('Could not load the script. Use Download it instead.',3500);
   try{await navigator.clipboard.writeText(t);toast('Script copied. Paste it into a new project at script.google.com.',4000)}catch(e){toast('Could not copy here. Use Download it instead.',3500)}});
 $('zipAll').addEventListener('click',()=>zipPhotos([...PHOTOS.values()],'Photo Card '+isoDate(Date.now())+'.zip'));
-$('setBtn').addEventListener('click',async()=>{renderSeriesEditor();renderFolder();renderWatch();loadGS();$('eraseAll').dataset.armed='';$('eraseAll').textContent='Erase everything on this device';
+$('setBtn').addEventListener('click',async()=>{renderSeriesEditor();renderFolder();renderWatch();renderKeep();loadGS();$('eraseAll').dataset.armed='';$('eraseAll').textContent='Erase everything on this device';
   let m=`${plural(CASES.size,'case')}, ${plural(PHOTOS.size,'photo')} on this device.`;try{if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();m+=` Using ${(e.usage/1048576).toFixed(0)} MB of about ${(e.quota/1073741824).toFixed(1)} GB the browser allows.`}
     if(navigator.storage&&navigator.storage.persisted&&await navigator.storage.persisted())m+=' The browser has agreed not to clear it automatically.'}catch(e){}
   $('storeMsg').textContent=m;$('dSet').showModal()});
 $('setClose').addEventListener('click',()=>$('dSet').close());
+function renderKeep(){$('keepOrig').checked=keepOrig();const n=[...PHOTOS.values()].filter(p=>p.orig!==false).length;$('dropOrig').hidden=!n;$('dropOrig').textContent=`Remove full-size originals from this device (${plural(n,'photo')})`;$('dropOrig').dataset.armed=''}
+$('keepOrig').addEventListener('change',()=>store.set('keepOrig',$('keepOrig').checked));
+$('dropOrig').addEventListener('click',async()=>{const b=$('dropOrig');if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='Tap again: only the screen copies stay here (check the photos are in Drive first)';return}
+  const ps=[...PHOTOS.values()].filter(p=>p.orig!==false);for(const p of ps){await DB.del('orig',p.id);p.orig=false;await savePhoto(p)}renderKeep();toast(`Freed the space from ${plural(ps.length,'original')}`)});
 $('eraseAll').addEventListener('click',async()=>{const b=$('eraseAll');if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='Tap again: this deletes every case and photo on this device';return}
   await deletePhotos([...PHOTOS.keys()]);for(const id of [...CASES.keys()]){await DB.del('cases',id)}CASES.clear();$('dSet').close();showView('home');toast('Everything erased')});
 

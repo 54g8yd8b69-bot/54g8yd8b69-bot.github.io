@@ -182,12 +182,18 @@ run({name:'Landing page',fn:async()=>{
     const r1=await pg.evaluate(async files=>{const root=await navigator.storage.getDirectory(),dir=await root.getDirectoryHandle('image.canon',{create:true}),sub=await dir.getDirectoryHandle('2026',{create:true});
       for(const f of files){const bin=atob(f.b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);const h=await sub.getFileHandle(f.name,{create:true}),w=await h.createWritable();await w.write(u);await w.close()}
       const raw=await sub.getFileHandle('IMG_0101.CR3',{create:true}),w=await raw.createWritable();await w.write('raw');await w.close();
-      photoCard._watch(dir);await photoCard.checkWatch(false);return photoCard.photos().map(p=>p.name+':'+(p.caseId||'-')+':'+p.stage)},files);
+      localStorage.setItem('photoCard.keepOrig','false');photoCard._watch(dir);await photoCard.checkWatch(false);return photoCard.photos().map(p=>p.name+':'+(p.caseId||'-')+':'+p.stage)},files);
     expect(!(await pg.evaluate(()=>document.getElementById('dImp').open)),'the checking step opened for the watched folder');
     const inC=r1.filter(x=>x.includes(':cccc1111:pre'));expect(inC.length===2&&r1.length===3,'watched folder photos not filed: '+r1.join(', '));
     expect(r1.some(x=>/IMG_0104.JPG:-:/.test(x)),'a photo 4 hours after the slate should be unsorted: '+r1.join(', '));
     expect((await pg.evaluate(()=>photoCard.cases())).some(c=>c.id==='cccc1111'&&c.label==='veneers'),'case not made from the slate');
     const n2=await pg.evaluate(async()=>{await photoCard.checkWatch(false);return photoCard.photos().length});expect(n2===3,'photos imported twice: '+n2);
+    // with "keep full-size originals" off, only the screen copy is stored, and downloads use it
+    const kept=await pg.evaluate(()=>new Promise(res=>{const r=indexedDB.open('notile-photo-card');r.onsuccess=()=>{const q=r.result.transaction('orig').objectStore('orig').count();q.onsuccess=()=>res(q.result)}}));
+    expect(kept===0&&(await pg.evaluate(()=>photoCard.photos().every(p=>p.orig===false))),'originals kept despite the setting: '+kept);
+    await pg.click('[data-case="cccc1111"]');await pg.click('#photoGroups .ph >> nth=0');await pg.waitForSelector('#dView[open]');
+    expect(/Screen copy on this device/.test(await pg.innerText('#vInfo')),'viewer should say only the screen copy is here');
+    const dl=pg.waitForEvent('download');await pg.click('#vDown');expect((await (await dl).path())!==null,'download of the screen copy failed');await pg.click('#vClose');
     await noErrors(pg)});
   await test('The Photo Card Google Drive script files image.canon photos into case and visit folders, with RAW files, across checks',async()=>{
     const fs=require('fs'),path=require('path'),root=path.join(__dirname,'..','photo-card');
