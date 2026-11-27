@@ -170,6 +170,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:80ch}
 .empty{color:var(--muted);margin:6px 0}
 .srow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
 .srow label{flex:1;display:flex;gap:8px;align-items:center}
+.steps{margin:0;padding-left:1.3em;display:grid;gap:4px}
 .srow input[type=checkbox]{width:20px;height:20px;accent-color:var(--teal)}
 @media (prefers-reduced-motion:reduce){#toast,.prog>div{transition:none}}
 </style>
@@ -184,6 +185,7 @@ footer{font-size:.85rem;color:var(--muted);max-width:80ch}
 </header>
 
 <main id="home">
+  <section class="card row" id="watchBar" hidden><span class="sp" id="watchBarMsg"></span><button class="btn" id="watchBarBtn" type="button">Check now</button></section>
   <section class="drop" id="dropzone" aria-label="Import photos">
     <h2>Import photos</h2>
     <p class="sub" id="dropHint">Drop the photos, a folder, or the ZIP you downloaded from Google Photos here. Photo Card finds each QR slate and files the photos after it into that case.</p>
@@ -335,11 +337,18 @@ footer{font-size:.85rem;color:var(--muted);max-width:80ch}
 <!-- settings -->
 <dialog id="dSet" aria-labelledby="dSetT"><div class="dlg">
   <h2 id="dSetT">Settings</h2>
-  <div class="f"><span class="lbl">My series order</span><p class="hint">Tick the views you take and put them in the order you take them. On import, Photo Card can label the photos after each slate in this order.</p><div id="mySeries"></div></div>
-  <hr style="border:0;border-top:1px solid var(--line);margin:2px 0">
+  <div class="f"><span class="lbl">Sort in Google Drive automatically</span>
+    <p class="hint">A small script in your own Google account files the photos image.canon sends to Google Drive into Photo Cases › case › visit folders every 10 minutes, with nothing left open. RAW files go with their JPEGs. Set it up once, on a computer:</p>
+    <ol class="hint steps"><li>Press Copy the script.</li><li>Go to script.google.com and press New project. Select everything in the editor, paste over it and press Save.</li><li>Choose <b>setup</b> in the list next to Run, press Run and allow access to Drive. Google warns that the app isn't verified because it's your own script: press Advanced, then Go to … (unsafe), then Allow.</li></ol>
+    <div class="row"><button class="btn ghost" id="gsCopy" type="button">Copy the script</button><a class="btn ghost" href="PhotoCardSorter.gs" download="PhotoCardSorter.gs">Download it</a></div></div>
+  <div class="f" id="watchBox" hidden><span class="lbl">Import automatically from a folder</span><p class="hint" id="watchMsg"></p>
+    <div class="row" id="watchFirst" hidden><button class="btn" id="watchAll" type="button">Import them</button><button class="btn ghost" id="watchSkip" type="button">Only new photos from now on</button></div>
+    <div class="row"><button class="btn ghost" id="watchPick" type="button">Choose folder</button><button class="btn ghost" id="watchNow" type="button" hidden>Check now</button><button class="btn ghost" id="watchForget" type="button" hidden>Stop watching</button></div></div>
   <div class="f" id="folderBox" hidden><span class="lbl">Folder for case folders</span><p class="hint" id="folderMsg">Choose a folder on this computer, such as your Google Drive or OneDrive folder, and Photo Card saves each case into its own folder there.</p>
     <div class="row"><button class="btn ghost" id="folderPick" type="button">Choose folder</button><button class="btn ghost" id="folderForget" type="button" hidden>Forget folder</button></div>
     <label class="row" style="gap:8px"><input type="checkbox" id="folderAuto" style="width:20px;height:20px;accent-color:var(--teal)"> Save newly imported photos to the folder straight away</label></div>
+  <div class="f"><span class="lbl">My series order</span><p class="hint">Tick the views you take and put them in the order you take them. On import, Photo Card can label the photos after each slate in this order.</p><div id="mySeries"></div></div>
+  <hr style="border:0;border-top:1px solid var(--line);margin:2px 0">
   <div class="f"><span class="lbl">Backup</span><div class="row"><button class="btn ghost" id="zipAll" type="button">Download all cases as ZIP</button></div></div>
   <div class="f"><span class="lbl">Storage</span><p class="hint" id="storeMsg"></p></div>
   <div class="row"><button class="btn danger" id="eraseAll" type="button">Erase everything on this device</button></div>
@@ -621,51 +630,61 @@ function filesFromDrop(dt){return new Promise(async res=>{const out=[],items=[..
   if(!items.length){res([...(dt.files||[])]);return}
   const walk=async ent=>{if(ent.isFile)await new Promise(r=>ent.file(f=>{out.push(f);r()},r));else if(ent.isDirectory){const rd=ent.createReader();let batch;do{batch=await new Promise(r=>rd.readEntries(r,()=>r([])));for(const e of batch)await walk(e)}while(batch.length)}};
   for(const e of items)await walk(e);res(out)})}
-async function startImport(files,forceCase){files=[...files];if(!files.length||IMP.busy)return;IMP.busy=true;IMP.items=[];IMP.forceCase=forceCase||null;
-  $('impWork').hidden=false;$('impReview').hidden=true;$('impErr').hidden=true;$('impSave').disabled=true;$('dImpT').textContent='Importing photos';$('impBar').style.width='0';$('dImp').showModal();
-  const known=new Set([...PHOTOS.values()].map(p=>`${p.name}|${p.size}|${p.taken}`));let done=0,total=files.length,failed=[],dupes=0;
-  const msg=t=>{$('impMsg').textContent=t};
+// opts.auto: from the watched folder, saved straight away with no checking step; returns a summary, or null if it failed
+async function startImport(files,forceCase,opts){const auto=!!(opts&&opts.auto);files=[...files];if(!files.length)return null;
+  if(IMP.busy){if(!auto)toast('Photo Card is still importing. Try again in a moment.');return null}
+  IMP.busy=true;IMP.items=[];IMP.forceCase=forceCase||null;
+  if(!auto){$('impWork').hidden=false;$('impReview').hidden=true;$('impErr').hidden=true;$('impSave').disabled=true;$('dImpT').textContent='Importing photos';$('impBar').style.width='0';$('dImp').showModal()}
+  /* duplicates are matched on size and capture time, so a copy saved under another name isn't imported twice */const known=new Set([...PHOTOS.values()].map(p=>`${p.size}|${p.taken}`));let done=0,total=files.length,failed=[],dupes=0;
+  const msg=t=>{if(auto)toast(t,60000);else $('impMsg').textContent=t};
   try{
     // unpack ZIPs first so the count is right
     const imgs=[];for(const f of files){if(/\.zip$/i.test(f.name)||f.type==='application/zip'||f.type==='application/x-zip-compressed'){msg(`Opening ${f.name}…`);try{await unzip(f,async x=>{imgs.push(x)})}catch(e){failed.push(f.name+' (could not open the ZIP)')}}else if(/^image\//.test(f.type)||/\.(jpe?g|png|heic|heif|webp)$/i.test(f.name))imgs.push(f)}
-    total=imgs.length;if(!total){msg('No photos found.');throw new Error('No photos found in what you chose.')}
-    for(const f of imgs){if(!$('dImp').open)throw new Error('cancelled');msg(`Reading photo ${done+1} of ${total}…`);
+    total=imgs.length;if(!total){if(auto){toast('',1);return 'no photos to read.'}msg('No photos found.');throw new Error('No photos found in what you chose.')}
+    for(const f of imgs){if(!auto&&!$('dImp').open)throw new Error('cancelled');msg(auto?`Reading new photo ${done+1} of ${total} from the watched folder…`:`Reading photo ${done+1} of ${total}…`);
       try{const head=await f.slice(0,262144).arrayBuffer(),ex=exifInfo(head),taken=exifTime(ex)||f.lastModified||Date.now();
-        if(known.has(`${f.name}|${f.size}|${taken}`)){dupes++;done++;continue}
+        if(known.has(`${f.size}|${taken}`)){dupes++;done++;continue}known.add(`${f.size}|${taken}`);
         const img=await decodeImage(f),{w,h}=dims(img);const big=scaled(img,1800),thumbC=scaled(big,420);if(img.close)img.close();
         const slate=IMP.forceCase?null:await findSlate(big);
         const disp=await toBlob(big,'image/jpeg',.86),thumb=await toBlob(thumbC,'image/jpeg',.8);
         IMP.items.push({id:uid(),file:f,name:f.name,size:f.size,taken,w,h,disp,thumb,slate,include:!slate,thumbUrl:URL.createObjectURL(thumb)});
       }catch(e){failed.push(f.name)}
       done++;$('impBar').style.width=Math.round(done/total*100)+'%';await yieldUI()}
-    buildGroups();renderReview(failed,dupes);
-  }catch(e){if(e.message!=='cancelled'){$('impErr').textContent=e.message||String(e);$('impErr').hidden=false}}
+    buildGroups();
+    if(auto)return await saveImport(true,{failed,dupes});
+    renderReview(failed,dupes);return null;
+  }catch(e){if(auto){toast('Could not import from the watched folder: '+(e.message||e),5000);return null}if(e.message!=='cancelled'){$('impErr').textContent=e.message||String(e);$('impErr').hidden=false}return null}
   finally{IMP.busy=false}}
 function buildGroups(){const items=IMP.items.sort((a,b)=>a.taken-b.taken||a.name.localeCompare(b.name,undefined,{numeric:true}));IMP.groups=[];IMP.unsorted=[];let cur=null;
   if(IMP.forceCase){const c=CASES.get(IMP.forceCase);IMP.groups.push({target:c.id,slate:null,stage:S.stage||'pre',items:items.slice()});return}
-  for(const it of items){if(it.slate){cur={slate:it.slate,slateItem:it,target:'slate',stage:it.slate.stage||'pre',items:[]};IMP.groups.push(cur)}else if(cur)cur.items.push(it);else IMP.unsorted.push(it)}
+  // a slate covers the photos after it until the next slate, a gap of more than 3 hours, or midnight (as the Drive script does)
+  for(const it of items){if(it.slate){cur={slate:it.slate,slateItem:it,target:'slate',stage:it.slate.stage||'pre',items:[],last:it.taken};IMP.groups.push(cur)}
+    else if(cur&&isoDate(it.taken)===isoDate(cur.last)&&it.taken-cur.last<=SLATE_GAP){cur.items.push(it);cur.last=it.taken}else{cur=null;IMP.unsorted.push(it)}}
   // photos before this import's first slate carry on from the last slate imported earlier the same day (a second download later in the clinic)
   IMP.unsortedTarget='';IMP.unsortedStage='pre';IMP.carry=null;
   if(IMP.unsorted.length){const first=IMP.unsorted[0].taken,ev=store.get('slates',[]).filter(e=>e.t<=first&&isoDate(e.t)===isoDate(first)&&CASES.has(e.caseId)).sort((a,b)=>b.t-a.t)[0];
     if(ev){IMP.unsortedTarget=ev.caseId;IMP.unsortedStage=ev.stage||'pre';IMP.carry=ev}}}
+const SLATE_GAP=3*3600000;
+function assignViews(){const ser=seriesFor(store.get('impSeries','none'));
+  const lab=(arr,on)=>{let i=0;arr.forEach(it=>{it.view=on&&ser&&it.include&&!it.slate?(ser[i++]||'other'):''})};IMP.groups.forEach(g=>lab(g.items,true));lab(IMP.unsorted,!!IMP.unsortedTarget)}
 function seriesFor(key){if(key==='none')return null;if(key==='mine')return mySeries();return SERIES_PRESETS[key]?SERIES_PRESETS[key][1]:null}
 function renderReview(failed,dupes){$('impWork').hidden=true;$('impReview').hidden=false;$('dImpT').textContent='Check the sorting';
   const n=IMP.items.length,slates=IMP.groups.filter(g=>g.slate).length;
-  $('impSummary').textContent=[`${plural(n,'photo')} read`,IMP.forceCase?'':`${plural(slates,'slate')} found`,IMP.unsorted.length?`${plural(IMP.unsorted.length,'photo')} before the first slate`:'',dupes?`${plural(dupes,'photo')} already in the library, skipped`:'',failed.length?`${plural(failed.length,'file')} could not be read (${failed.slice(0,3).join(', ')}${failed.length>3?'…':''})`:''].filter(Boolean).join(' · ')+'. Tap a photo to leave it out.';
+  $('impSummary').textContent=[`${plural(n,'photo')} read`,IMP.forceCase?'':`${plural(slates,'slate')} found`,IMP.unsorted.length?`${plural(IMP.unsorted.length,'photo')} not after a slate`:'',dupes?`${plural(dupes,'photo')} already in the library, skipped`:'',failed.length?`${plural(failed.length,'file')} could not be read (${failed.slice(0,3).join(', ')}${failed.length>3?'…':''})`:''].filter(Boolean).join(' · ')+'. Tap a photo to leave it out.';
   $('impSeries').innerHTML=`<option value="none">Don't label views</option><option value="mine">My series order (settings)</option>`+Object.entries(SERIES_PRESETS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('');
   $('impSeries').value=store.get('impSeries','none');drawGroups();$('impSave').disabled=!n}
 function caseOptions(sel,slate){const cs=[...CASES.values()].sort((a,b)=>a.name.localeCompare(b.name));
   return (slate?`<option value="slate"${sel==='slate'?' selected':''}>${esc(slate.name)}${CASES.has(slate.id)?'':' (new case from the slate)'}</option>`:'')+cs.filter(c=>!slate||c.id!==slate.id).map(c=>`<option value="${esc(c.id)}"${sel===c.id?' selected':''}>${esc(c.name)}${c.label?' · '+esc(c.label):''}</option>`).join('')+`<option value=""${sel===''?' selected':''}>Unsorted</option><option value="skip"${sel==='skip'?' selected':''}>Leave out</option>`}
-function drawGroups(){const ser=seriesFor($('impSeries').value);
-  const tiles=(arr,labelled)=>{let i=0;return arr.map(it=>{const v=labelled&&it.include&&!it.slate?(ser[i++]||'other'):'';it.view=v;
+function drawGroups(){assignViews();
+  const tiles=arr=>{return arr.map(it=>{const v=it.view;
     return `<button type="button" class="ph${it.include?'':' off'}" data-imp="${esc(it.id)}" aria-pressed="false" aria-label="${esc(it.name)}${it.include?'':', left out'}"><img alt="" src="${it.thumbUrl}">${it.slate?'<span class="badge">Slate</span>':''}<span class="lab">${esc(v?VSHORT[v]:it.name)}</span></button>`}).join('')};
   let h=IMP.groups.map((g,gi)=>{const inc=g.items.filter(x=>x.include).length;
     return `<div class="grp"><div class="gh"><b>${g.slate?'Slate: '+esc(g.slate.name):esc((CASES.get(g.target)||{}).name||'Case')}</b><span class="hint">${plural(inc,'photo')}</span><span class="sp"></span>
       <label class="lbl">Case <select data-gt="${gi}">${caseOptions(g.target,g.slate)}</select></label><label class="lbl">Stage <select data-gs="${gi}">${STAGES.map(([k,n])=>`<option value="${k}"${g.stage===k?' selected':''}>${n}</option>`).join('')}</select></label></div>
-      <div class="grid">${tiles(g.slate?[g.slateItem,...g.items]:g.items,!!ser)}</div></div>`}).join('');
-  if(IMP.unsorted.length)h+=`<div class="grp unsorted"><div class="gh"><b>${IMP.groups.length?'Before the first slate':'No slate in these photos'}</b>${IMP.carry?`<span class="hint">Carrying on from the ${esc(CASES.get(IMP.carry.caseId).name)} slate at ${new Date(IMP.carry.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`:''}<span class="hint">${plural(IMP.unsorted.filter(x=>x.include).length,'photo')}</span><span class="sp"></span>
+      <div class="grid">${tiles(g.slate?[g.slateItem,...g.items]:g.items)}</div></div>`}).join('');
+  if(IMP.unsorted.length)h+=`<div class="grp unsorted"><div class="gh"><b>${IMP.groups.length?'Not after a slate':'No slate in these photos'}</b>${IMP.carry?`<span class="hint">Carrying on from the ${esc(CASES.get(IMP.carry.caseId).name)} slate at ${new Date(IMP.carry.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`:''}<span class="hint">${plural(IMP.unsorted.filter(x=>x.include).length,'photo')}</span><span class="sp"></span>
       <label class="lbl">Case <select data-gt="u">${caseOptions(IMP.unsortedTarget||'',null)}</select></label><label class="lbl">Stage <select data-gs="u">${STAGES.map(([k,n])=>`<option value="${k}"${(IMP.unsortedStage||'pre')===k?' selected':''}>${n}</option>`).join('')}</select></label></div>
-      <div class="grid">${tiles(IMP.unsorted,!!ser&&!!IMP.unsortedTarget)}</div></div>`;
+      <div class="grid">${tiles(IMP.unsorted)}</div></div>`;
   $('impGroups').innerHTML=h||'<p class="empty">Nothing to import.</p>'}
 $('impSeries').addEventListener('change',()=>{store.set('impSeries',$('impSeries').value);drawGroups()});
 $('impGroups').addEventListener('click',e=>{const b=e.target.closest('[data-imp]');if(!b)return;const it=IMP.items.find(x=>x.id===b.dataset.imp);if(it){it.include=!it.include;drawGroups()}});
@@ -674,23 +693,28 @@ $('impGroups').addEventListener('change',e=>{const t=e.target;if(t.dataset.gt!==
 function endImport(){IMP.items.forEach(it=>URL.revokeObjectURL(it.thumbUrl));IMP.items=[];IMP.groups=[];IMP.unsorted=[];IMP.unsortedTarget='';IMP.unsortedStage='pre';$('dImp').close()}
 $('impCancel').addEventListener('click',endImport);
 $('dImp').addEventListener('cancel',e=>{if(IMP.busy)return;e.preventDefault();endImport()});
-$('impSave').addEventListener('click',async()=>{
-  const autoFolder=canFolder&&FOLDER&&store.get('folderAuto',false)&&await folderReady(true); // ask while the click still counts as a gesture
+$('impSave').addEventListener('click',()=>saveImport(false));
+async function saveImport(auto,info){
+  const autoFolder=canFolder&&FOLDER&&store.get('folderAuto',false)&&await folderReady(!auto); // asks while the click still counts as a gesture
+  if(auto)assignViews();
   $('impSave').disabled=true;let saved=0;const added=[];
   const commit=async(items,target,stage,slate)=>{if(target==='skip')return;let caseId=target||null;
     if(target==='slate'&&slate){if(!CASES.has(slate.id))await saveCase({id:slate.id,name:slate.name,label:slate.label,tags:[],notes:'',created:Date.now()});caseId=slate.id}
     for(const it of items){if(!it.include)continue;const p={id:it.id,caseId,stage,view:it.slate?'other':(it.view||''),taken:it.taken,date:isoDate(it.taken),name:it.name,size:it.size,w:it.w,h:it.h,teeth:[],tags:it.slate?['slate']:[],note:'',rot:0,fh:false,fv:false,star:false};
-      await addPhoto(p,it.file,it.disp,it.thumb);added.push(p);saved++;$('impSummary').textContent=`Saving… ${saved}`;await yieldUI()}};
+      await addPhoto(p,it.file,it.disp,it.thumb);added.push(p);saved++;if(!auto)$('impSummary').textContent=`Saving… ${saved}`;await yieldUI()}};
   try{const evs=store.get('slates',[]);
     for(const g of IMP.groups){await commit(g.slate?[g.slateItem,...g.items]:g.items,g.target,g.stage,g.slate);
       const cid=g.target==='slate'&&g.slate?g.slate.id:g.target;if(g.slate&&cid&&cid!=='skip')evs.push({t:g.slateItem.taken,caseId:cid,stage:g.stage})}
     store.set('slates',evs.sort((a,b)=>a.t-b.t).slice(-400));
     await commit(IMP.unsorted,IMP.unsortedTarget||'',IMP.unsortedStage||'pre',null);
     let wrote=0;if(autoFolder&&added.length){try{wrote=await writeToFolder(added,true)}catch(e){toast('Saved in Photo Card, but not to the folder: '+(e.message||e),4500)}}
-    const cases=new Set(added.map(p=>p.caseId).filter(Boolean));endImport();
-    toast(`Saved ${plural(saved,'photo')}${cases.size?' into '+plural(cases.size,'case'):''}${wrote?`, and to ${FOLDER.name}`:''}`,3500);
-    if(S.view==='case')renderCase();else if(cases.size===1)openCase([...cases][0]);else renderHome();
-  }catch(e){$('impErr').textContent='Could not save: '+(e.message||e)+(e.name==='QuotaExceededError'?' The browser has run out of space for Photo Card.':'');$('impErr').hidden=false;$('impSave').disabled=false}});
+    const cases=new Set(added.map(p=>p.caseId).filter(Boolean)),unsorted=added.filter(p=>!p.caseId).length;endImport();
+    const sum=`${saved?'filed '+plural(saved-unsorted,'new photo')+(cases.size?' into '+plural(cases.size,'case'):''):'nothing new'}${unsorted?`, ${unsorted} unsorted`:''}${info&&info.dupes?`, ${info.dupes} already here`:''}${wrote?`, and saved to ${FOLDER.name}`:''}.`;
+    if(auto)toast(saved?'Watched folder: '+sum:'',saved?4000:1);else toast(`Saved ${plural(saved,'photo')}${cases.size?' into '+plural(cases.size,'case'):''}${wrote?`, and to ${FOLDER.name}`:''}`,3500);
+    if(S.view==='case')renderCase();else if(!auto&&cases.size===1)openCase([...cases][0]);else renderHome();
+    return sum;
+  }catch(e){if(auto){toast('Could not save from the watched folder: '+(e.message||e),5000);return null}
+    $('impErr').textContent='Could not save: '+(e.message||e)+(e.name==='QuotaExceededError'?' The browser has run out of space for Photo Card.':'');$('impErr').hidden=false;$('impSave').disabled=false;return null}}
 $('fileIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f)});
 $('dirIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f)});
 $('caseFileIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f,S.caseId)});
@@ -806,8 +830,50 @@ function renderFolder(){$('folderBox').hidden=!canFolder;if(!canFolder)return;$(
 $('folderPick').addEventListener('click',chooseFolder);
 $('folderForget').addEventListener('click',async()=>{FOLDER=null;await DB.del('kv','folder');renderFolder()});
 $('folderAuto').addEventListener('change',()=>store.set('folderAuto',$('folderAuto').checked));
+/* watched folder: on this computer, photos that arrive in a folder (Google Drive, OneDrive, iCloud) are read and filed while Photo Card is open */
+let WATCH=null,WATCH_SEEN=null,watchLast=0;
+async function scanWatch(){const out=[];
+  const walk=async(dir,pre,depth)=>{for await(const [name,h] of dir.entries()){if(name.startsWith('.'))continue;
+    if(h.kind==='directory'){if(depth<4)await walk(h,pre+name+'/',depth+1)}
+    else if(/\.jpe?g$/i.test(name)){try{const f=await h.getFile();out.push({key:`${pre}${name}|${f.size}|${f.lastModified}`,file:f})}catch(e){}}}};
+  await walk(WATCH,'',0);return out}
+async function watchPerm(ask){if(!WATCH)return false;try{const o={mode:'read'};if(await WATCH.queryPermission(o)==='granted')return true;if(ask)return (await WATCH.requestPermission(o))==='granted'}catch(e){}return false}
+async function watchSeen(){if(!WATCH_SEEN)WATCH_SEEN=new Set((await DB.get('kv','watchSeen'))||[]);return WATCH_SEEN}
+async function saveSeen(){await DB.put('kv',[...WATCH_SEEN].slice(-30000),'watchSeen')}
+const stamp=()=>new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+async function checkWatch(ask){if(!WATCH||IMP.busy||$('dImp').open)return;watchLast=Date.now();
+  if(!(await watchPerm(ask))){renderWatch(true);return}
+  let all;try{all=await scanWatch()}catch(e){store.set('watchStatus','Could not read the folder ('+(e.message||e)+').');renderWatch();return}
+  const seen=await watchSeen();
+  if(store.get('watchFirst',false)){store.set('watchPending',all.length);if(!all.length)store.set('watchFirst',false);renderWatch();if(all.length)return}
+  const fresh=all.filter(x=>!seen.has(x.key));
+  if(!fresh.length){store.set('watchStatus',`Checked at ${stamp()}: nothing new.`);renderWatch();return}
+  const r=await startImport(fresh.map(x=>x.file),null,{auto:true});
+  if(r!==null){fresh.forEach(x=>seen.add(x.key));await saveSeen();store.set('watchStatus',`Checked at ${stamp()}: ${r}`)}renderWatch()}
+function renderWatch(needOk){const on=canFolder&&!!WATCH,first=on&&store.get('watchFirst',false);
+  $('watchBar').hidden=!(on&&needOk);if(on&&needOk)$('watchBarMsg').textContent=`Photo Card needs your OK to check “${WATCH.name}” for new photos.`;
+  $('watchBox').hidden=!canFolder;if(!canFolder)return;
+  $('watchNow').hidden=$('watchForget').hidden=!on||first;$('watchPick').textContent=on?'Change folder':'Choose folder';$('watchFirst').hidden=!first;
+  $('watchMsg').textContent=!on?'Choose the folder your photos arrive in on this computer: for example Google Drive › My Drive › image.canon or Photo Cases, or OneDrive › image.canon. While Photo Card is open here, new photos in it are read, filed by their slates and saved, with no checking step. RAW files are left alone.'
+    :first?`“${WATCH.name}” already has ${plural(store.get('watchPending',0),'photo')} in it, including any in folders inside it. Import them, or only photos that arrive from now on?`
+    :`Watching “${WATCH.name}” while Photo Card is open on this computer, every 2 minutes. ${store.get('watchStatus','')}`}
+$('watchPick').addEventListener('click',async()=>{try{const h=await showDirectoryPicker({id:'photo-card-watch',mode:'read'});WATCH=h;WATCH_SEEN=new Set();await DB.put('kv',h,'watch');await saveSeen();
+  store.set('watchFirst',true);store.set('watchStatus','');renderWatch();await checkWatch(true)}catch(e){if(e&&e.name!=='AbortError')toast('Could not use that folder.',3000)}});
+$('watchAll').addEventListener('click',async()=>{store.set('watchFirst',false);renderWatch();$('dSet').close();await checkWatch(true)});
+$('watchSkip').addEventListener('click',async()=>{if(!(await watchPerm(true)))return;const all=await scanWatch(),seen=await watchSeen();all.forEach(x=>seen.add(x.key));await saveSeen();
+  store.set('watchFirst',false);store.set('watchStatus',`From ${stamp()}, new photos only.`);renderWatch()});
+$('watchNow').addEventListener('click',async()=>{$('dSet').close();await checkWatch(true)});
+$('watchBarBtn').addEventListener('click',()=>checkWatch(true));
+$('watchForget').addEventListener('click',async()=>{WATCH=null;WATCH_SEEN=null;await DB.del('kv','watch');await DB.del('kv','watchSeen');renderWatch()});
+setInterval(()=>{if(document.visibilityState==='visible')checkWatch(false)},120000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-watchLast>30000)checkWatch(false)});
+// the Google Drive script (PhotoCardSorter.gs), fetched when Settings opens so Copy works straight from the tap
+let GS='';
+async function loadGS(){if(GS)return GS;try{const r=await fetch('PhotoCardSorter.gs',{cache:'no-cache'});if(r.ok)GS=await r.text()}catch(e){}return GS}
+$('gsCopy').addEventListener('click',async()=>{const t=GS||await loadGS();if(!t)return toast('Could not load the script. Use Download it instead.',3500);
+  try{await navigator.clipboard.writeText(t);toast('Script copied. Paste it into a new project at script.google.com.',4000)}catch(e){toast('Could not copy here. Use Download it instead.',3500)}});
 $('zipAll').addEventListener('click',()=>zipPhotos([...PHOTOS.values()],'Photo Card '+isoDate(Date.now())+'.zip'));
-$('setBtn').addEventListener('click',async()=>{renderSeriesEditor();renderFolder();$('eraseAll').dataset.armed='';$('eraseAll').textContent='Erase everything on this device';
+$('setBtn').addEventListener('click',async()=>{renderSeriesEditor();renderFolder();renderWatch();loadGS();$('eraseAll').dataset.armed='';$('eraseAll').textContent='Erase everything on this device';
   let m=`${plural(CASES.size,'case')}, ${plural(PHOTOS.size,'photo')} on this device.`;try{if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();m+=` Using ${(e.usage/1048576).toFixed(0)} MB of about ${(e.quota/1073741824).toFixed(1)} GB the browser allows.`}
     if(navigator.storage&&navigator.storage.persisted&&await navigator.storage.persisted())m+=' The browser has agreed not to clear it automatically.'}catch(e){}
   $('storeMsg').textContent=m;$('dSet').showModal()});
@@ -821,11 +887,12 @@ async function fromHash(){const p=new URLSearchParams(location.hash.slice(1));
   const sl=parseSlate(location.href);if(sl){if(!CASES.has(sl.id))await saveCase({id:sl.id,name:sl.name,label:sl.label,tags:[],notes:'',created:Date.now()});openCase(sl.id);return}
   const c=p.get('c');if(c&&(CASES.has(c)||c==='__unsorted'))openCase(c);else showView('home')}
 (async()=>{fillSelects();
-  try{await DB.open();(await DB.all('cases')).forEach(c=>CASES.set(c.id,c));(await DB.all('photos')).forEach(p=>PHOTOS.set(p.id,p));if(canFolder){FOLDER=await DB.get('kv','folder')||null}}
+  try{await DB.open();(await DB.all('cases')).forEach(c=>CASES.set(c.id,c));(await DB.all('photos')).forEach(p=>PHOTOS.set(p.id,p));if(canFolder){FOLDER=await DB.get('kv','folder')||null;WATCH=await DB.get('kv','watch')||null}}
   catch(e){toast('This browser is blocking storage, so photos cannot be kept here. Try a normal (not private) window.',8000)}
   if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
-  await fromHash();addEventListener('hashchange',fromHash)})();
-window.photoCard={cases:()=>[...CASES.values()].map(c=>({...c})),photos:()=>[...PHOTOS.values()].map(p=>({...p})),parseSlate,slateUrl,exifInfo,exifTime,unzip,makeZip,crc32,drawQR};
+  await fromHash();addEventListener('hashchange',fromHash);
+  if(WATCH)setTimeout(()=>checkWatch(false),600)})();
+window.photoCard={checkWatch,_watch:h=>{WATCH=h;WATCH_SEEN=new Set();store.set('watchFirst',false)},cases:()=>[...CASES.values()].map(c=>({...c})),photos:()=>[...PHOTOS.values()].map(p=>({...p})),parseSlate,slateUrl,exifInfo,exifTime,unzip,makeZip,crc32,drawQR};
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 })();
 </script>

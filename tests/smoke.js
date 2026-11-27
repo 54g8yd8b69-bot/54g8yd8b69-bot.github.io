@@ -129,7 +129,7 @@ run({name:'Landing page',fn:async()=>{
     const files=await pg.evaluate(MAKE_JPEGS,{shots,slateFor:{A:caseA,B:caseB}});
     await pg.setInputFiles('#fileIn',files.map(f=>({name:f.name,mimeType:'image/jpeg',buffer:Buffer.from(f.b64,'base64')})));
     await pg.waitForSelector('#impReview:not([hidden])',{timeout:20000});
-    const sum=await pg.innerText('#impSummary');expect(/11 photos read/.test(sum)&&/2 slates found/.test(sum)&&/2 photos before the first slate/.test(sum),'summary: '+sum);
+    const sum=await pg.innerText('#impSummary');expect(/11 photos read/.test(sum)&&/2 slates found/.test(sum)&&/2 photos not after a slate/.test(sum),'summary: '+sum);
     await pg.selectOption('#impSeries','intra5');
     const grp=await pg.$$eval('#impGroups .grp',g=>g.map(x=>x.querySelector('b').textContent+':'+[...x.querySelectorAll('.ph:not(.off) .lab')].map(l=>l.textContent).join(',')));
     expect(grp[0]==='Slate: Case A:Frontal,Right buccal,Left buccal,Upper occlusal,Lower occlusal','group A wrong: '+grp[0]);
@@ -174,6 +174,37 @@ run({name:'Landing page',fn:async()=>{
     const pg2=await lp.context().newPage();await pg2.goto(BASE+'/photo-card/#case=q1w2e3r4&n=Case%20C&s=pre');await pg2.waitForTimeout(600);
     expect(await pg2.innerText('#cvName')==='Case C','slate link did not open a new case');
     await noErrors(pg);await noErrors(lp)});
+  await test('Photo Card files photos arriving in a watched folder by their slates with no checking step, and only once',async()=>{
+    const pg=await page('/photo-card/');await pg.evaluate(()=>{});
+    const caseC={id:'cccc1111',name:'Case C',label:'veneers'};
+    const shots=[{name:'IMG_0101',dt:'2026:11:21 09:00:00',slate:'C',stage:'pre'},{name:'IMG_0102',dt:'2026:11:21 09:00:30'},{name:'IMG_0103',dt:'2026:11:21 09:01:00'},{name:'IMG_0104',dt:'2026:11:21 13:30:00'}];
+    const files=await pg.evaluate(MAKE_JPEGS,{shots,slateFor:{C:caseC}});
+    const r1=await pg.evaluate(async files=>{const root=await navigator.storage.getDirectory(),dir=await root.getDirectoryHandle('image.canon',{create:true}),sub=await dir.getDirectoryHandle('2026',{create:true});
+      for(const f of files){const bin=atob(f.b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);const h=await sub.getFileHandle(f.name,{create:true}),w=await h.createWritable();await w.write(u);await w.close()}
+      const raw=await sub.getFileHandle('IMG_0101.CR3',{create:true}),w=await raw.createWritable();await w.write('raw');await w.close();
+      photoCard._watch(dir);await photoCard.checkWatch(false);return photoCard.photos().map(p=>p.name+':'+(p.caseId||'-')+':'+p.stage)},files);
+    expect(!(await pg.evaluate(()=>document.getElementById('dImp').open)),'the checking step opened for the watched folder');
+    const inC=r1.filter(x=>x.includes(':cccc1111:pre'));expect(inC.length===2&&r1.length===3,'watched folder photos not filed: '+r1.join(', '));
+    expect(r1.some(x=>/IMG_0104.JPG:-:/.test(x)),'a photo 4 hours after the slate should be unsorted: '+r1.join(', '));
+    expect((await pg.evaluate(()=>photoCard.cases())).some(c=>c.id==='cccc1111'&&c.label==='veneers'),'case not made from the slate');
+    const n2=await pg.evaluate(async()=>{await photoCard.checkWatch(false);return photoCard.photos().length});expect(n2===3,'photos imported twice: '+n2);
+    await noErrors(pg)});
+  await test('The Photo Card Google Drive script files image.canon photos into case and visit folders, with RAW files, across checks',async()=>{
+    const fs=require('fs'),path=require('path'),root=path.join(__dirname,'..','photo-card');
+    expect(fs.readFileSync(path.join(root,'PhotoCardSorter.gs'),'utf8').startsWith(fs.readFileSync(path.join(root,'drive-sorter','core.js'),'utf8').trimEnd()),'PhotoCardSorter.gs is out of date: run python3 photo-card/tools/build_drive_sorter.py');
+    const pg=await page('/photo-card/');
+    const makeJpeg=async(kind,url)=>Buffer.from(await pg.evaluate(async ({kind,url})=>{const c=document.createElement('canvas');c.width=1200;c.height=800;const x=c.getContext('2d');x.fillStyle='#b88';x.fillRect(0,0,1200,800);
+      if(kind==='slate'){const q=document.createElement('canvas');photoCard.drawQR(q,url,6);x.drawImage(q,(1200-q.width)/2,(800-q.height)/2)}
+      const b=await new Promise(r=>c.toBlob(r,'image/jpeg',.85)),u=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);return btoa(s)},{kind,url}),'base64');
+    const r=await require('../photo-card/tests/drive-sorter-sim.js').simulate(async(k,u)=>new Uint8Array(await makeJpeg(k,u)));
+    const A='Photo Cases/Case A - UL1 implant/2026-11-20 Pre-op',B='Photo Cases/Case B/2026-11-20 Post-op';
+    expect(JSON.stringify(r.first[A])===JSON.stringify(['IMG_0002.CR3','IMG_0002.JPG','IMG_0003.CR3','IMG_0003.JPG','IMG_0004.JPG']),'case A folder: '+JSON.stringify(r.first));
+    expect(JSON.stringify(r.first[B])===JSON.stringify(['IMG_0005.JPG','IMG_0006.JPG']),'case B folder: '+JSON.stringify(r.first[B]));
+    expect(JSON.stringify(r.first['image.canon'])===JSON.stringify(['IMG_0001.JPG','IMG_0007.JPG','IMG_0008.JPG']),'left in image.canon: '+JSON.stringify(r.first['image.canon']));
+    expect(r.second[B].includes('IMG_0009.JPG'),'a later photo should join case B on the next check');
+    expect(r.second['image.canon'].includes('IMG_0011.JPG'),'a photo after one with no preview yet should wait');
+    expect(r.caseFolders.length===2,'case folders made twice: '+r.caseFolders.join(', '));expect(r.thumbsSecond===1,'previews read again: '+r.thumbsSecond);
+    expect(/^Filed 3 photos into 2 cases \(2 slates found\)/.test(r.runs[0]),'summary: '+r.runs[0]);await noErrors(pg)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');
