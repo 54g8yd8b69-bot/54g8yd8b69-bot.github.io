@@ -1,5 +1,20 @@
 // Landing page, manifest and service worker checks. Serve this repo as the site root.
 const {page,expect,test,noErrors,run,BASE}=require('./harness');
+// Makes JPEG photos in the page with an EXIF capture time; slates carry a Photo Card QR.
+const MAKE_JPEGS=async ({shots,slateFor})=>{
+  const exif=(dt)=>{const b=new Uint8Array(64),v=new DataView(b.buffer);b.set([0x49,0x49,0x2A,0,8,0,0,0]);
+    v.setUint16(8,1,true);v.setUint16(10,0x8769,true);v.setUint16(12,4,true);v.setUint32(14,1,true);v.setUint32(18,26,true);v.setUint32(22,0,true);
+    v.setUint16(26,1,true);v.setUint16(28,0x9003,true);v.setUint16(30,2,true);v.setUint32(32,20,true);v.setUint32(36,44,true);v.setUint32(40,0,true);
+    for(let i=0;i<19;i++)b[44+i]=dt.charCodeAt(i);
+    const seg=new Uint8Array(4+6+64);seg.set([0xFF,0xE1,0,72,0x45,0x78,0x69,0x66,0,0]);seg.set(b,10);return seg};
+  const out=[];
+  for(const s of shots){const c=document.createElement('canvas');c.width=1200;c.height=800;const x=c.getContext('2d');
+    if(s.slate){x.fillStyle='#ddd';x.fillRect(0,0,1200,800);const q=document.createElement('canvas');photoCard.drawQR(q,photoCard.slateUrl(slateFor[s.slate],s.stage),6);x.drawImage(q,(1200-q.width)/2,(800-q.height)/2)}
+    else{x.fillStyle=s.col||'#c88';x.fillRect(0,0,1200,800);x.fillStyle='#fff';x.font='120px sans-serif';x.fillText(s.name,100,400)}
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.9)),u8=new Uint8Array(await blob.arrayBuffer()),seg=exif(s.dt);
+    const j=new Uint8Array(u8.length+seg.length);j.set(u8.subarray(0,2));j.set(seg,2);j.set(u8.subarray(2),2+seg.length);
+    let bin='';for(let i=0;i<j.length;i++)bin+=String.fromCharCode(j[i]);out.push({name:s.name+'.JPG',b64:btoa(bin)})}
+  return out};
 run({name:'Landing page',fn:async()=>{
   await test('shows all fifteen apps and a sign-out link',async()=>{const pg=await page('/');
     const hrefs=await pg.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')));for(const h of ['/notile/','/dictate/','/snip-card/','/notile/chart/','/letter-card/','/trauma-card/','/set-app/','/chrome-card/','/ortho-card/','/scan-card/','/dentmat/','/dentalaudit/','/smile-card/','/implantref/','/guide-card/'])expect(hrefs.includes(h),'missing '+h);
@@ -94,6 +109,71 @@ run({name:'Landing page',fn:async()=>{
     await pg.reload();await pg.waitForTimeout(400);d=await pg.evaluate(()=>taskCard.data());expect(d.letters.length===2&&d.misc.length===1,'list not kept after reload');
     await lp.reload();await lp.waitForTimeout(300);const tile=lp.locator('a.app[href="/task-card/"]');expect(await tile.count()===1,'Task Card tile missing after use');
     expect(/2 letters to do · 1 overdue · 1 misc/.test(await tile.innerText()),'tile summary wrong: '+await tile.innerText());await noErrors(pg);await noErrors(lp)});
+  await test('Photo Card files photos after each QR slate into that case, labels the series, and keeps them on this device only',async()=>{
+    const lp=await page('/');expect(!(await lp.$$eval('a.app',a=>a.map(x=>x.getAttribute('href')))).includes('/photo-card/'),'Photo Card tile should not show on a device that has not used it');
+    const pg=await lp.context().newPage();pg._errors=[];pg.on('pageerror',e=>pg._errors.push(e.message));pg.on('console',m=>{if(m.type()==='error'&&!/Failed to load resource|favicon/.test(m.text()))pg._errors.push(m.text())});
+    await pg.goto(BASE+'/photo-card/');await pg.waitForTimeout(500);
+    expect((await pg.request.get(BASE+'/photo-card/manifest.webmanifest')).ok(),'Photo Card manifest missing');
+    // a case made on this device shows its slate, and the slate's link names it
+    await pg.click('#newCase');await pg.fill('#cName','Case A');await pg.fill('#cLabel','UL1 implant');await pg.fill('#cTags','implant, teaching');await pg.click('#cSave');
+    await pg.waitForSelector('#dSlate[open]');expect(await pg.innerText('#slName')==='Case A'&&/UL1 implant · Pre-op/.test(await pg.innerText('#slLine')),'slate text wrong: '+await pg.innerText('#slLine'));
+    const caseA=(await pg.evaluate(()=>photoCard.cases()))[0];
+    const parsed=await pg.evaluate(c=>photoCard.parseSlate(photoCard.slateUrl(c,'post')),caseA);expect(parsed.id===caseA.id&&parsed.stage==='post'&&parsed.label==='UL1 implant','slate link did not round-trip: '+JSON.stringify(parsed));
+    await pg.click('#slClose');
+    // import: two strays, slate A (pre) + 5 shots, slate for a case not yet on this device (B, post) + 2 shots; out of order on purpose
+    const caseB={id:'zz9b2k1q',name:'Case B',label:''};
+    const shots=[
+      {name:'IMG_0007',dt:'2026:11:20 10:01:30'},{name:'IMG_0001',dt:'2026:11:20 09:00:00',col:'#888'},{name:'IMG_0002',dt:'2026:11:20 09:00:10',col:'#888'},
+      {name:'IMG_0003',dt:'2026:11:20 10:00:00',slate:'A',stage:'pre'},{name:'IMG_0004',dt:'2026:11:20 10:00:20'},{name:'IMG_0005',dt:'2026:11:20 10:00:40'},{name:'IMG_0006',dt:'2026:11:20 10:01:00'},
+      {name:'IMG_0008',dt:'2026:11:20 10:02:00'},{name:'IMG_0009',dt:'2026:11:20 11:00:00',slate:'B',stage:'post'},{name:'IMG_0010',dt:'2026:11:20 11:00:30',col:'#8c8'},{name:'IMG_0011',dt:'2026:11:20 11:01:00',col:'#8c8'}];
+    const files=await pg.evaluate(MAKE_JPEGS,{shots,slateFor:{A:caseA,B:caseB}});
+    await pg.setInputFiles('#fileIn',files.map(f=>({name:f.name,mimeType:'image/jpeg',buffer:Buffer.from(f.b64,'base64')})));
+    await pg.waitForSelector('#impReview:not([hidden])',{timeout:20000});
+    const sum=await pg.innerText('#impSummary');expect(/11 photos read/.test(sum)&&/2 slates found/.test(sum)&&/2 photos before the first slate/.test(sum),'summary: '+sum);
+    await pg.selectOption('#impSeries','intra5');
+    const grp=await pg.$$eval('#impGroups .grp',g=>g.map(x=>x.querySelector('b').textContent+':'+[...x.querySelectorAll('.ph:not(.off) .lab')].map(l=>l.textContent).join(',')));
+    expect(grp[0]==='Slate: Case A:Frontal,Right buccal,Left buccal,Upper occlusal,Lower occlusal','group A wrong: '+grp[0]);
+    expect(/^Slate: Case B:/.test(grp[1])&&grp[1].split(',').length===2,'group B wrong: '+grp[1]);
+    // leave out the last shot in A
+    await pg.click('#impGroups .grp >> nth=0 >> [data-imp] >> nth=5');
+    await pg.click('#impSave');await pg.waitForFunction(()=>!document.getElementById('dImp').open,null,{timeout:15000});await pg.waitForTimeout(300);
+    let cs=await pg.evaluate(()=>photoCard.cases()),ps=await pg.evaluate(()=>photoCard.photos());
+    expect(cs.length===2&&cs.some(c=>c.id===caseB.id&&c.name==='Case B'),'case B not created from its slate');
+    const inA=ps.filter(p=>p.caseId===caseA.id&&!p.tags.includes('slate')),inB=ps.filter(p=>p.caseId===caseB.id&&!p.tags.includes('slate'));
+    expect(inA.length===4&&inA.every(p=>p.stage==='pre'&&p.date==='2026-11-20'),'case A photos wrong: '+inA.map(p=>p.name+p.stage).join(','));
+    expect(inA.find(p=>p.name==='IMG_0007.JPG').view==='occ-u','EXIF order not used for the series labels');
+    expect(inB.length===2&&inB.every(p=>p.stage==='post'),'case B photos wrong');
+    expect(ps.filter(p=>!p.caseId).length===2,'strays should be unsorted');
+    expect(ps.filter(p=>p.tags.includes('slate')).length===0,'slates should be left out by default');
+    // a later download from the same clinic, with no slate in it, carries on into the case of the last slate
+    const more=await pg.evaluate(MAKE_JPEGS,{shots:[{name:'IMG_0012',dt:'2026:11:20 11:05:00',col:'#8c8'},{name:'IMG_0011',dt:'2026:11:20 11:01:00',col:'#8c8'}],slateFor:{}});
+    await pg.setInputFiles('#fileIn',more.map(f=>({name:f.name,mimeType:'image/jpeg',buffer:Buffer.from(f.b64,'base64')})));await pg.waitForSelector('#impReview:not([hidden])',{timeout:20000});
+    expect(await pg.inputValue('#impGroups [data-gt="u"]')===caseB.id&&/Carrying on from the Case B slate/.test(await pg.innerText('#impGroups')),'no carry-on from the earlier slate: '+await pg.innerText('#impGroups'));
+    expect(/1 photo read/.test(await pg.innerText('#impSummary'))||/already in the library/.test(await pg.innerText('#impSummary')),'re-imported photo not skipped: '+await pg.innerText('#impSummary'));await pg.click('#impCancel');
+    // case view: series checklist, compare, collage
+    await pg.click(`[data-case="${caseA.id}"]`);await pg.click('[data-stg="pre"]');
+    expect(/4 of 10 standard views/.test(await pg.innerText('#seriesLbl')),'series checklist: '+await pg.innerText('#seriesLbl'));
+    await pg.click('#selToggle');await pg.click('#photoGroups .ph >> nth=0');await pg.click('#photoGroups .ph >> nth=1');await pg.click('#sCompare');await pg.waitForSelector('#dCmp[open]');
+    expect(await pg.evaluate(()=>document.getElementById('cmpA').width>100&&document.getElementById('cmpB').width>100),'compare not drawn');await pg.click('#cmpClose');
+    await pg.click('#photoGroups .ph >> nth=2');await pg.click('#sCollage');await pg.waitForSelector('#dCol[open]');await pg.waitForTimeout(300);
+    const dl=pg.waitForEvent('download');await pg.click('#colDown');const d=await dl;expect(/\.jpg$/.test(d.suggestedFilename()),'collage download name');await pg.click('#colClose');await pg.click('#sDone');
+    // viewer edits
+    await pg.click('#photoGroups .ph >> nth=0');await pg.waitForSelector('#dView[open]');await pg.fill('#vTeeth','ul1 ur1 xx');await pg.dispatchEvent('#vTeeth','change');await pg.click('#vFlipH');
+    await pg.waitForTimeout(150);const p0=(await pg.evaluate(()=>photoCard.photos())).find(p=>p.teeth.length);expect(p0&&p0.teeth.join()==='UL1,UR1'&&p0.fh,'viewer edits not kept: '+JSON.stringify(p0&&p0.teeth));await pg.click('#vClose');
+    // ZIP export makes case folders with the originals, readable by the importer
+    await pg.click('#cvMore');const zdl=pg.waitForEvent('download');await pg.click('#cvZip');const z=await zdl;const zp=await z.path();
+    const names=await pg.evaluate(async b64=>{const bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);const out=[];await photoCard.unzip(new File([u],'x.zip'),async f=>out.push(f.name+':'+f.size));return out},require('fs').readFileSync(zp).toString('base64'));
+    expect(names.length===4,'zip should hold 4 photos, got '+names.length);
+    expect(z.suggestedFilename()==='Case A - UL1 implant.zip','zip name '+z.suggestedFilename());
+    // search and the tile
+    await pg.click('#back');await pg.fill('#q','teaching');expect((await pg.$$eval('#caseList .ccard',a=>a.length))===1,'tag search');await pg.fill('#q','');
+    await pg.reload();await pg.waitForTimeout(500);expect((await pg.evaluate(()=>photoCard.photos())).length===8,'photos not kept after reload');
+    await lp.reload();await lp.waitForTimeout(300);const tile=lp.locator('a.app[href="/photo-card/"]');expect(await tile.count()===1,'Photo Card tile missing after use');
+    expect(/2 cases · 8 photos · 2 unsorted/.test(await tile.innerText()),'tile summary wrong: '+await tile.innerText());
+    // opening a slate link (scanned with the phone camera) opens that case
+    const pg2=await lp.context().newPage();await pg2.goto(BASE+'/photo-card/#case=q1w2e3r4&n=Case%20C&s=pre');await pg2.waitForTimeout(600);
+    expect(await pg2.innerText('#cvName')==='Case C','slate link did not open a new case');
+    await noErrors(pg);await noErrors(lp)});
   await test('DentMat opens with its catalogue, no errors, and its logo returns to the launcher',async()=>{const pg=await page('/dentmat/');
     await pg.waitForFunction(()=>window.DentMat&&DentMat.products.length>0,null,{timeout:15000});
     const n=await pg.evaluate(()=>DentMat.products.length);expect(n>=80,'only '+n+' products');
@@ -373,7 +453,7 @@ run({name:'Landing page',fn:async()=>{
     await pg.click('#hoImport');await pg.waitForTimeout(300);
     const txt=await pg.innerText('#page');expect(/Lateral luxation/.test(txt)&&/Assessment: Monitor/.test(txt),'trauma findings missing from the letter');
     expect(await pg.evaluate(()=>localStorage.getItem('notile:letterHandoff'))===null,'handoff left on the device');await noErrors(pg)});
-  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card'],['/snip-card/','header a.brand','Snip Card'],['/task-card/','header a.brand','Task Card']])
+  for(const [path,sel,name] of [['/dentalaudit/','aside a.brand','DentalAudit'],['/smile-card/','header h1 a.homelink','Smile Card'],['/wax-card/','header a.brand','Wax Card'],['/tray-card/','#top a.brand','Tray Card'],['/scan-card/','#top a.brand','Scan Card'],['/implantref/','aside a.brand','ImplantRef'],['/guide-card/','header h1 a.homelink','Guide Card'],['/trauma-card/','header h1 a.homelink','Trauma Card'],['/letter-card/','header h1 a.homelink','Letter Card'],['/snip-card/','header a.brand','Snip Card'],['/task-card/','header a.brand','Task Card'],['/photo-card/','header a.brand','Photo Card']])
     await test(name+' logo returns to the launcher',async()=>{const pg=await page(path);await pg.waitForTimeout(400);
       await Promise.all([pg.waitForURL(BASE+'/'),pg.click(sel)]);expect(await pg.locator('a.app').count()>=6,'not on the launcher')});
 }});

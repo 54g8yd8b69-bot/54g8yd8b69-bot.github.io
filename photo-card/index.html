@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Photo Card</title>
+<meta name="description" content="Photo Card: clinical photos sorted into case folders by a QR slate, with series checklists, before/after and collages. Kept on this device.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B2E4A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Photo Card">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<script src="vendor/qrcode-generator-1.4.4.js"></script>
+<script src="vendor/jsQR-1.4.0.js"></script>
+<style>
+/* Photo Card. Photos are kept in this browser's IndexedDB ("notile-photo-card"): original files untouched, plus a screen copy and a thumbnail.
+   Case slate: a QR code holding the case id, name, label and stage, photographed before a series. On import the photos are put in the order
+   they were taken and every photo after a slate is filed under that case until the next slate. The QR carries everything about the case,
+   so a case made on the phone is recreated on the PC when its slate turns up in an import. Nothing is sent anywhere. */
+:root{
+  --navy:#0B2E4A; --teal:#1C7293; --mint:#3FA9A0;
+  --bg:#F3F6F8; --panel:#FFFFFF; --fg:#132433; --muted:#5C6E7D; --line:#DCE4EA; --chip:#EAF1F4; --sel:#E2F1F1;
+  --bad:#B3261E; --badbg:#FCE9E7; --warn:#7A4F00; --warnbg:#FFF2CF; --ok:#1E6B3A; --okbg:#E3F3E8; --stage:#E3EAEE;
+  --f-display:"Caladea", Cambria, Georgia, serif;
+  --f-body:"Source Sans 3", "Carlito", Calibri, "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --navy:#CFE2EE; --teal:#4FB3C9; --mint:#5CC3B7;
+  --bg:#0C151D; --panel:#111D27; --fg:#E2EAF0; --muted:#93A7B6; --line:#223442; --chip:#182836; --sel:#153337;
+  --bad:#FFB4AB; --badbg:#3B1A18; --warn:#F3D9A4; --warnbg:#3A2C0C; --ok:#9DD9B1; --okbg:#14301F; --stage:#0A1118; color-scheme:dark }}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--f-body);min-height:100vh;-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--mint);outline-offset:2px}
+header{position:sticky;top:0;z-index:4;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(8px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 8px max(14px,env(safe-area-inset-left,0px))}
+.hrow{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:10px}
+a.brand{display:flex;align-items:center;gap:10px;color:var(--navy);text-decoration:none;font-family:var(--f-display);font-size:1.3rem;font-weight:700;flex:none}
+a.brand em{font-style:normal;color:var(--mint)}
+.brand-dot{width:32px;height:32px;border-radius:9px;background:#0B2E4A;display:grid;place-items:center;flex:none}
+.brand-dot svg{width:20px;height:20px}
+.priv{margin-left:auto;font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+.priv svg{width:15px;height:15px;flex:none}
+@media (max-width:560px){.priv span{display:none}}
+.iconbtn{border:1px solid var(--line);background:transparent;border-radius:10px;width:42px;height:42px;display:grid;place-items:center;cursor:pointer;color:var(--teal);flex:none}
+.iconbtn svg{width:20px;height:20px}
+main{max-width:1180px;margin:0 auto;padding:16px max(14px,env(safe-area-inset-right,0px)) calc(48px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));display:grid;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+h2{margin:0;font-size:1.1rem;color:var(--navy)}
+h2.big{font-family:var(--f-display);font-size:1.45rem}
+.sub{margin:2px 0 0;color:var(--muted);font-size:.92rem}
+.hint{font-size:.88rem;color:var(--muted);margin:0}
+.err{font-size:.92rem;color:var(--bad);font-weight:600;margin:0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+.btn{border:1px solid transparent;border-radius:10px;padding:9px 14px;min-height:44px;cursor:pointer;background:var(--teal);color:#fff;font-weight:600;display:inline-flex;align-items:center;gap:7px;text-decoration:none;white-space:nowrap}
+.btn.ghost{background:transparent;color:var(--teal);border-color:var(--line)}
+.btn.sm{min-height:36px;padding:5px 11px;font-size:.92rem}
+.btn.danger{background:transparent;color:var(--bad);border-color:var(--line)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:18px;height:18px;flex:none}
+@media (prefers-color-scheme: dark){.btn:not(.ghost):not(.danger){color:#08141D}}
+input[type=text],input[type=search],input[type=date],textarea,select{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 11px;min-height:44px;width:100%}
+textarea{min-height:64px;resize:vertical}
+select{width:auto;max-width:100%}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:6px 12px;min-height:38px;cursor:pointer;font-size:.92rem;color:var(--fg);display:inline-flex;align-items:center;gap:5px}
+.chip[aria-pressed="true"]{background:var(--sel);border-color:var(--teal);font-weight:700;color:var(--navy)}
+.chip .k{color:var(--muted);font-weight:400}
+.tag{display:inline-block;font-size:.8rem;border-radius:6px;padding:1px 7px;background:var(--chip);color:var(--fg)}
+/* home */
+.drop{border:2px dashed var(--line);border-radius:14px;padding:18px;text-align:center;background:var(--panel)}
+body.dragging .drop{border-color:var(--mint);background:var(--sel)}
+.drop h2{margin-bottom:4px}
+.cases{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.ccard{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;text-align:left;padding:0;display:flex;flex-direction:column;color:inherit}
+.ccard:hover{border-color:var(--teal)}
+.cthumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:var(--stage);aspect-ratio:4/1.1}
+.cthumbs img,.cthumbs span{width:100%;height:100%;object-fit:cover;display:block;background:var(--stage)}
+.cbody{padding:10px 12px;display:grid;gap:4px}
+.cbody b{font-size:1.02rem;color:var(--navy)}
+.cbody .meta{font-size:.85rem;color:var(--muted)}
+/* case view */
+.chead{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.series{display:flex;gap:6px;flex-wrap:wrap}
+.sv{border:1px dashed var(--line);border-radius:8px;padding:4px 9px;font-size:.85rem;color:var(--muted);background:transparent;cursor:pointer;min-height:34px}
+.sv.have{border-style:solid;border-color:var(--ok);background:var(--okbg);color:var(--ok);font-weight:600}
+.sv.have::before{content:"✓ "}
+.pgroup+.pgroup{margin-top:16px}
+.pgh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.pgh h3{margin:0;font-size:1rem;color:var(--navy)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+@media (max-width:560px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}}
+.ph{position:relative;border:0;padding:0;background:var(--stage);border-radius:9px;overflow:hidden;aspect-ratio:1;cursor:pointer;display:block;width:100%}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph .lab{position:absolute;left:0;right:0;bottom:0;padding:14px 6px 4px;background:linear-gradient(transparent,rgba(0,0,0,.65));color:#fff;font-size:.74rem;line-height:1.2;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph .star{position:absolute;top:5px;left:6px;color:#FFC83D;font-size:1rem;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.ph .tick{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgba(0,0,0,.25);display:none}
+body.selecting .ph .tick{display:block}
+.ph[aria-pressed="true"] .tick{background:var(--teal);border-color:#fff}
+.ph[aria-pressed="true"] .tick::after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.ph[aria-pressed="true"]{box-shadow:0 0 0 3px var(--teal)}
+.ph.off{opacity:.3}
+.ph .badge{position:absolute;top:5px;right:5px;font-size:.7rem;font-weight:700;background:#0B2E4A;color:#fff;border-radius:5px;padding:1px 5px}
+.selbar{position:sticky;bottom:max(10px,env(safe-area-inset-bottom,0px));z-index:3;background:var(--navy);color:#fff;border-radius:12px;padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+@media (prefers-color-scheme: dark){.selbar{background:#1B3346}}
+.selbar .btn{background:rgba(255,255,255,.12);color:#fff;border-color:transparent;min-height:38px;padding:5px 11px}
+.selbar .btn:disabled{opacity:.4}
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--fg);padding:0;width:min(680px,calc(100vw - 16px));max-height:calc(100dvh - 16px);overflow:auto;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+dialog.wide{width:min(1180px,calc(100vw - 16px))}
+dialog.full{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;border:0}
+dialog::backdrop{background:rgba(8,20,30,.55)}
+.dlg{padding:18px;display:grid;gap:14px}
+.dlg h2{font-family:var(--f-display);font-size:1.25rem}
+.f{display:grid;gap:6px;min-width:0}
+.f>.lbl,.lbl{font-size:.88rem;font-weight:600;color:var(--muted)}
+.dbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;position:sticky;bottom:0;background:var(--panel);padding:12px 18px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);z-index:2}
+.dbtns .left{margin-right:auto}
+/* slate */
+.slate{display:grid;justify-items:center;gap:10px;text-align:center;padding:8px 0}
+.slate canvas{width:min(78vw,360px);height:auto;image-rendering:pixelated;background:#fff;border-radius:6px}
+.slate .sname{font:700 1.7rem/1.15 var(--f-display);color:var(--navy);overflow-wrap:anywhere}
+.slate .sline{font-size:1.05rem;color:var(--fg)}
+.slatebox{background:#fff;color:#111;border-radius:14px;padding:16px;display:grid;justify-items:center;gap:6px}
+.slatebox .sname{color:#0B2E4A}
+.slatebox .sline{color:#222}
+#printArea{display:none}
+@media print{body>*:not(#printArea){display:none!important}#printArea{display:block!important}#printArea .slatebox{break-inside:avoid;margin:0 auto 18mm;width:120mm}#printArea canvas{width:90mm!important;height:auto}}
+/* import review */
+.prog{height:8px;background:var(--chip);border-radius:99px;overflow:hidden}
+.prog>div{height:100%;width:0;background:var(--mint);transition:width .2s}
+.grp{border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:10px}
+.grp.unsorted{border-style:dashed}
+.grp .gh{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grp .gh b{color:var(--navy)}
+.grp .grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+/* viewer */
+.vwrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;height:100%;min-height:0}
+@media (max-width:820px){.vwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,58vh) auto;height:auto}}
+.vstage{background:#0B1218;display:grid;place-items:center;position:relative;min-height:0;overflow:hidden}
+.vstage canvas{max-width:100%;max-height:100%;display:block}
+.vnav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:64px;border:0;border-radius:10px;background:rgba(255,255,255,.12);color:#fff;font-size:1.6rem;cursor:pointer}
+.vnav.l{left:8px}.vnav.r{right:8px}
+.vtop{position:absolute;top:8px;left:8px;right:8px;display:flex;gap:6px;justify-content:flex-end}
+.vtop button{border:0;border-radius:10px;background:rgba(255,255,255,.14);color:#fff;min-width:42px;height:42px;cursor:pointer;font-size:1rem;padding:0 10px}
+.vside{overflow:auto;padding:14px;display:grid;gap:12px;align-content:start;border-left:1px solid var(--line)}
+@media (max-width:820px){.vside{border-left:0;border-top:1px solid var(--line)}}
+/* compare / collage */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cmp canvas,.preview canvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--stage)}
+.slider{position:relative;border-radius:8px;overflow:hidden;background:var(--stage)}
+.slider canvas{width:100%;height:auto;display:block}
+.slider .top{position:absolute;inset:0;overflow:hidden}
+.slider .top canvas{height:100%;width:auto;max-width:none}
+.slider .bar{position:absolute;top:0;bottom:0;width:3px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.3);pointer-events:none}
+input[type=range]{width:100%}
+.cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.cells label{font-size:.85rem;color:var(--muted);display:grid;gap:4px}
+#toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0B2E4A;color:#fff;padding:8px 14px;border-radius:10px;font-size:.95rem;opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100vw - 24px);z-index:20}
+#toast.show{opacity:1}
+footer{font-size:.85rem;color:var(--muted);max-width:80ch}
+.empty{color:var(--muted);margin:6px 0}
+.srow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+.srow label{flex:1;display:flex;gap:8px;align-items:center}
+.srow input[type=checkbox]{width:20px;height:20px;accent-color:var(--teal)}
+@media (prefers-reduced-motion:reduce){#toast,.prog>div{transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <a class="brand" href="/" title="Back to all apps" aria-label="Photo Card: back to all Notile apps"><span class="brand-dot" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span>Photo <em>Card</em></span></a>
+    <span class="priv" title="Photos are kept in this browser on this device"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>Kept on this device</span></span>
+    <button class="iconbtn" id="setBtn" type="button" aria-label="Settings, series order, folder and storage" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
+  </div>
+</header>
+
+<main id="home">
+  <section class="drop" id="dropzone" aria-label="Import photos">
+    <h2>Import photos</h2>
+    <p class="sub" id="dropHint">Drop the photos, a folder, or the ZIP you downloaded from Google Photos here. Photo Card finds each QR slate and files the photos after it into that case.</p>
+    <div class="row" style="justify-content:center;margin-top:10px">
+      <label class="btn" for="fileIn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 21h14"/></svg>Choose photos or ZIP</label>
+      <label class="btn ghost" for="dirIn" id="dirBtn" hidden>Choose folder</label>
+      <button class="btn ghost" id="newCase" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New case</button>
+    </div>
+  </section>
+  <section class="card" style="display:grid;gap:12px" aria-label="Cases">
+    <div class="row"><h2 class="sp">Cases</h2><input type="search" id="q" placeholder="Search cases, tags, teeth" aria-label="Search" style="max-width:320px"></div>
+    <div class="chips" id="tagChips"></div>
+    <div class="cases" id="caseList"></div>
+    <p class="empty" id="caseEmpty">No cases yet. Make a case and show its slate, or import photos.</p>
+  </section>
+  <footer>Photo Card keeps your photos in this browser on this device, and nothing is uploaded. To keep a copy elsewhere, save cases to a folder or ZIP (for example your Google Drive or OneDrive folder).</footer>
+</main>
+
+<main id="caseView" hidden>
+  <section class="card" style="display:grid;gap:12px">
+    <div class="chead">
+      <button class="iconbtn" id="back" type="button" aria-label="Back to cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="sp" style="min-width:12em"><h2 class="big" id="cvName"></h2><p class="sub" id="cvMeta"></p><div class="chips" id="cvTags" style="margin-top:6px"></div></div>
+      <div class="row">
+        <button class="btn" id="cvSlate" type="button">Show slate</button>
+        <label class="btn ghost" for="caseFileIn">Add photos</label>
+        <button class="btn ghost" id="cvMore" type="button" aria-haspopup="true">More…</button>
+      </div>
+    </div>
+    <div class="row" id="cvMoreRow" hidden>
+      <button class="btn ghost sm" id="cvEdit" type="button">Edit case</button>
+      <button class="btn ghost sm" id="cvBA" type="button">Before / after</button>
+      <button class="btn ghost sm" id="cvZip" type="button">Download as ZIP</button>
+      <button class="btn ghost sm" id="cvFolder" type="button" hidden>Save to folder</button>
+      <button class="btn danger sm" id="cvDel" type="button">Delete case</button>
+    </div>
+    <div class="chips" id="stageChips" role="group" aria-label="Stage"></div>
+    <div id="seriesBox" hidden><p class="lbl" style="margin:0 0 6px" id="seriesLbl"></p><div class="series" id="seriesList"></div></div>
+    <div class="row"><span class="sp hint" id="cvCount"></span><button class="btn ghost sm" id="selToggle" type="button">Select</button></div>
+  </section>
+  <section class="card" id="photoGroups" aria-live="polite"></section>
+  <div class="selbar" id="selbar" hidden>
+    <b id="selN" style="padding:0 6px">0 selected</b>
+    <button class="btn" id="sCompare" type="button">Compare</button>
+    <button class="btn" id="sCollage" type="button">Collage</button>
+    <button class="btn" id="sStage" type="button">Stage…</button>
+    <button class="btn" id="sMove" type="button">Move…</button>
+    <button class="btn" id="sShare" type="button" hidden>Share</button>
+    <button class="btn" id="sDel" type="button">Delete</button>
+    <span class="sp"></span>
+    <button class="btn" id="sDone" type="button">Done</button>
+  </div>
+</main>
+
+<input type="file" id="fileIn" accept="image/*,.jpg,.jpeg,.png,.heic,.zip,application/zip" multiple hidden>
+<input type="file" id="dirIn" webkitdirectory multiple hidden>
+<input type="file" id="caseFileIn" accept="image/*,.zip,application/zip" multiple hidden>
+<div id="printArea"></div>
+
+<!-- new / edit case -->
+<dialog id="dCase" aria-labelledby="dCaseT"><form method="dialog" id="fCase" novalidate autocomplete="off">
+  <div class="dlg"><h2 id="dCaseT">New case</h2>
+    <div class="f"><label class="lbl" for="cName">Case name</label><input type="text" id="cName" maxlength="60" placeholder="e.g. patient name or case code" required></div>
+    <div class="f"><label class="lbl" for="cLabel">Label (optional)</label><input type="text" id="cLabel" maxlength="60" placeholder="e.g. UL1 implant, composite build-ups"></div>
+    <div class="f"><label class="lbl" for="cTags">Tags (optional, separated by commas)</label><input type="text" id="cTags" list="tagList" maxlength="200" placeholder="e.g. implant, hypodontia, teaching"><datalist id="tagList"></datalist></div>
+    <div class="f"><label class="lbl" for="cNotes">Notes (optional)</label><textarea id="cNotes" maxlength="1000"></textarea></div>
+    <p class="err" id="cErr" hidden></p>
+  </div>
+  <div class="dbtns"><button class="btn ghost" type="button" id="cCancel">Cancel</button><button class="btn" type="submit" id="cSave">Save and show slate</button></div>
+</form></dialog>
+
+<!-- slate -->
+<dialog id="dSlate" aria-labelledby="dSlateT">
+  <div class="dlg">
+    <h2 id="dSlateT">Case slate</h2>
+    <div class="chips" id="slStages" role="group" aria-label="Stage for this series"></div>
+    <div class="slate"><div class="slatebox" id="slBox"><canvas id="slQR" width="10" height="10" aria-label="QR code for this case"></canvas><div class="sname" id="slName"></div><div class="sline" id="slLine"></div></div></div>
+    <p class="hint">Photograph this with the camera before the series: hold it straight on, fill about a quarter of the frame, and turn the screen brightness up. Photos after it are filed into this case until the next slate.</p>
+  </div>
+  <div class="dbtns"><button class="btn ghost left" type="button" id="slPrint">Print slate</button><button class="btn" type="button" id="slClose">Done</button></div>
+</dialog>
+
+<!-- import -->
+<dialog id="dImp" class="wide" aria-labelledby="dImpT">
+  <div class="dlg">
+    <h2 id="dImpT">Importing photos</h2>
+    <div id="impWork"><p id="impMsg" role="status">Reading photos…</p><div class="prog"><div id="impBar"></div></div></div>
+    <div id="impReview" hidden style="display:grid;gap:12px">
+      <p class="sub" id="impSummary"></p>
+      <div class="row"><label class="lbl" for="impSeries">Label the views in this order</label><select id="impSeries"></select><span class="hint">Applied to each case below. You can change any photo afterwards.</span></div>
+      <div id="impGroups" style="display:grid;gap:12px"></div>
+    </div>
+    <p class="err" id="impErr" hidden></p>
+  </div>
+  <div class="dbtns"><button class="btn ghost" type="button" id="impCancel">Cancel</button><button class="btn" type="button" id="impSave" disabled>Save to library</button></div>
+</dialog>
+
+<!-- viewer -->
+<dialog id="dView" class="full" aria-label="Photo">
+  <div class="vwrap">
+    <div class="vstage" id="vStage"><canvas id="vCanvas" aria-label="Photo"></canvas>
+      <button class="vnav l" id="vPrev" type="button" aria-label="Previous photo">‹</button><button class="vnav r" id="vNext" type="button" aria-label="Next photo">›</button>
+      <div class="vtop"><button type="button" id="vRotL" title="Rotate left" aria-label="Rotate left">⟲</button><button type="button" id="vRotR" title="Rotate right" aria-label="Rotate right">⟳</button><button type="button" id="vFlipH" title="Flip left to right (mirror shot)" aria-label="Flip left to right">⇋</button><button type="button" id="vFlipV" title="Flip top to bottom (occlusal mirror shot)" aria-label="Flip top to bottom">⇵</button><button type="button" id="vClose" aria-label="Close">✕</button></div>
+    </div>
+    <div class="vside">
+      <div><b id="vTitle"></b><p class="hint" id="vInfo"></p></div>
+      <div class="f"><label class="lbl" for="vView">View</label><select id="vView"></select></div>
+      <div class="f"><label class="lbl" for="vStageSel">Stage</label><select id="vStageSel"></select></div>
+      <div class="f"><label class="lbl" for="vDate">Date taken</label><input type="date" id="vDate"></div>
+      <div class="f"><label class="lbl" for="vTeeth">Teeth (Palmer, e.g. UL1, UR2)</label><input type="text" id="vTeeth" maxlength="120"></div>
+      <div class="f"><label class="lbl" for="vTags">Tags</label><input type="text" id="vTags" list="tagList" maxlength="200"></div>
+      <div class="f"><label class="lbl" for="vNote">Note</label><textarea id="vNote" maxlength="1000"></textarea></div>
+      <label class="row" style="gap:8px"><input type="checkbox" id="vStar" style="width:20px;height:20px;accent-color:var(--teal)"> Favourite (good for teaching)</label>
+      <div class="row"><button class="btn ghost sm" id="vDown" type="button">Download original</button><button class="btn ghost sm" id="vShare" type="button" hidden>Share</button><button class="btn ghost sm" id="vMove" type="button">Move to case…</button><button class="btn danger sm" id="vDel" type="button">Delete</button></div>
+    </div>
+  </div>
+</dialog>
+
+<!-- compare -->
+<dialog id="dCmp" class="wide" aria-labelledby="dCmpT">
+  <div class="dlg"><h2 id="dCmpT">Before / after</h2>
+    <div class="row"><div class="chips" role="group" aria-label="Layout"><button type="button" class="chip" data-cm="side" aria-pressed="true">Side by side</button><button type="button" class="chip" data-cm="slider" aria-pressed="false">Slider</button></div>
+      <span class="sp"></span><select id="cmpPairs" aria-label="Pair" hidden></select></div>
+    <div id="cmpSide" class="cmp"><div class="f"><input type="text" id="cmpL1" aria-label="Left label"><canvas id="cmpA"></canvas></div><div class="f"><input type="text" id="cmpL2" aria-label="Right label"><canvas id="cmpB"></canvas></div></div>
+    <div id="cmpSlider" hidden><div class="slider" id="sliderBox"><canvas id="slB"></canvas><div class="top" id="slTop"><canvas id="slA"></canvas></div><div class="bar" id="slBar"></div></div><input type="range" id="slRange" min="0" max="100" value="50" aria-label="Slide between before and after"></div>
+  </div>
+  <div class="dbtns"><button class="btn ghost left" type="button" id="cmpSwap">Swap</button><button class="btn ghost" type="button" id="cmpCopy" hidden>Copy image</button><button class="btn ghost" type="button" id="cmpShare" hidden>Share</button><button class="btn ghost" type="button" id="cmpDown">Download image</button><button class="btn" type="button" id="cmpClose">Done</button></div>
+</dialog>
+
+<!-- collage -->
+<dialog id="dCol" class="wide" aria-labelledby="dColT">
+  <div class="dlg"><h2 id="dColT">Collage</h2>
+    <div class="row">
+      <label class="lbl" for="colLayout">Layout</label><select id="colLayout"></select>
+      <label class="lbl" for="colShape">Shape</label><select id="colShape"><option value="16:9">16:9 slide</option><option value="4:3">4:3 slide</option><option value="1:1">Square</option><option value="210:297">A4 portrait</option></select>
+      <label class="lbl" for="colBg">Background</label><select id="colBg"><option value="#ffffff">White</option><option value="#000000">Black</option></select>
+    </div>
+    <div class="row"><input type="text" id="colTitle" placeholder="Title (optional)" maxlength="80" style="max-width:420px"><label class="row" style="gap:6px"><input type="checkbox" id="colLabels"> View labels</label><label class="row" style="gap:6px"><input type="checkbox" id="colFill" checked> Fill each box (crops the edges)</label></div>
+    <div class="preview"><canvas id="colCanvas"></canvas></div>
+    <div class="cells" id="colCells"></div>
+  </div>
+  <div class="dbtns"><button class="btn ghost" type="button" id="colCopy" hidden>Copy image</button><button class="btn ghost" type="button" id="colShare" hidden>Share</button><button class="btn ghost" type="button" id="colDown">Download image</button><button class="btn" type="button" id="colClose">Done</button></div>
+</dialog>
+
+<!-- pick a case / stage -->
+<dialog id="dPick" aria-labelledby="dPickT"><div class="dlg"><h2 id="dPickT"></h2><div class="chips" id="pickList" style="max-height:50vh;overflow:auto"></div></div>
+  <div class="dbtns"><button class="btn ghost" type="button" id="pickCancel">Cancel</button></div></dialog>
+
+<!-- settings -->
+<dialog id="dSet" aria-labelledby="dSetT"><div class="dlg">
+  <h2 id="dSetT">Settings</h2>
+  <div class="f"><span class="lbl">My series order</span><p class="hint">Tick the views you take and put them in the order you take them. On import, Photo Card can label the photos after each slate in this order.</p><div id="mySeries"></div></div>
+  <hr style="border:0;border-top:1px solid var(--line);margin:2px 0">
+  <div class="f" id="folderBox" hidden><span class="lbl">Folder for case folders</span><p class="hint" id="folderMsg">Choose a folder on this computer, such as your Google Drive or OneDrive folder, and Photo Card saves each case into its own folder there.</p>
+    <div class="row"><button class="btn ghost" id="folderPick" type="button">Choose folder</button><button class="btn ghost" id="folderForget" type="button" hidden>Forget folder</button></div>
+    <label class="row" style="gap:8px"><input type="checkbox" id="folderAuto" style="width:20px;height:20px;accent-color:var(--teal)"> Save newly imported photos to the folder straight away</label></div>
+  <div class="f"><span class="lbl">Backup</span><div class="row"><button class="btn ghost" id="zipAll" type="button">Download all cases as ZIP</button></div></div>
+  <div class="f"><span class="lbl">Storage</span><p class="hint" id="storeMsg"></p></div>
+  <div class="row"><button class="btn danger" id="eraseAll" type="button">Erase everything on this device</button></div>
+</div><div class="dbtns"><button class="btn" id="setClose" type="button">Done</button></div></dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+/* ============================================================ basics */
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36).slice(-5)+Math.random().toString(36).slice(2,6);
+const pad=n=>String(n).padStart(2,'0');
+const isoDate=t=>{const d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
+const fmtDate=(s,o)=>{if(!s)return '';const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d).toLocaleDateString('en-GB',o||{weekday:'short',day:'numeric',month:'short',year:'numeric'})};
+const plural=(n,w,ws)=>`${n} ${n===1?w:(ws||w+'s')}`;
+const store={get(k,d){try{const v=localStorage.getItem('photoCard.'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('photoCard.'+k,JSON.stringify(v))}catch(e){}}};
+const yieldUI=()=>new Promise(r=>setTimeout(r,0));
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),ms||2400)}
+const splitList=s=>[...new Set(String(s||'').split(',').map(x=>x.trim()).filter(Boolean))].slice(0,20);
+const teethList=s=>[...new Set(String(s||'').toUpperCase().split(/[\s,;]+/).map(x=>x.replace(/[^URLD0-9A-E]/g,'')).filter(x=>/^(U|L)(R|L)[1-8A-E]$/.test(x)))];
+const safeName=s=>String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]+/g,' ').replace(/[\u2013\u2014]/g,'-').replace(/\s+/g,' ').trim().slice(0,80)||'Untitled';
+try{localStorage.setItem('notile:photoCard:seen','1')}catch(e){}
+
+/* ============================================================ clinical vocabulary */
+const STAGES=[['pre','Pre-op'],['during','During treatment'],['post','Post-op'],['review','Review']],SNAME=Object.fromEntries(STAGES);
+const VIEWS=[
+  ['face-rest','Full face, at rest','Face at rest','Camera at eye level, head upright, lips relaxed, plain background.'],
+  ['face-smile','Full face, smiling','Face smiling','As at rest, with a natural full smile.'],
+  ['profile-r','Profile, right','Profile R','Patient turned 90°, ear visible, head level.'],
+  ['smile','Smile, close-up','Smile','Lips and teeth only, centred on the midline, camera level with the incisal plane.'],
+  ['ret-front','Retracted frontal, in occlusion','Frontal','Retractors out and forward, teeth together, centred on the midline, occlusal plane level.'],
+  ['ret-apart','Retracted frontal, teeth apart','Frontal apart','As frontal, teeth slightly apart to show the incisal edges.'],
+  ['buccal-r','Right buccal','Right buccal','Right cheek retracted or a buccal mirror, teeth together, camera square to the premolars. Flip left to right if taken in a mirror.'],
+  ['buccal-l','Left buccal','Left buccal','As right buccal, on the left.'],
+  ['occ-u','Upper occlusal','Upper occlusal','Occlusal mirror, head tilted back, mouth wide, whole arch in view. Flip top to bottom afterwards.'],
+  ['occ-l','Lower occlusal','Lower occlusal','Occlusal mirror, chin down, tongue back, whole arch in view. Flip top to bottom afterwards.'],
+  ['shade','Close-up with shade tab','Shade','Tab edge to edge with the tooth, in the same plane, no flash glare.'],
+  ['radiograph','Radiograph or scan','Radiograph',''],
+  ['other','Other','Other','']
+],VNAME=Object.fromEntries(VIEWS.map(v=>[v[0],v[1]])),VSHORT=Object.fromEntries(VIEWS.map(v=>[v[0],v[2]])),VORDER=Object.fromEntries(VIEWS.map((v,i)=>[v[0],i]));
+const SERIES_PRESETS={
+  full:['Full series',['face-rest','face-smile','profile-r','smile','ret-front','ret-apart','buccal-r','buccal-l','occ-u','occ-l']],
+  intra5:['Intraoral 5',['ret-front','buccal-r','buccal-l','occ-u','occ-l']],
+  smile6:['Smile and intraoral',['smile','ret-front','buccal-r','buccal-l','occ-u','occ-l']]};
+const CHECKLIST=['face-rest','face-smile','profile-r','smile','ret-front','ret-apart','buccal-r','buccal-l','occ-u','occ-l'];
+function mySeries(){const s=store.get('mySeries',null);return Array.isArray(s)&&s.length?s.filter(k=>VNAME[k]):SERIES_PRESETS.full[1].slice()}
+const TAG_SUGGEST=['composite build-ups','veneers','crown','onlay','bridge','RBB','implant','denture','endo','perio','ortho','hypodontia','trauma','toothwear','whitening','teaching'];
+
+/* ============================================================ storage (IndexedDB) */
+const DB={db:null,
+  open(){return new Promise((res,rej)=>{const r=indexedDB.open('notile-photo-card',1);
+    r.onupgradeneeded=()=>{const d=r.result;['cases','photos'].forEach(s=>{if(!d.objectStoreNames.contains(s))d.createObjectStore(s,{keyPath:'id'})});['orig','disp','thumb','kv'].forEach(s=>{if(!d.objectStoreNames.contains(s))d.createObjectStore(s)})};
+    r.onsuccess=()=>{DB.db=r.result;res()};r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('blocked'))})},
+  run(stores,mode,fn){return new Promise((res,rej)=>{const t=DB.db.transaction(stores,mode);let out;t.oncomplete=()=>res(out);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error||new Error('abort'));
+    const req=fn(t);if(req&&'onsuccess' in req)req.onsuccess=()=>{out=req.result}})},
+  all(s){return DB.run([s],'readonly',t=>t.objectStore(s).getAll())},
+  get(s,k){return DB.run([s],'readonly',t=>t.objectStore(s).get(k))},
+  put(s,v,k){return DB.run([s],'readwrite',t=>k===undefined?t.objectStore(s).put(v):t.objectStore(s).put(v,k))},
+  del(s,k){return DB.run([s],'readwrite',t=>t.objectStore(s).delete(k))}};
+const CASES=new Map(),PHOTOS=new Map();
+async function saveCase(c){c.updated=Date.now();CASES.set(c.id,c);await DB.put('cases',c)}
+async function savePhoto(p){p.updated=Date.now();PHOTOS.set(p.id,p);await DB.put('photos',p)}
+async function addPhoto(p,orig,disp,thumb){p.updated=p.created=Date.now();
+  await DB.run(['photos','orig','disp','thumb'],'readwrite',t=>{t.objectStore('photos').put(p);t.objectStore('orig').put(orig,p.id);t.objectStore('disp').put(disp,p.id);t.objectStore('thumb').put(thumb,p.id)});PHOTOS.set(p.id,p)}
+async function deletePhotos(ids){if(!ids.length)return;await DB.run(['photos','orig','disp','thumb'],'readwrite',t=>{ids.forEach(id=>['photos','orig','disp','thumb'].forEach(s=>t.objectStore(s).delete(id)))});
+  ids.forEach(id=>{PHOTOS.delete(id);const u=THUMB.get(id);if(u){URL.revokeObjectURL(u);THUMB.delete(id)}})}
+const THUMB=new Map();
+async function thumbUrl(id){if(THUMB.has(id))return THUMB.get(id);const b=await DB.get('thumb',id);if(!b)return '';const u=URL.createObjectURL(b);THUMB.set(id,u);return u}
+// fill <img data-th> placeholders once their thumbnails are read
+function hydrate(root){root.querySelectorAll('img[data-th]').forEach(async img=>{const id=img.dataset.th;img.removeAttribute('data-th');const u=await thumbUrl(id);if(u)img.src=u})}
+const casePhotos=id=>[...PHOTOS.values()].filter(p=>p.caseId===id);
+const sortPhotos=a=>a.sort((x,y)=>(x.date||'').localeCompare(y.date||'')||(VORDER[x.view]??99)-(VORDER[y.view]??99)||(x.taken||0)-(y.taken||0));
+
+/* ============================================================ reading photos */
+// DateTimeOriginal (+ sub-seconds) and camera model from a JPEG's EXIF block
+function exifInfo(buf){const v=new DataView(buf),out={};try{
+  if(v.byteLength<4||v.getUint16(0)!==0xFFD8)return out;let o=2;
+  while(o+4<=v.byteLength){const m=v.getUint16(o);if((m&0xFF00)!==0xFF00)break;const len=v.getUint16(o+2);
+    if(m===0xFFE1&&o+10<=v.byteLength&&v.getUint32(o+4)===0x45786966){const t=o+10,le=v.getUint16(t)===0x4949,u16=p=>v.getUint16(p,le),u32=p=>v.getUint32(p,le);
+      const str=(cnt,vo)=>{const off=cnt>4?t+u32(vo):vo;let s='';for(let i=0;i<cnt&&off+i<v.byteLength;i++){const c=v.getUint8(off+i);if(!c)break;s+=String.fromCharCode(c)}return s.trim()};
+      const ifd=(p,cb)=>{if(p+2>v.byteLength)return;const n=u16(p);for(let i=0;i<n;i++){const e=p+2+i*12;if(e+12>v.byteLength)return;cb(u16(e),u32(e+4),e+8)}};
+      let ex=0;ifd(t+u32(t+4),(tag,cnt,vo)=>{if(tag===0x8769)ex=u32(vo);else if(tag===0x0110)out.model=str(cnt,vo);else if(tag===0x0132)out.dt0=str(cnt,vo)});
+      if(ex)ifd(t+ex,(tag,cnt,vo)=>{if(tag===0x9003)out.dt=str(cnt,vo);else if(tag===0x9291)out.sub=str(cnt,vo)});return out}
+    if(m===0xFFDA||len<2)break;o+=2+len}}catch(e){}return out}
+function exifTime(ex){const s=ex.dt||ex.dt0;const m=s&&/^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)/.exec(s);if(!m)return 0;
+  const t=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]).getTime();return isNaN(t)?0:t+(ex.sub?Math.round(parseFloat('0.'+String(ex.sub).replace(/\D/g,''))*1000)||0:0)}
+async function decodeImage(blob){
+  if(window.createImageBitmap){try{return await createImageBitmap(blob,{imageOrientation:'from-image'})}catch(e){try{return await createImageBitmap(blob)}catch(_){}}}
+  const url=URL.createObjectURL(blob);try{const im=new Image();im.decoding='async';await new Promise((res,rej)=>{im.onload=res;im.onerror=()=>rej(new Error('decode'));im.src=url});await im.decode().catch(()=>{});return im}finally{setTimeout(()=>URL.revokeObjectURL(url),1000)}}
+const dims=src=>({w:src.naturalWidth||src.width,h:src.naturalHeight||src.height});
+function scaled(src,max){const {w,h}=dims(src),k=Math.min(1,max/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*k));c.height=Math.max(1,Math.round(h*k));
+  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingQuality='high';x.drawImage(src,0,0,c.width,c.height);return c}
+const toBlob=(c,type,q)=>new Promise(res=>c.toBlob(b=>res(b),type||'image/jpeg',q||.86));
+// Look for a Photo Card slate QR in the picture
+let BD=null;try{if('BarcodeDetector' in window)BarcodeDetector.getSupportedFormats().then(f=>{if(f.includes('qr_code'))BD=new BarcodeDetector({formats:['qr_code']})}).catch(()=>{})}catch(e){}
+async function findSlate(c){
+  if(BD){try{const r=await BD.detect(c);for(const x of r){const s=parseSlate(x.rawValue);if(s)return s}}catch(e){}}
+  if(!window.jsQR)return null;
+  if(Math.max(c.width,c.height)>1200)c=scaled(c,1200); // a slate filling a quarter of the frame still has 6+ pixels per module here, and jsQR is much quicker
+  const x=c.getContext('2d',{willReadFrequently:true}),img=x.getImageData(0,0,c.width,c.height);
+  const r=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});return r?parseSlate(r.data):null}
+function slateUrl(c,stage){const p=new URLSearchParams();p.set('case',c.id);p.set('n',c.name);if(c.label)p.set('l',c.label);if(stage)p.set('s',stage);return location.origin+'/photo-card/#'+p.toString()}
+function parseSlate(txt){try{const u=new URL(String(txt||''));if(!/\/photo-card\/?$/.test(u.pathname))return null;const p=new URLSearchParams(u.hash.slice(1)),id=p.get('case');
+  if(!id||!/^[a-z0-9]{4,20}$/i.test(id))return null;return {id,name:(p.get('n')||'Case').slice(0,60),label:(p.get('l')||'').slice(0,60),stage:SNAME[p.get('s')]?p.get('s'):''}}catch(e){return null}}
+
+/* ============================================================ ZIP in and out */
+// Reads stored and deflated entries (ZIP64 too). Google Photos downloads come as plain ZIPs of the original files.
+async function unzip(file,onEntry){
+  const len=file.size,tailLen=Math.min(len,66000+20),tail=new DataView(await file.slice(len-tailLen).arrayBuffer());
+  let e=-1;for(let i=tail.byteLength-22;i>=0;i--){if(tail.getUint32(i,true)===0x06054b50){e=i;break}}if(e<0)throw new Error('Not a ZIP file');
+  let count=tail.getUint16(e+10,true),cdSize=tail.getUint32(e+12,true),cdOff=tail.getUint32(e+16,true);
+  if(count===0xFFFF||cdOff===0xFFFFFFFF){const l=e-20;if(l>=0&&tail.getUint32(l,true)===0x07064b50){const z64=Number(tail.getBigUint64(l+8,true)),zv=new DataView(await file.slice(z64,z64+56).arrayBuffer());
+    count=Number(zv.getBigUint64(32,true));cdSize=Number(zv.getBigUint64(40,true));cdOff=Number(zv.getBigUint64(48,true))}}
+  const cd=new DataView(await file.slice(cdOff,cdOff+cdSize).arrayBuffer()),dec=new TextDecoder();let p=0;
+  for(let i=0;i<count&&p+46<=cd.byteLength;i++){if(cd.getUint32(p,true)!==0x02014b50)break;
+    const method=cd.getUint16(p+10,true),mt=cd.getUint16(p+12,true),md=cd.getUint16(p+14,true);let csize=cd.getUint32(p+20,true),usize=cd.getUint32(p+24,true);
+    const nlen=cd.getUint16(p+28,true),xlen=cd.getUint16(p+30,true),clen=cd.getUint16(p+32,true);let lho=cd.getUint32(p+42,true);
+    const name=dec.decode(new Uint8Array(cd.buffer,cd.byteOffset+p+46,nlen));
+    let x=p+46+nlen;const xe=x+xlen;while(x+4<=xe){const id=cd.getUint16(x,true),sz=cd.getUint16(x+2,true);if(id===1){let q=x+4;if(usize===0xFFFFFFFF){usize=Number(cd.getBigUint64(q,true));q+=8}if(csize===0xFFFFFFFF){csize=Number(cd.getBigUint64(q,true));q+=8}if(lho===0xFFFFFFFF){lho=Number(cd.getBigUint64(q,true))}}x+=4+sz}
+    p=xe+clen;
+    if(name.endsWith('/')||/(^|\/)(__MACOSX|\.)/.test(name)||!/\.(jpe?g|png|heic|heif|webp)$/i.test(name))continue;
+    const lh=new DataView(await file.slice(lho,lho+30).arrayBuffer());if(lh.getUint32(0,true)!==0x04034b50)continue;
+    const start=lho+30+lh.getUint16(26,true)+lh.getUint16(28,true),raw=file.slice(start,start+csize);
+    const mtime=new Date(1980+(md>>9),((md>>5)&15)-1,md&31,mt>>11,(mt>>5)&63,(mt&31)*2).getTime();
+    let blob;if(method===0)blob=raw;else if(method===8&&'DecompressionStream' in window)blob=await new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();else continue;
+    const base=name.split('/').pop(),type=/\.png$/i.test(base)?'image/png':/\.webp$/i.test(base)?'image/webp':/\.hei[cf]$/i.test(base)?'image/heic':'image/jpeg';
+    await onEntry(new File([blob],base,{type,lastModified:mtime}))}}
+let CRC=null;function crc32(u8){if(!CRC){CRC=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;CRC[n]=c>>>0}}let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRC[(c^u8[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+// Store-only ZIP (photos are already compressed). files: [{path, blob}]
+async function makeZip(files,onProgress){const parts=[],cdir=[],enc=new TextEncoder();let off=0;const now=new Date(),dt=((now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1)),dd=(((now.getFullYear()-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate());
+  for(let i=0;i<files.length;i++){const f=files[i],name=enc.encode(f.path),data=new Uint8Array(await f.blob.arrayBuffer()),crc=crc32(data);
+    const h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);h.setUint16(10,dt,true);h.setUint16(12,dd,true);h.setUint32(14,crc,true);h.setUint32(18,data.length,true);h.setUint32(22,data.length,true);h.setUint16(26,name.length,true);h.setUint16(28,0,true);
+    parts.push(h,name,f.blob);
+    const c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);c.setUint16(12,dt,true);c.setUint16(14,dd,true);c.setUint32(16,crc,true);c.setUint32(20,data.length,true);c.setUint32(24,data.length,true);c.setUint16(28,name.length,true);c.setUint32(42,off,true);
+    cdir.push(c,name);off+=30+name.length+data.length;if(onProgress)onProgress((i+1)/files.length);await yieldUI()}
+  const cdSize=cdir.reduce((s,x)=>s+(x.byteLength||x.length),0),e=new DataView(new ArrayBuffer(22));e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cdSize,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cdir,e],{type:'application/zip'})}
+function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
+const canShareFiles=f=>{try{return !!(navigator.share&&navigator.canShare&&navigator.canShare({files:f}))}catch(e){return false}};
+const canCopyImg=!!(navigator.clipboard&&navigator.clipboard.write&&window.ClipboardItem);
+async function copyImage(c){try{const b=await toBlob(c,'image/png');await navigator.clipboard.write([new ClipboardItem({'image/png':b})]);toast('Image copied: paste it into your slides')}catch(e){toast('Could not copy the image here. Download it instead.',3000)}}
+async function shareFiles(files,title){try{await navigator.share({files,title})}catch(e){if(e&&e.name!=='AbortError')toast('Could not share from here.',3000)}}
+
+/* ============================================================ export paths and folders */
+function exportPath(p,c,used){const st=SNAME[p.stage]||'Unsorted',num=pad((VORDER[p.view]??90)+1),base=`${p.date||'undated'} ${st}`;
+  let n=`${safeName(c?c.name+(c.label?' - '+c.label:''):'Unsorted')}/${safeName(base)}/${num} ${safeName(VSHORT[p.view]||'Photo')} - ${safeName((p.name||'photo').replace(/\.[^.]+$/,''))}${(/\.[a-z0-9]{2,5}$/i.exec(p.name||'')||['.jpg'])[0].toLowerCase()}`;
+  if(used){let k=n,i=2;while(used.has(k)){k=n.replace(/(\.[a-z0-9]+)$/i,` (${i++})$1`)}used.add(k);n=k}return n}
+async function zipPhotos(list,zipName){if(!list.length)return toast('No photos to save');toast('Making the ZIP…',60000);const used=new Set(),files=[];
+  for(const p of sortPhotos(list.slice())){const b=await DB.get('orig',p.id);if(b)files.push({path:exportPath(p,CASES.get(p.caseId),used),blob:b})}
+  const z=await makeZip(files);toast(`ZIP ready: ${plural(files.length,'photo')}`);
+  if(/iPhone|iPad/.test(navigator.userAgent)&&canShareFiles([new File([z],zipName,{type:'application/zip'})]))return shareFiles([new File([z],zipName,{type:'application/zip'})],zipName);
+  download(z,zipName)}
+const canFolder=!!window.showDirectoryPicker&&window.isSecureContext;
+let FOLDER=null;
+async function folderReady(ask){if(!FOLDER)return false;try{const o={mode:'readwrite'};if(await FOLDER.queryPermission(o)==='granted')return true;if(ask&&await FOLDER.requestPermission(o)==='granted')return true}catch(e){}return false}
+async function writeToFolder(list,silent){if(!FOLDER||!list.length)return 0;let n=0;const used=new Set();
+  for(const p of sortPhotos(list.slice())){const b=await DB.get('orig',p.id);if(!b)continue;const parts=exportPath(p,CASES.get(p.caseId),used).split('/');let dir=FOLDER;
+    for(const d of parts.slice(0,-1))dir=await dir.getDirectoryHandle(d,{create:true});
+    const fh=await dir.getFileHandle(parts[parts.length-1],{create:true}),w=await fh.createWritable();await w.write(b);await w.close();
+    p.saved=FOLDER.name;await savePhoto(p);n++}
+  if(!silent)toast(`Saved ${plural(n,'photo')} to ${FOLDER.name}`);return n}
+
+/* ============================================================ home */
+const S={view:'home',caseId:null,stage:'',q:'',tag:'',selecting:false,sel:new Set(),list:[]};
+function caseStats(c){const ps=casePhotos(c.id),stages=[...new Set(ps.map(p=>p.stage))].filter(Boolean),last=ps.reduce((m,p)=>p.date>m?p.date:m,'');return{ps,stages,last}}
+function caseMatches(c,q){if(!q)return true;q=q.toLowerCase();const hay=[c.name,c.label,c.notes,...(c.tags||[])].join(' ').toLowerCase();if(hay.includes(q))return true;
+  return casePhotos(c.id).some(p=>[...(p.tags||[]),...(p.teeth||[]),p.note,VNAME[p.view]].join(' ').toLowerCase().includes(q))}
+function allTags(){const m=new Map();CASES.forEach(c=>(c.tags||[]).forEach(t=>m.set(t,(m.get(t)||0)+1)));PHOTOS.forEach(p=>(p.tags||[]).forEach(t=>m.set(t,(m.get(t)||0)+1)));return [...m.entries()].sort((a,b)=>b[1]-a[1]).map(x=>x[0])}
+function writeSum(){try{localStorage.setItem('notile:photoCard:sum',JSON.stringify({cases:CASES.size,photos:PHOTOS.size,unsorted:[...PHOTOS.values()].filter(p=>!p.caseId).length}))}catch(e){}}
+function renderHome(){writeSum();
+  const tags=allTags();$('tagList').innerHTML=[...new Set([...tags,...TAG_SUGGEST])].map(t=>`<option value="${esc(t)}">`).join('');
+  $('tagChips').innerHTML=tags.slice(0,14).map(t=>`<button type="button" class="chip" data-tagf="${esc(t)}" aria-pressed="${S.tag===t}">${esc(t)}</button>`).join('');
+  const unsorted=[...PHOTOS.values()].filter(p=>!p.caseId);
+  let cs=[...CASES.values()].filter(c=>caseMatches(c,S.q)&&(!S.tag||(c.tags||[]).includes(S.tag)||casePhotos(c.id).some(p=>(p.tags||[]).includes(S.tag))));
+  cs=cs.map(c=>({c,st:caseStats(c)})).sort((a,b)=>(b.st.last||'').localeCompare(a.st.last||'')||b.c.updated-a.c.updated);
+  const card=(id,name,label,meta,ps,tagsHtml)=>{const pick=sortPhotos(ps.slice()).sort((a,b)=>(['ret-front','smile','face-smile','buccal-r'].indexOf(a.view)+1||9)-(['ret-front','smile','face-smile','buccal-r'].indexOf(b.view)+1||9)).slice(0,4);
+    return `<button type="button" class="ccard" data-case="${esc(id)}"><div class="cthumbs">${[0,1,2,3].map(i=>pick[i]?`<img alt="" data-th="${esc(pick[i].id)}"${tf(pick[i])}>`:'<span></span>').join('')}</div>
+      <div class="cbody"><b>${esc(name)}</b>${label?`<span>${esc(label)}</span>`:''}<span class="meta">${meta}</span>${tagsHtml||''}</div></button>`};
+  let h='';if(unsorted.length&&!S.q&&!S.tag)h+=card('__unsorted','Unsorted','Photos not yet filed into a case',plural(unsorted.length,'photo'),unsorted);
+  h+=cs.map(({c,st})=>card(c.id,c.name,c.label,[plural(st.ps.length,'photo'),st.stages.map(s=>SNAME[s]).join(', '),st.last?fmtDate(st.last,{day:'numeric',month:'short',year:'numeric'}):''].filter(Boolean).join(' · '),st.ps,
+    (c.tags||[]).length?`<span class="chips">${c.tags.slice(0,4).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</span>`:'')).join('');
+  $('caseList').innerHTML=h;$('caseEmpty').hidden=!!h;$('caseEmpty').textContent=CASES.size||PHOTOS.size?'No cases match.':'No cases yet. Make a case and show its slate, or import photos.';hydrate($('caseList'))}
+$('q').addEventListener('input',e=>{S.q=e.target.value.trim();renderHome()});
+document.addEventListener('click',e=>{const t=e.target.closest('[data-tagf]');if(t){S.tag=S.tag===t.dataset.tagf?'':t.dataset.tagf;renderHome()}
+  const c=e.target.closest('[data-case]');if(c)openCase(c.dataset.case)});
+
+/* ============================================================ case view */
+function showView(v){S.view=v;$('home').hidden=v!=='home';$('caseView').hidden=v!=='case';if(v==='home'){setSelecting(false);renderHome()}scrollTo(0,0)}
+function openCase(id){S.caseId=id;S.stage='';setSelecting(false);$('cvMoreRow').hidden=true;showView('case');renderCase();try{history.replaceState(null,'','#c='+encodeURIComponent(id))}catch(e){}}
+$('back').addEventListener('click',()=>{showView('home');try{history.replaceState(null,'',location.pathname)}catch(e){}});
+function curPhotos(){return S.caseId==='__unsorted'?[...PHOTOS.values()].filter(p=>!p.caseId):casePhotos(S.caseId)}
+function renderCase(){writeSum();const un=S.caseId==='__unsorted',c=CASES.get(S.caseId);if(!un&&!c){showView('home');return}
+  const all=curPhotos();
+  $('cvName').textContent=un?'Unsorted photos':c.name;$('cvMeta').textContent=un?'Select photos and move them into a case.':[c.label,c.notes].filter(Boolean).join(' · ');
+  $('cvTags').innerHTML=un?'':(c.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+  ['cvSlate','cvMore'].forEach(id=>$(id).hidden=un);document.querySelector('label[for=caseFileIn]').hidden=un;$('cvFolder').hidden=!canFolder;
+  const counts=Object.fromEntries(STAGES.map(([k])=>[k,all.filter(p=>p.stage===k).length]));
+  $('stageChips').innerHTML=`<button type="button" class="chip" data-stg="" aria-pressed="${!S.stage}">All <span class="k">${all.length}</span></button>`+STAGES.filter(([k])=>counts[k]||S.stage===k).map(([k,n])=>`<button type="button" class="chip" data-stg="${k}" aria-pressed="${S.stage===k}">${n} <span class="k">${counts[k]}</span></button>`).join('');
+  const list=sortPhotos(all.filter(p=>!S.stage||p.stage===S.stage));S.list=list;
+  // series checklist for the chosen stage
+  $('seriesBox').hidden=un||!S.stage;
+  if(S.stage){const have=new Set(list.map(p=>p.view)),n=CHECKLIST.filter(k=>have.has(k)).length;$('seriesLbl').textContent=`${SNAME[S.stage]} series: ${n} of ${CHECKLIST.length} standard views`;
+    $('seriesList').innerHTML=CHECKLIST.map(k=>`<button type="button" class="sv${have.has(k)?' have':''}" data-svj="${k}" title="${esc(VIEWS[VORDER[k]][3])}">${esc(VSHORT[k])}</button>`).join('')}
+  $('cvCount').textContent=plural(list.length,'photo');
+  // group by stage then date
+  const groups=new Map();list.forEach(p=>{const k=(p.stage||'zz')+'|'+(p.date||'');if(!groups.has(k))groups.set(k,[]);groups.get(k).push(p)});
+  const keys=[...groups.keys()].sort((a,b)=>{const [sa,da]=a.split('|'),[sb,db]=b.split('|');return (da||'').localeCompare(db||'')||(STAGES.findIndex(x=>x[0]===sa))-(STAGES.findIndex(x=>x[0]===sb))});
+  $('photoGroups').innerHTML=keys.length?keys.map(k=>{const [st,d]=k.split('|'),ps=groups.get(k);
+    return `<div class="pgroup"><div class="pgh"><h3>${esc(SNAME[st]||'No stage')}</h3><span class="hint">${esc(fmtDate(d))} · ${plural(ps.length,'photo')}</span></div><div class="grid">${ps.map(phTile).join('')}</div></div>`}).join('')
+    :`<p class="empty">${un?'No unsorted photos.':'No photos yet. Show the slate, photograph it before the series, then import the photos.'}</p>`;
+  hydrate($('photoGroups'))}
+const tf=p=>p.rot||p.fh||p.fv?` style="transform:rotate(${p.rot||0}deg) scale(${p.fh?-1:1},${p.fv?-1:1})"`:'';
+function phTile(p){return `<button type="button" class="ph" data-ph="${esc(p.id)}" aria-pressed="${S.sel.has(p.id)}" aria-label="${esc(VNAME[p.view]||'Photo')}, ${esc(fmtDate(p.date))}"><img alt="" data-th="${esc(p.id)}"${tf(p)}>${p.star?'<span class="star" aria-hidden="true">★</span>':''}<span class="tick" aria-hidden="true"></span><span class="lab">${esc(p.view?VSHORT[p.view]:'Not labelled')}</span></button>`}
+document.addEventListener('click',e=>{
+  const st=e.target.closest('[data-stg]');if(st){S.stage=st.dataset.stg;renderCase();return}
+  const ph=e.target.closest('#photoGroups [data-ph]');if(ph){const id=ph.dataset.ph;if(S.selecting){S.sel.has(id)?S.sel.delete(id):S.sel.add(id);ph.setAttribute('aria-pressed',String(S.sel.has(id)));updateSel()}else openViewer(id,S.list.map(p=>p.id));return}
+  const sv=e.target.closest('[data-svj]');if(sv){const p=S.list.find(x=>x.view===sv.dataset.svj);if(p)openViewer(p.id,S.list.map(x=>x.id));else toast(VNAME[sv.dataset.svj]+': not taken yet. '+(VIEWS[VORDER[sv.dataset.svj]][3]||''),4200)}});
+$('cvMore').addEventListener('click',()=>{$('cvMoreRow').hidden=!$('cvMoreRow').hidden});
+// selection
+function setSelecting(on){S.selecting=on;S.sel.clear();document.body.classList.toggle('selecting',on);$('selbar').hidden=!on;$('selToggle').textContent=on?'Cancel':'Select';document.querySelectorAll('#photoGroups .ph').forEach(x=>x.setAttribute('aria-pressed','false'));updateSel()}
+function updateSel(){const n=S.sel.size;$('selN').textContent=n+' selected';$('sCompare').disabled=n!==2;['sCollage','sStage','sMove','sDel','sShare'].forEach(id=>$(id).disabled=!n);$('sShare').hidden=!navigator.share}
+$('selToggle').addEventListener('click',()=>setSelecting(!S.selecting));
+$('sDone').addEventListener('click',()=>setSelecting(false));
+const selPhotos=()=>S.list.filter(p=>S.sel.has(p.id));
+$('sCompare').addEventListener('click',()=>{const [a,b]=sortPhotos(selPhotos());openCompare([[a,b]])});
+$('sCollage').addEventListener('click',()=>openCollage(selPhotos()));
+$('sStage').addEventListener('click',()=>pick('Set the stage for '+plural(S.sel.size,'photo'),STAGES.map(([k,n])=>[k,n]),async k=>{for(const p of selPhotos()){p.stage=k;await savePhoto(p)}setSelecting(false);renderCase();toast('Stage set')}));
+$('sMove').addEventListener('click',()=>pickCase('Move '+plural(S.sel.size,'photo')+' to',async id=>{for(const p of selPhotos()){p.caseId=id||null;await savePhoto(p)}setSelecting(false);renderCase();toast('Moved')}));
+$('sDel').addEventListener('click',async()=>{const ps=selPhotos();if(!ps.length)return;if($('sDel').dataset.armed!=='1'){$('sDel').dataset.armed='1';$('sDel').textContent='Tap again to delete';setTimeout(()=>{$('sDel').dataset.armed='';$('sDel').textContent='Delete'},4000);return}
+  $('sDel').dataset.armed='';$('sDel').textContent='Delete';await deletePhotos(ps.map(p=>p.id));setSelecting(false);renderCase();toast(`Deleted ${plural(ps.length,'photo')}`)});
+$('sShare').addEventListener('click',async()=>{const files=[];for(const p of sortPhotos(selPhotos())){const b=await DB.get('orig',p.id);if(b)files.push(new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'}))}
+  if(!canShareFiles(files))return toast('This browser cannot share photos. Download a ZIP instead.',3200);shareFiles(files,'Photos')});
+// pickers
+let pickCb=null;
+function pick(title,opts,cb){$('dPickT').textContent=title;$('pickList').innerHTML=opts.map(([k,n])=>`<button type="button" class="chip" data-pk="${esc(k)}">${esc(n)}</button>`).join('');pickCb=cb;$('dPick').showModal()}
+function pickCase(title,cb){const cs=[...CASES.values()].sort((a,b)=>a.name.localeCompare(b.name));pick(title,[['__new','+ New case'],...cs.map(c=>[c.id,c.name+(c.label?' · '+c.label:'')]),['','Unsorted']],async k=>{
+  if(k==='__new'){openCaseDialog(null,async c=>{await cb(c.id)});return}await cb(k)})}
+$('pickList').addEventListener('click',e=>{const b=e.target.closest('[data-pk]');if(!b)return;$('dPick').close();const cb=pickCb;pickCb=null;if(cb)cb(b.dataset.pk)});
+$('pickCancel').addEventListener('click',()=>$('dPick').close());
+// case actions
+$('cvEdit').addEventListener('click',()=>openCaseDialog(CASES.get(S.caseId)));
+$('cvSlate').addEventListener('click',()=>openSlate(CASES.get(S.caseId)));
+$('cvZip').addEventListener('click',()=>{const c=CASES.get(S.caseId);zipPhotos(casePhotos(c.id),safeName(c.name+(c.label?' - '+c.label:''))+'.zip')});
+$('cvFolder').addEventListener('click',async()=>{if(!FOLDER){await chooseFolder();if(!FOLDER)return}if(!(await folderReady(true)))return toast('Photo Card needs permission to save in the folder.',3200);
+  try{await writeToFolder(casePhotos(S.caseId))}catch(e){toast('Could not save to the folder: '+(e.message||e),4000)}});
+$('cvBA').addEventListener('click',()=>{const ps=casePhotos(S.caseId),pre=ps.filter(p=>p.stage==='pre'),after=ps.filter(p=>p.stage==='post'||p.stage==='review'),pairs=[];
+  CHECKLIST.concat(['shade','other']).forEach(v=>{const a=sortPhotos(pre.filter(p=>p.view===v))[0],bs=sortPhotos(after.filter(p=>p.view===v)),b=bs[bs.length-1];if(a&&b)pairs.push([a,b])});
+  if(!pairs.length)return toast('No matching views in Pre-op and Post-op or Review yet. Label the views, or select two photos and press Compare.',4600);openCompare(pairs)});
+$('cvDel').addEventListener('click',async()=>{const b=$('cvDel'),c=CASES.get(S.caseId),ps=casePhotos(c.id);if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent=`Tap again to delete the case and ${plural(ps.length,'photo')}`;setTimeout(()=>{b.dataset.armed='';b.textContent='Delete case'},5000);return}
+  b.dataset.armed='';b.textContent='Delete case';await deletePhotos(ps.map(p=>p.id));CASES.delete(c.id);await DB.del('cases',c.id);showView('home');toast('Case deleted')});
+
+/* ============================================================ case dialog and slate */
+let caseCb=null,editing=null;
+function openCaseDialog(c,cb){editing=c||null;caseCb=cb||null;$('dCaseT').textContent=c?'Edit case':'New case';$('cSave').textContent=c?'Save':cb?'Save':'Save and show slate';
+  $('cName').value=c?c.name:'';$('cLabel').value=c?c.label||'':'';$('cTags').value=c?(c.tags||[]).join(', '):'';$('cNotes').value=c?c.notes||'':'';$('cErr').hidden=true;$('dCase').showModal();$('cName').focus()}
+$('newCase').addEventListener('click',()=>openCaseDialog(null));
+$('cCancel').addEventListener('click',()=>$('dCase').close());
+$('fCase').addEventListener('submit',async e=>{e.preventDefault();const name=$('cName').value.trim();if(!name){$('cErr').textContent='Give the case a name or code.';$('cErr').hidden=false;return}
+  const c=editing||{id:uid(),created:Date.now()};Object.assign(c,{name:name.slice(0,60),label:$('cLabel').value.trim().slice(0,60),tags:splitList($('cTags').value),notes:$('cNotes').value.trim().slice(0,1000)});
+  await saveCase(c);$('dCase').close();const cb=caseCb;caseCb=null;
+  if(cb){await cb(c);return}if(editing){renderCase();toast('Case saved');return}renderHome();openSlate(c)});
+let slateCase=null,slateStage='pre';
+function drawQR(canvas,text,scale){const q=qrcode(0,'M');q.addData(text);q.make();const n=q.getModuleCount(),m=4,s=scale||8;canvas.width=canvas.height=(n+m*2)*s;const x=canvas.getContext('2d');
+  x.fillStyle='#fff';x.fillRect(0,0,canvas.width,canvas.height);x.fillStyle='#000';for(let r=0;r<n;r++)for(let c=0;c<n;c++)if(q.isDark(r,c))x.fillRect((c+m)*s,(r+m)*s,s,s)}
+function renderSlate(){const c=slateCase;$('slStages').innerHTML=STAGES.map(([k,n])=>`<button type="button" class="chip" data-sls="${k}" aria-pressed="${slateStage===k}">${n}</button>`).join('');
+  drawQR($('slQR'),slateUrl(c,slateStage),8);$('slName').textContent=c.name;$('slLine').textContent=[c.label,SNAME[slateStage],fmtDate(isoDate(Date.now()),{day:'numeric',month:'short',year:'numeric'})].filter(Boolean).join(' · ')}
+function openSlate(c){if(!c)return;slateCase=c;slateStage=store.get('slateStage','pre');renderSlate();$('dSlate').showModal()}
+$('slStages').addEventListener('click',e=>{const b=e.target.closest('[data-sls]');if(!b)return;slateStage=b.dataset.sls;store.set('slateStage',slateStage);renderSlate()});
+$('slClose').addEventListener('click',()=>$('dSlate').close());
+$('slPrint').addEventListener('click',()=>{const box=$('slBox').cloneNode(true),cv=box.querySelector('canvas');cv.removeAttribute('id');drawQR(cv,slateUrl(slateCase,slateStage),10);
+  $('printArea').innerHTML='';$('printArea').appendChild(box);setTimeout(()=>window.print(),50)});
+
+/* ============================================================ import */
+const IMP={items:[],groups:[],unsorted:[],busy:false,forceCase:null};
+function filesFromDrop(dt){return new Promise(async res=>{const out=[],items=[...(dt.items||[])].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);
+  if(!items.length){res([...(dt.files||[])]);return}
+  const walk=async ent=>{if(ent.isFile)await new Promise(r=>ent.file(f=>{out.push(f);r()},r));else if(ent.isDirectory){const rd=ent.createReader();let batch;do{batch=await new Promise(r=>rd.readEntries(r,()=>r([])));for(const e of batch)await walk(e)}while(batch.length)}};
+  for(const e of items)await walk(e);res(out)})}
+async function startImport(files,forceCase){files=[...files];if(!files.length||IMP.busy)return;IMP.busy=true;IMP.items=[];IMP.forceCase=forceCase||null;
+  $('impWork').hidden=false;$('impReview').hidden=true;$('impErr').hidden=true;$('impSave').disabled=true;$('dImpT').textContent='Importing photos';$('impBar').style.width='0';$('dImp').showModal();
+  const known=new Set([...PHOTOS.values()].map(p=>`${p.name}|${p.size}|${p.taken}`));let done=0,total=files.length,failed=[],dupes=0;
+  const msg=t=>{$('impMsg').textContent=t};
+  try{
+    // unpack ZIPs first so the count is right
+    const imgs=[];for(const f of files){if(/\.zip$/i.test(f.name)||f.type==='application/zip'||f.type==='application/x-zip-compressed'){msg(`Opening ${f.name}…`);try{await unzip(f,async x=>{imgs.push(x)})}catch(e){failed.push(f.name+' (could not open the ZIP)')}}else if(/^image\//.test(f.type)||/\.(jpe?g|png|heic|heif|webp)$/i.test(f.name))imgs.push(f)}
+    total=imgs.length;if(!total){msg('No photos found.');throw new Error('No photos found in what you chose.')}
+    for(const f of imgs){if(!$('dImp').open)throw new Error('cancelled');msg(`Reading photo ${done+1} of ${total}…`);
+      try{const head=await f.slice(0,262144).arrayBuffer(),ex=exifInfo(head),taken=exifTime(ex)||f.lastModified||Date.now();
+        if(known.has(`${f.name}|${f.size}|${taken}`)){dupes++;done++;continue}
+        const img=await decodeImage(f),{w,h}=dims(img);const big=scaled(img,1800),thumbC=scaled(big,420);if(img.close)img.close();
+        const slate=IMP.forceCase?null:await findSlate(big);
+        const disp=await toBlob(big,'image/jpeg',.86),thumb=await toBlob(thumbC,'image/jpeg',.8);
+        IMP.items.push({id:uid(),file:f,name:f.name,size:f.size,taken,w,h,disp,thumb,slate,include:!slate,thumbUrl:URL.createObjectURL(thumb)});
+      }catch(e){failed.push(f.name)}
+      done++;$('impBar').style.width=Math.round(done/total*100)+'%';await yieldUI()}
+    buildGroups();renderReview(failed,dupes);
+  }catch(e){if(e.message!=='cancelled'){$('impErr').textContent=e.message||String(e);$('impErr').hidden=false}}
+  finally{IMP.busy=false}}
+function buildGroups(){const items=IMP.items.sort((a,b)=>a.taken-b.taken||a.name.localeCompare(b.name,undefined,{numeric:true}));IMP.groups=[];IMP.unsorted=[];let cur=null;
+  if(IMP.forceCase){const c=CASES.get(IMP.forceCase);IMP.groups.push({target:c.id,slate:null,stage:S.stage||'pre',items:items.slice()});return}
+  for(const it of items){if(it.slate){cur={slate:it.slate,slateItem:it,target:'slate',stage:it.slate.stage||'pre',items:[]};IMP.groups.push(cur)}else if(cur)cur.items.push(it);else IMP.unsorted.push(it)}
+  // photos before this import's first slate carry on from the last slate imported earlier the same day (a second download later in the clinic)
+  IMP.unsortedTarget='';IMP.unsortedStage='pre';IMP.carry=null;
+  if(IMP.unsorted.length){const first=IMP.unsorted[0].taken,ev=store.get('slates',[]).filter(e=>e.t<=first&&isoDate(e.t)===isoDate(first)&&CASES.has(e.caseId)).sort((a,b)=>b.t-a.t)[0];
+    if(ev){IMP.unsortedTarget=ev.caseId;IMP.unsortedStage=ev.stage||'pre';IMP.carry=ev}}}
+function seriesFor(key){if(key==='none')return null;if(key==='mine')return mySeries();return SERIES_PRESETS[key]?SERIES_PRESETS[key][1]:null}
+function renderReview(failed,dupes){$('impWork').hidden=true;$('impReview').hidden=false;$('dImpT').textContent='Check the sorting';
+  const n=IMP.items.length,slates=IMP.groups.filter(g=>g.slate).length;
+  $('impSummary').textContent=[`${plural(n,'photo')} read`,IMP.forceCase?'':`${plural(slates,'slate')} found`,IMP.unsorted.length?`${plural(IMP.unsorted.length,'photo')} before the first slate`:'',dupes?`${plural(dupes,'photo')} already in the library, skipped`:'',failed.length?`${plural(failed.length,'file')} could not be read (${failed.slice(0,3).join(', ')}${failed.length>3?'…':''})`:''].filter(Boolean).join(' · ')+'. Tap a photo to leave it out.';
+  $('impSeries').innerHTML=`<option value="none">Don't label views</option><option value="mine">My series order (settings)</option>`+Object.entries(SERIES_PRESETS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('');
+  $('impSeries').value=store.get('impSeries','none');drawGroups();$('impSave').disabled=!n}
+function caseOptions(sel,slate){const cs=[...CASES.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  return (slate?`<option value="slate"${sel==='slate'?' selected':''}>${esc(slate.name)}${CASES.has(slate.id)?'':' (new case from the slate)'}</option>`:'')+cs.filter(c=>!slate||c.id!==slate.id).map(c=>`<option value="${esc(c.id)}"${sel===c.id?' selected':''}>${esc(c.name)}${c.label?' · '+esc(c.label):''}</option>`).join('')+`<option value=""${sel===''?' selected':''}>Unsorted</option><option value="skip"${sel==='skip'?' selected':''}>Leave out</option>`}
+function drawGroups(){const ser=seriesFor($('impSeries').value);
+  const tiles=(arr,labelled)=>{let i=0;return arr.map(it=>{const v=labelled&&it.include&&!it.slate?(ser[i++]||'other'):'';it.view=v;
+    return `<button type="button" class="ph${it.include?'':' off'}" data-imp="${esc(it.id)}" aria-pressed="false" aria-label="${esc(it.name)}${it.include?'':', left out'}"><img alt="" src="${it.thumbUrl}">${it.slate?'<span class="badge">Slate</span>':''}<span class="lab">${esc(v?VSHORT[v]:it.name)}</span></button>`}).join('')};
+  let h=IMP.groups.map((g,gi)=>{const inc=g.items.filter(x=>x.include).length;
+    return `<div class="grp"><div class="gh"><b>${g.slate?'Slate: '+esc(g.slate.name):esc((CASES.get(g.target)||{}).name||'Case')}</b><span class="hint">${plural(inc,'photo')}</span><span class="sp"></span>
+      <label class="lbl">Case <select data-gt="${gi}">${caseOptions(g.target,g.slate)}</select></label><label class="lbl">Stage <select data-gs="${gi}">${STAGES.map(([k,n])=>`<option value="${k}"${g.stage===k?' selected':''}>${n}</option>`).join('')}</select></label></div>
+      <div class="grid">${tiles(g.slate?[g.slateItem,...g.items]:g.items,!!ser)}</div></div>`}).join('');
+  if(IMP.unsorted.length)h+=`<div class="grp unsorted"><div class="gh"><b>${IMP.groups.length?'Before the first slate':'No slate in these photos'}</b>${IMP.carry?`<span class="hint">Carrying on from the ${esc(CASES.get(IMP.carry.caseId).name)} slate at ${new Date(IMP.carry.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`:''}<span class="hint">${plural(IMP.unsorted.filter(x=>x.include).length,'photo')}</span><span class="sp"></span>
+      <label class="lbl">Case <select data-gt="u">${caseOptions(IMP.unsortedTarget||'',null)}</select></label><label class="lbl">Stage <select data-gs="u">${STAGES.map(([k,n])=>`<option value="${k}"${(IMP.unsortedStage||'pre')===k?' selected':''}>${n}</option>`).join('')}</select></label></div>
+      <div class="grid">${tiles(IMP.unsorted,!!ser&&!!IMP.unsortedTarget)}</div></div>`;
+  $('impGroups').innerHTML=h||'<p class="empty">Nothing to import.</p>'}
+$('impSeries').addEventListener('change',()=>{store.set('impSeries',$('impSeries').value);drawGroups()});
+$('impGroups').addEventListener('click',e=>{const b=e.target.closest('[data-imp]');if(!b)return;const it=IMP.items.find(x=>x.id===b.dataset.imp);if(it){it.include=!it.include;drawGroups()}});
+$('impGroups').addEventListener('change',e=>{const t=e.target;if(t.dataset.gt!==undefined){if(t.dataset.gt==='u')IMP.unsortedTarget=t.value;else IMP.groups[+t.dataset.gt].target=t.value;drawGroups()}
+  if(t.dataset.gs!==undefined){if(t.dataset.gs==='u')IMP.unsortedStage=t.value;else IMP.groups[+t.dataset.gs].stage=t.value}});
+function endImport(){IMP.items.forEach(it=>URL.revokeObjectURL(it.thumbUrl));IMP.items=[];IMP.groups=[];IMP.unsorted=[];IMP.unsortedTarget='';IMP.unsortedStage='pre';$('dImp').close()}
+$('impCancel').addEventListener('click',endImport);
+$('dImp').addEventListener('cancel',e=>{if(IMP.busy)return;e.preventDefault();endImport()});
+$('impSave').addEventListener('click',async()=>{
+  const autoFolder=canFolder&&FOLDER&&store.get('folderAuto',false)&&await folderReady(true); // ask while the click still counts as a gesture
+  $('impSave').disabled=true;let saved=0;const added=[];
+  const commit=async(items,target,stage,slate)=>{if(target==='skip')return;let caseId=target||null;
+    if(target==='slate'&&slate){if(!CASES.has(slate.id))await saveCase({id:slate.id,name:slate.name,label:slate.label,tags:[],notes:'',created:Date.now()});caseId=slate.id}
+    for(const it of items){if(!it.include)continue;const p={id:it.id,caseId,stage,view:it.slate?'other':(it.view||''),taken:it.taken,date:isoDate(it.taken),name:it.name,size:it.size,w:it.w,h:it.h,teeth:[],tags:it.slate?['slate']:[],note:'',rot:0,fh:false,fv:false,star:false};
+      await addPhoto(p,it.file,it.disp,it.thumb);added.push(p);saved++;$('impSummary').textContent=`Saving… ${saved}`;await yieldUI()}};
+  try{const evs=store.get('slates',[]);
+    for(const g of IMP.groups){await commit(g.slate?[g.slateItem,...g.items]:g.items,g.target,g.stage,g.slate);
+      const cid=g.target==='slate'&&g.slate?g.slate.id:g.target;if(g.slate&&cid&&cid!=='skip')evs.push({t:g.slateItem.taken,caseId:cid,stage:g.stage})}
+    store.set('slates',evs.sort((a,b)=>a.t-b.t).slice(-400));
+    await commit(IMP.unsorted,IMP.unsortedTarget||'',IMP.unsortedStage||'pre',null);
+    let wrote=0;if(autoFolder&&added.length){try{wrote=await writeToFolder(added,true)}catch(e){toast('Saved in Photo Card, but not to the folder: '+(e.message||e),4500)}}
+    const cases=new Set(added.map(p=>p.caseId).filter(Boolean));endImport();
+    toast(`Saved ${plural(saved,'photo')}${cases.size?' into '+plural(cases.size,'case'):''}${wrote?`, and to ${FOLDER.name}`:''}`,3500);
+    if(S.view==='case')renderCase();else if(cases.size===1)openCase([...cases][0]);else renderHome();
+  }catch(e){$('impErr').textContent='Could not save: '+(e.message||e)+(e.name==='QuotaExceededError'?' The browser has run out of space for Photo Card.':'');$('impErr').hidden=false;$('impSave').disabled=false}});
+$('fileIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f)});
+$('dirIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f)});
+$('caseFileIn').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';startImport(f,S.caseId)});
+let dragN=0;
+addEventListener('dragenter',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){dragN++;document.body.classList.add('dragging')}});
+addEventListener('dragleave',()=>{if(--dragN<=0){dragN=0;document.body.classList.remove('dragging')}});
+addEventListener('dragover',e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files'))e.preventDefault()});
+addEventListener('drop',async e=>{if(!e.dataTransfer||![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();dragN=0;document.body.classList.remove('dragging');
+  const files=await filesFromDrop(e.dataTransfer);startImport(files,S.view==='case'&&S.caseId!=='__unsorted'?S.caseId:null)});
+if('webkitdirectory' in document.createElement('input')&&!matchMedia('(hover:none) and (pointer:coarse)').matches)$('dirBtn').hidden=false;
+if(matchMedia('(hover:none) and (pointer:coarse)').matches)$('dropHint').textContent='Choose the photos from your library, including the slate photo before each series. Photo Card files the photos after each slate into that case.';
+
+/* ============================================================ drawing with rotate / flip */
+const BMP=new Map();
+async function dispBitmap(id){if(BMP.has(id))return BMP.get(id);const b=await DB.get('disp',id);if(!b)return null;const bm=await decodeImage(b);BMP.set(id,bm);if(BMP.size>24){const k=BMP.keys().next().value;const o=BMP.get(k);if(o&&o.close)o.close();BMP.delete(k)}return bm}
+const oriented=(p,src)=>{const {w,h}=dims(src);return (p.rot||0)%180?{w:h,h:w}:{w,h}};
+// draw src (with the photo's rotation / flips) into the box x,y,w,h: contain, or cover (cropping)
+function drawPhoto(ctx,p,src,x,y,w,h,cover){const o=oriented(p,src),k=cover?Math.max(w/o.w,h/o.h):Math.min(w/o.w,h/o.h),dw=o.w*k,dh=o.h*k;
+  ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();ctx.translate(x+w/2,y+h/2);ctx.rotate((p.rot||0)*Math.PI/180);ctx.scale(p.fh?-1:1,p.fv?-1:1);
+  const {w:sw,h:sh}=dims(src),rw=(p.rot||0)%180?dh:dw,rh=(p.rot||0)%180?dw:dh;ctx.drawImage(src,0,0,sw,sh,-rw/2,-rh/2,rw,rh);ctx.restore()}
+
+/* ============================================================ viewer */
+const V={id:null,list:[]};
+function fillSelects(){$('vView').innerHTML='<option value="">Not labelled</option>'+VIEWS.map(v=>`<option value="${v[0]}">${esc(v[1])}</option>`).join('');$('vStageSel').innerHTML=STAGES.map(([k,n])=>`<option value="${k}">${n}</option>`).join('')}
+async function openViewer(id,list){V.id=id;V.list=list||[id];if(!$('dView').open)$('dView').showModal();await showPhoto()}
+async function showPhoto(){const p=PHOTOS.get(V.id);if(!p){$('dView').close();return}const c=CASES.get(p.caseId),i=V.list.indexOf(p.id);
+  $('vTitle').textContent=(c?c.name:'Unsorted')+(V.list.length>1?` · ${i+1} of ${V.list.length}`:'');$('vInfo').textContent=[p.name,p.w&&p.h?`${p.w}×${p.h}`:'',p.taken?new Date(p.taken).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}):'',p.saved?'Saved to '+p.saved:''].filter(Boolean).join(' · ');
+  $('vView').value=p.view||'';$('vStageSel').value=p.stage||'pre';$('vDate').value=p.date||'';$('vTeeth').value=(p.teeth||[]).join(', ');$('vTags').value=(p.tags||[]).join(', ');$('vNote').value=p.note||'';$('vStar').checked=!!p.star;
+  $('vPrev').hidden=$('vNext').hidden=V.list.length<2;$('vShare').hidden=!navigator.share;await drawViewer()}
+async function drawViewer(){const p=PHOTOS.get(V.id),bm=await dispBitmap(V.id);if(!bm||!p)return;const o=oriented(p,bm),cv=$('vCanvas');cv.width=o.w;cv.height=o.h;const x=cv.getContext('2d');x.fillStyle='#000';x.fillRect(0,0,o.w,o.h);drawPhoto(x,p,bm,0,0,o.w,o.h,false)}
+function step(d){const i=V.list.indexOf(V.id);if(i<0)return;V.id=V.list[(i+d+V.list.length)%V.list.length];showPhoto()}
+$('vPrev').addEventListener('click',()=>step(-1));$('vNext').addEventListener('click',()=>step(1));
+$('dView').addEventListener('keydown',e=>{if(e.target.matches('input,textarea,select'))return;if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1)});
+let swipeX=null;$('vStage').addEventListener('pointerdown',e=>{swipeX=e.clientX});$('vStage').addEventListener('pointerup',e=>{if(swipeX!==null&&Math.abs(e.clientX-swipeX)>60&&!e.target.closest('button'))step(e.clientX<swipeX?1:-1);swipeX=null});
+$('vClose').addEventListener('click',()=>$('dView').close());
+$('dView').addEventListener('close',()=>{if(S.view==='case')renderCase();else renderHome()});
+const edit=async fn=>{const p=PHOTOS.get(V.id);if(!p)return;fn(p);await savePhoto(p)};
+$('vRotL').addEventListener('click',async()=>{await edit(p=>p.rot=((p.rot||0)+270)%360);drawViewer()});
+$('vRotR').addEventListener('click',async()=>{await edit(p=>p.rot=((p.rot||0)+90)%360);drawViewer()});
+$('vFlipH').addEventListener('click',async()=>{await edit(p=>{if((p.rot||0)%180)p.fv=!p.fv;else p.fh=!p.fh});drawViewer()});
+$('vFlipV').addEventListener('click',async()=>{await edit(p=>{if((p.rot||0)%180)p.fh=!p.fh;else p.fv=!p.fv});drawViewer()});
+$('vView').addEventListener('change',()=>edit(p=>p.view=$('vView').value));
+$('vStageSel').addEventListener('change',()=>edit(p=>p.stage=$('vStageSel').value));
+$('vDate').addEventListener('change',()=>{if($('vDate').value)edit(p=>p.date=$('vDate').value)});
+$('vTeeth').addEventListener('change',()=>edit(p=>{p.teeth=teethList($('vTeeth').value);$('vTeeth').value=p.teeth.join(', ')}));
+$('vTags').addEventListener('change',()=>edit(p=>p.tags=splitList($('vTags').value)));
+$('vNote').addEventListener('change',()=>edit(p=>p.note=$('vNote').value.trim().slice(0,1000)));
+$('vStar').addEventListener('change',()=>edit(p=>p.star=$('vStar').checked));
+$('vDown').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await DB.get('orig',p.id);if(b)download(b,p.name||'photo.jpg')});
+$('vShare').addEventListener('click',async()=>{const p=PHOTOS.get(V.id),b=await DB.get('orig',p.id);const f=[new File([b],p.name||'photo.jpg',{type:b.type||'image/jpeg'})];if(canShareFiles(f))shareFiles(f,'Photo');else toast('This browser cannot share photos.')});
+$('vMove').addEventListener('click',()=>pickCase('Move this photo to',async id=>{await edit(p=>p.caseId=id||null);toast('Moved');showPhoto()}));
+$('vDel').addEventListener('click',async()=>{const b=$('vDel');if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='Tap again to delete';setTimeout(()=>{b.dataset.armed='';b.textContent='Delete'},4000);return}
+  b.dataset.armed='';b.textContent='Delete';const id=V.id,i=V.list.indexOf(id);await deletePhotos([id]);V.list=V.list.filter(x=>x!==id);if(!V.list.length){$('dView').close();return}V.id=V.list[Math.min(i,V.list.length-1)];showPhoto();toast('Photo deleted')});
+
+/* ============================================================ compare */
+const CM={pairs:[],i:0,mode:'side'};
+async function openCompare(pairs){CM.pairs=pairs;CM.i=0;$('cmpPairs').hidden=pairs.length<2;$('cmpPairs').innerHTML=pairs.map((pr,i)=>`<option value="${i}">${esc(VNAME[pr[0].view]||'Pair '+(i+1))}</option>`).join('');
+  $('cmpCopy').hidden=!canCopyImg;$('cmpShare').hidden=!navigator.share;$('dCmp').showModal();await drawCompare(true)}
+const pairLabel=p=>`${SNAME[p.stage]||'Photo'} · ${fmtDate(p.date,{day:'numeric',month:'short',year:'numeric'})}`;
+async function drawCompare(resetLabels){const [a,b]=CM.pairs[CM.i];if(resetLabels){$('cmpL1').value=pairLabel(a);$('cmpL2').value=pairLabel(b)}
+  const A=await dispBitmap(a.id),B=await dispBitmap(b.id);if(!A||!B)return;
+  const put=(cv,p,src)=>{const o=oriented(p,src);cv.width=o.w;cv.height=o.h;drawPhoto(cv.getContext('2d'),p,src,0,0,o.w,o.h,false)};
+  put($('cmpA'),a,A);put($('cmpB'),b,B);put($('slA'),a,A);put($('slB'),b,B);sliderPos()}
+function sliderPos(){const v=+$('slRange').value;$('slTop').style.width=v+'%';$('slBar').style.left=`calc(${v}% - 1px)`;const box=$('sliderBox');$('slA').style.height=box.clientHeight+'px';$('slA').style.width=box.clientWidth+'px'}
+$('slRange').addEventListener('input',sliderPos);addEventListener('resize',()=>{if($('dCmp').open)sliderPos()});
+document.querySelectorAll('[data-cm]').forEach(b=>b.addEventListener('click',()=>{CM.mode=b.dataset.cm;document.querySelectorAll('[data-cm]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));$('cmpSide').hidden=CM.mode!=='side';$('cmpSlider').hidden=CM.mode!=='slider';sliderPos()}));
+$('cmpPairs').addEventListener('change',()=>{CM.i=+$('cmpPairs').value;drawCompare(true)});
+$('cmpSwap').addEventListener('click',()=>{CM.pairs[CM.i].reverse();const t=$('cmpL1').value;$('cmpL1').value=$('cmpL2').value;$('cmpL2').value=t;drawCompare(false)});
+$('cmpClose').addEventListener('click',()=>$('dCmp').close());
+async function compareImage(){const [a,b]=CM.pairs[CM.i],A=await dispBitmap(a.id),B=await dispBitmap(b.id),oa=oriented(a,A),ob=oriented(b,B);
+  const H=1400,wa=Math.round(oa.w*H/oa.h),wb=Math.round(ob.w*H/ob.h),gap=24,lab=$('cmpL1').value||$('cmpL2').value?90:0,c=document.createElement('canvas');c.width=wa+wb+gap*3;c.height=H+gap*2+lab;
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);drawPhoto(x,a,A,gap,gap+lab,wa,H,false);drawPhoto(x,b,B,gap*2+wa,gap+lab,wb,H,false);
+  if(lab){x.fillStyle='#0B2E4A';x.font='600 52px "Source Sans 3", Calibri, sans-serif';x.textBaseline='middle';x.fillText($('cmpL1').value,gap,gap+lab/2-6);x.fillText($('cmpL2').value,gap*2+wa,gap+lab/2-6)}return c}
+$('cmpDown').addEventListener('click',async()=>{const c=await compareImage();download(await toBlob(c,'image/jpeg',.92),'before-after.jpg')});
+$('cmpCopy').addEventListener('click',async()=>copyImage(await compareImage()));
+$('cmpShare').addEventListener('click',async()=>{const c=await compareImage(),f=[new File([await toBlob(c,'image/jpeg',.92)],'before-after.jpg',{type:'image/jpeg'})];if(canShareFiles(f))shareFiles(f,'Before and after');else toast('This browser cannot share images.')});
+
+/* ============================================================ collage */
+const LAYOUTS={two:['2 side by side',1,2],three:['3 in a row',1,3],grid4:['2 × 2',2,2],grid6:['3 × 2',2,3],series:['Dental series 3 × 3',3,3]};
+const SERIES_GRID=['face-rest','face-smile','profile-r','buccal-r','ret-front','buccal-l','occ-u','smile','occ-l'];
+const CL={photos:[],cells:[]};
+function openCollage(ps){CL.photos=sortPhotos(ps.slice());$('colLayout').innerHTML=Object.entries(LAYOUTS).map(([k,v])=>`<option value="${k}">${v[0]}</option>`).join('');
+  const n=CL.photos.length,auto=n>=7?'series':n>=5?'grid6':n===4?'grid4':n===3?'three':'two';$('colLayout').value=auto;$('colCopy').hidden=!canCopyImg;$('colShare').hidden=!navigator.share;assignCells();$('dCol').showModal();drawCollage()}
+function assignCells(){const L=LAYOUTS[$('colLayout').value],n=L[1]*L[2],ps=CL.photos;
+  if($('colLayout').value==='series'){const used=new Set();CL.cells=SERIES_GRID.map(v=>{const p=ps.find(x=>x.view===v&&!used.has(x.id));if(p)used.add(p.id);return p?p.id:''});
+    CL.cells=CL.cells.map(id=>id||(ps.find(x=>!used.has(x.id)&&used.add(x.id))||{}).id||'')}
+  else CL.cells=Array.from({length:n},(_,i)=>ps[i]?ps[i].id:'');drawCells()}
+function drawCells(){$('colCells').innerHTML=CL.cells.map((id,i)=>`<label>Box ${i+1}<select data-cell="${i}"><option value="">Empty</option>${CL.photos.map(p=>`<option value="${esc(p.id)}"${p.id===id?' selected':''}>${esc((VSHORT[p.view]||'Photo')+' · '+(SNAME[p.stage]||'')+' · '+fmtDate(p.date,{day:'numeric',month:'short'}))}</option>`).join('')}</select></label>`).join('')}
+async function collageCanvas(){const L=LAYOUTS[$('colLayout').value],[ar,br]=$('colShape').value.split(':').map(Number),W=3000,H=Math.round(W*br/ar),c=document.createElement('canvas');c.width=W;c.height=H;
+  const x=c.getContext('2d'),bg=$('colBg').value,fg=bg==='#000000'?'#fff':'#0B2E4A';x.fillStyle=bg;x.fillRect(0,0,W,H);const title=$('colTitle').value.trim(),th=title?150:0,gap=24,rows=L[1],cols=L[2],labels=$('colLabels').checked,lh=labels?64:0;
+  if(title){x.fillStyle=fg;x.font='700 84px Caladea, Cambria, Georgia, serif';x.textBaseline='middle';x.textAlign='center';x.fillText(title,W/2,th/2+10)}
+  const cw=(W-gap*(cols+1))/cols,ch=(H-th-gap*(rows+1))/rows;
+  for(let i=0;i<rows*cols;i++){const id=CL.cells[i];if(!id)continue;const p=PHOTOS.get(id),src=await dispBitmap(id);if(!p||!src)continue;const r=Math.floor(i/cols),k=i%cols,bx=gap+k*(cw+gap),by=th+gap+r*(ch+gap);
+    drawPhoto(x,p,src,bx,by,cw,ch-lh,$('colFill').checked);if(labels){x.fillStyle=fg;x.font='600 44px "Source Sans 3", Calibri, sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(VNAME[p.view]||'',bx+cw/2,by+ch-lh/2+4)}}
+  return c}
+async function drawCollage(){const c=await collageCanvas(),pv=$('colCanvas');pv.width=c.width/3;pv.height=c.height/3;pv.getContext('2d').drawImage(c,0,0,pv.width,pv.height)}
+$('colLayout').addEventListener('change',()=>{assignCells();drawCollage()});
+['colShape','colBg','colLabels','colFill'].forEach(id=>$(id).addEventListener('change',drawCollage));$('colTitle').addEventListener('input',()=>{clearTimeout(drawCollage.t);drawCollage.t=setTimeout(drawCollage,250)});
+$('colCells').addEventListener('change',e=>{const s=e.target.closest('[data-cell]');if(!s)return;CL.cells[+s.dataset.cell]=s.value;drawCollage()});
+$('colClose').addEventListener('click',()=>$('dCol').close());
+$('colDown').addEventListener('click',async()=>{const c=await collageCanvas();download(await toBlob(c,'image/jpeg',.92),safeName($('colTitle').value||'collage')+'.jpg')});
+$('colCopy').addEventListener('click',async()=>copyImage(await collageCanvas()));
+$('colShare').addEventListener('click',async()=>{const c=await collageCanvas(),f=[new File([await toBlob(c,'image/jpeg',.92)],'collage.jpg',{type:'image/jpeg'})];if(canShareFiles(f))shareFiles(f,'Collage');else toast('This browser cannot share images.')});
+
+/* ============================================================ settings */
+function renderSeriesEditor(){const cur=mySeries(),rest=VIEWS.map(v=>v[0]).filter(k=>!cur.includes(k)&&k!=='other');
+  $('mySeries').innerHTML=cur.concat(rest).map((k,i)=>`<div class="srow"><label><input type="checkbox" data-ms="${k}"${cur.includes(k)?' checked':''}> ${esc(VNAME[k])}</label>${cur.includes(k)?`<button class="btn ghost sm" type="button" data-up="${k}" aria-label="Move ${esc(VNAME[k])} earlier"${i===0?' disabled':''}>↑</button>`:''}</div>`).join('')}
+$('mySeries').addEventListener('change',e=>{const k=e.target.dataset.ms;if(!k)return;let cur=mySeries();cur=e.target.checked?cur.concat(k):cur.filter(x=>x!==k);if(!cur.length){e.target.checked=true;return}store.set('mySeries',cur);renderSeriesEditor()});
+$('mySeries').addEventListener('click',e=>{const k=e.target.closest('[data-up]');if(!k)return;const cur=mySeries(),i=cur.indexOf(k.dataset.up);if(i>0){[cur[i-1],cur[i]]=[cur[i],cur[i-1]];store.set('mySeries',cur);renderSeriesEditor()}});
+async function chooseFolder(){try{FOLDER=await showDirectoryPicker({id:'photo-card',mode:'readwrite'});await DB.put('kv',FOLDER,'folder');renderFolder();toast('Cases will be saved in '+FOLDER.name)}catch(e){if(e&&e.name!=='AbortError')toast('Could not use that folder.',3000)}}
+function renderFolder(){$('folderBox').hidden=!canFolder;if(!canFolder)return;$('folderForget').hidden=!FOLDER;$('folderPick').textContent=FOLDER?'Change folder':'Choose folder';$('folderAuto').checked=store.get('folderAuto',false);
+  $('folderMsg').textContent=FOLDER?`Cases are saved in “${FOLDER.name}”, each in its own folder, with a folder per visit inside.`:'Choose a folder on this computer, such as your Google Drive or OneDrive folder, and Photo Card saves each case into its own folder there.'}
+$('folderPick').addEventListener('click',chooseFolder);
+$('folderForget').addEventListener('click',async()=>{FOLDER=null;await DB.del('kv','folder');renderFolder()});
+$('folderAuto').addEventListener('change',()=>store.set('folderAuto',$('folderAuto').checked));
+$('zipAll').addEventListener('click',()=>zipPhotos([...PHOTOS.values()],'Photo Card '+isoDate(Date.now())+'.zip'));
+$('setBtn').addEventListener('click',async()=>{renderSeriesEditor();renderFolder();$('eraseAll').dataset.armed='';$('eraseAll').textContent='Erase everything on this device';
+  let m=`${plural(CASES.size,'case')}, ${plural(PHOTOS.size,'photo')} on this device.`;try{if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();m+=` Using ${(e.usage/1048576).toFixed(0)} MB of about ${(e.quota/1073741824).toFixed(1)} GB the browser allows.`}
+    if(navigator.storage&&navigator.storage.persisted&&await navigator.storage.persisted())m+=' The browser has agreed not to clear it automatically.'}catch(e){}
+  $('storeMsg').textContent=m;$('dSet').showModal()});
+$('setClose').addEventListener('click',()=>$('dSet').close());
+$('eraseAll').addEventListener('click',async()=>{const b=$('eraseAll');if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='Tap again: this deletes every case and photo on this device';return}
+  await deletePhotos([...PHOTOS.keys()]);for(const id of [...CASES.keys()]){await DB.del('cases',id)}CASES.clear();$('dSet').close();showView('home');toast('Everything erased')});
+
+/* ============================================================ start */
+async function fromHash(){const p=new URLSearchParams(location.hash.slice(1));
+  // opening a slate's QR link (scanned with the phone camera) opens, or creates, that case
+  const sl=parseSlate(location.href);if(sl){if(!CASES.has(sl.id))await saveCase({id:sl.id,name:sl.name,label:sl.label,tags:[],notes:'',created:Date.now()});openCase(sl.id);return}
+  const c=p.get('c');if(c&&(CASES.has(c)||c==='__unsorted'))openCase(c);else showView('home')}
+(async()=>{fillSelects();
+  try{await DB.open();(await DB.all('cases')).forEach(c=>CASES.set(c.id,c));(await DB.all('photos')).forEach(p=>PHOTOS.set(p.id,p));if(canFolder){FOLDER=await DB.get('kv','folder')||null}}
+  catch(e){toast('This browser is blocking storage, so photos cannot be kept here. Try a normal (not private) window.',8000)}
+  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+  await fromHash();addEventListener('hashchange',fromHash)})();
+window.photoCard={cases:()=>[...CASES.values()].map(c=>({...c})),photos:()=>[...PHOTOS.values()].map(p=>({...p})),parseSlate,slateUrl,exifInfo,exifTime,unzip,makeZip,crc32,drawQR};
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+})();
+</script>
+</body>
+</html>
