@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CBCT Card — CBCT viewer and donor-tooth replicas</title>
+<title>CBCT Card — CBCT viewer, donor-tooth replicas and root canals</title>
 <script type="importmap">
 {"imports":{
  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -59,20 +59,29 @@ html.embed #cbBar{padding-left:8px}
 </head>
 <body>
 <script type="module">
-// CBCT Card — a CBCT viewer and donor-tooth replicas, part of Scan Card (its CBCT tab) or on its own.
+// CBCT Card — a CBCT viewer, donor-tooth replicas and root canals, part of Scan Card (its CBCT tab) or on its own.
 //  • Opens DICOM on this device (several files, a folder, a .zip, multi-frame files; see dicom.js). Only technical tags are
 //    read: the patient's details are stepped over by the reader and never reach this page, a saved case or an export.
-//  • Axial, coronal and sagittal slices with a linked cross-hair, windows, zoom and pan; a 3D view (maximum intensity or a
+//  • Axial, coronal and sagittal slices with a linked cross-hair that can be turned (oblique slices, square to each other),
+//    windows, zoom and pan; a 3D view (maximum intensity or a
 //    threshold surface, raymarched in a 3D texture) and a surface model as STL.
 //  • Panoramic: a curve along the arch (tapped, or proposed from the bright band of the teeth), a curved reformation with a
 //    slab, and cross-sections square to the curve with millimetre ticks. Distances and angles on any view.
-//  • Donor tooth: tap it; it is cut out of the bone and its neighbours inside an adjustable cylinder (threshold, then a flood
+//  • A tooth: tap it; it is cut out of the bone and its neighbours inside an adjustable cylinder (threshold, then a flood
 //    from the tap against the region's edge that meets in the dark ligament space and at narrow contacts); fix leaks with
 //    "not tooth" taps and an eraser; a smooth closed replica, optionally enlarged for the ligament and with a handle, as STL.
+//  • Root canals: the pulp chamber and canals inside the picked tooth (the dark space shut inside its hard tissue, or open
+//    only at the root end), red in the slices and a bright solid inside a glass tooth in 3D; the slices can be turned to run
+//    along the tooth; as STL.
 // Positions are the scan's own patient coordinates (LPS, mm), and so are the exported STL files.
 import * as N from './core.js';
 import * as D from './dicom.js';
 const THREE = N.THREE, $ = N.$, mm = (v, d = 1) => `${v.toFixed(d)} mm`;
+const SL = ['ax', 'co', 'sa'], SLICE = new Set(SL);
+// The three slice views' planes, in patient millimetres: u runs across the view (to the right), v down it and n is the way the
+// slice moves on scrolling. Straight, they are the scan's own axes; turned, they stay square to each other (see turnIn).
+const FR0 = { ax: { u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] }, co: { u: [1, 0, 0], v: [0, 0, -1], n: [0, 1, 0] }, sa: { u: [0, 1, 0], v: [0, 0, -1], n: [1, 0, 0] } };
+const frames0 = () => JSON.parse(JSON.stringify(FR0));
 const COL = { ax: '#f59e0b', co: '#22d3ee', sa: '#e879f9', pan: '#a3e635', xs: '#a3e635', tooth: '#2dd4bf', not: '#f87171', meas: '#fde047', roi: '#38bdf8' };
 const TITLE = { ax: 'Axial', co: 'Coronal', sa: 'Sagittal', pan: 'Panoramic', xs: 'Cross-section', r3: '3D' };
 const EMPTY = '<div><b>Open a CBCT scan</b>Drop the DICOM folder, files or a .zip here, or use “Open the scan”. It stays on this device.</div>';
@@ -81,6 +90,7 @@ const EMPTY = '<div><b>Open a CBCT scan</b>Drop the DICOM folder, files or a .zi
 const S = {
   vol: null, H: null, P: null, series: [], seriesId: null, skipped: 0, files: 0,
   cur: [0, 0, 0], win: { l: 0, w: 1 }, preset: 'bone', tool: 'browse', layout: 'mpr', max: null,
+  fr: frames0(), frVer: 0, rotating: null, rotTag: null,
   measures: [], draft: null,
   arch: { points: [], curve: null, ver: 0, slab: 10, mode: 'mean', s: 0, count: 3, step: 2, width: 30 },
   pano: null, xs: [],
@@ -88,13 +98,14 @@ const S = {
   surf: { mesh: null, info: null, detail: 0.5, largest: false, T: null },
   tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, preview: null, hist: [], fitted: false },
   rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
+  canal: { T: null, seg: null, mesh: null, show: 'glass', ver: 0 },
   pending: null, demo: null, busy: false, loads: 0,
 };
 
 // ───────────── shell ─────────────
 const fdiOpts = ['<option value="">—</option>'].concat([1, 2, 3, 4].flatMap((q) => [1, 2, 3, 4, 5, 6, 7, 8].map((t) => `<option value="${q}${t}">${q}${t}</option>`))).join('');
 const shell = N.createShell({
-  name: 'CBCT Card', tagline: 'CBCT viewer and donor-tooth replicas', title: document.title, emptyHtml: EMPTY,
+  name: 'CBCT Card', tagline: 'CBCT viewer, donor-tooth replicas and root canals', title: document.title, emptyHtml: EMPTY,
   steps: [
     { id: 'load', title: 'Open the scan', html: `
       <p class="lead">Open the CBCT’s DICOM files: the folder they are in, a .zip, or the files themselves.</p>
@@ -104,13 +115,14 @@ const shell = N.createShell({
       <div id="lSeries"></div><div id="lInfo"></div>
       <p class="tip">Everything is read on this device; nothing is uploaded. Only technical details are read from the files (size, voxel size, position, scan date): names, dates of birth, numbers and the like are stepped over and never shown or saved. If the scan is compressed with JPEG 2000 or JPEG-LS, export it again from the CBCT software as uncompressed DICOM.</p>` },
     { id: 'view', title: 'Slices', html: `
-      <p class="lead">Scroll over a slice to move through it; tap to move the cross-hair. Pinch or Ctrl + scroll to zoom; two fingers or the right mouse button to pan.</p>
+      <p class="lead">Scroll over a slice to move through it; tap to move the cross-hair. Drag a round handle on a cross-hair line to turn the lines: the other two slices follow at that angle. Pinch or Ctrl + scroll to zoom; two fingers or the right mouse button to pan.</p>
       <div class="row"><label>Window</label><div class="seg" id="vPreset"><button data-v="bone" type="button" title="Bone and teeth">Bone</button><button data-v="teeth" type="button" title="Enamel, dentine and pulp">Teeth</button><button data-v="soft" type="button" title="Soft tissue and airway">Soft</button><button data-v="full" type="button" title="Every value in the scan">Full</button></div></div>
       <div class="row"><label>Level</label><input type="range" id="vLevel" step="1"><span class="val"></span></div>
       <div class="row"><label>Width</label><input type="range" id="vWidth" step="1"><span class="val"></span></div>
-      <div class="btns"><button class="btn" id="vFit" type="button" title="Show each slice whole again">Fit the slices</button><button class="btn" id="vCentre" type="button" title="Put the cross-hair back in the middle of the scan">Centre the cross-hair</button></div>
+      <div class="btns"><button class="btn" id="vFit" type="button" title="Show each slice whole again">Fit the slices</button><button class="btn" id="vCentre" type="button" title="Put the cross-hair back in the middle of the scan">Centre the cross-hair</button><button class="btn" id="vStraight" type="button" title="Turn the cross-hair back square to the scan">Straighten the cross-hair</button></div>
       <div id="vInfo"></div>
-      <p class="tip">Use the bar above the slices for the tools: Point moves the cross-hair, Move pans, Window changes brightness (drag across for width, up and down for level), Distance and Angle measure on any slice — the panoramic and cross-sections too. Measurements are in millimetres in the plane of the slice. The window presets are display settings only.</p>` },
+      <p class="tip">Use the bar above the slices for the tools: Point moves the cross-hair, Move pans, Window changes brightness (drag across for width, up and down for level), Distance and Angle measure on any slice — the panoramic and cross-sections too. Measurements are in millimetres in the plane of the slice. The window presets are display settings only.</p>
+      <p class="tip">Turning the cross-hair: with Point, drag one of the round handles on its lines. The other two slices turn with the lines and become oblique slices, still square to each other and to the slice you turned it in — for example, turn it in the axial slice to lie along the arch, then in the cross-cut slice to follow a tooth’s long axis. The angle shows by the handle and in each slice’s label; it settles on straight within half a degree. With a slice selected, [ and ] turn its lines 1° at a time (0.1° with Shift). “Straighten” puts every slice back square to the scan.</p>` },
     { id: 'd3', title: '3D and surface', optional: true, html: `
       <p class="lead">The scan in 3D: the brightest value along each line of sight (MIP), or the surface where it crosses a threshold. Make that surface into an STL model.</p>
       <div class="row"><label>Show</label><div class="seg" id="tMode"><button data-v="mip" type="button" title="Maximum intensity projection">MIP</button><button data-v="iso" type="button" title="The surface at the threshold below">Surface</button></div></div>
@@ -133,7 +145,7 @@ const shell = N.createShell({
       <div class="row"><label>Width</label><input type="range" id="pWidth" min="15" max="50" step="1" value="30"><span class="val"></span></div>
       <div id="pInfo"></div>
       <p class="tip">Tap the panoramic to put the cross-sections there; scroll over a cross-section to step along the arch. In each cross-section the cheek or lip side (B) is on the left and the tongue side (L) on the right; ticks every millimetre, numbers every 5 mm from the arch curve and the scan’s height.</p>` },
-    { id: 'tooth', title: 'Donor tooth', optional: true, html: `
+    { id: 'tooth', title: 'Pick a tooth', optional: true, html: `
       <p class="lead" id="dLead">Tap the donor tooth in a slice, near the middle of its crown.</p>
       <div class="row"><label>Region</label><div class="seg" id="dShape"><button data-v="cyl" type="button" title="A cylinder round the tooth">Cylinder</button><button data-v="box" type="button" title="A box round the tooth">Box</button></div></div>
       <div class="row"><label>Width</label><input type="range" id="dR" min="3" max="12" step="0.25" value="7"><span class="val"></span></div>
@@ -142,7 +154,7 @@ const shell = N.createShell({
       <div class="row"><label>Threshold</label><input type="range" id="dT" step="1"><span class="val"></span></div>
       <div class="row"><label>Smoothing</label><input type="range" id="dSmooth" min="0" max="0.4" step="0.05" value="0.15"><span class="val"></span></div>
       <div class="row"><label>Eraser size</label><input type="range" id="dBrush" min="0.3" max="3" step="0.1" value="1"><span class="val"></span></div>
-      <div class="btns"><button class="btn" id="dFit" type="button" title="Fit the region round the tooth found">Fit the region</button><button class="btn" id="dUndo" type="button" title="Undo the last change">Undo</button><button class="btn" id="dClear" type="button" title="Pick the tooth again">Start again</button></div>
+      <div class="btns"><button class="btn" id="dFit" type="button" title="Fit the region round the tooth found">Fit the region</button><button class="btn" id="dUndo" type="button" title="Undo the last change">Undo</button><button class="btn" id="dClear" type="button" title="Pick the tooth again">Start again</button><button class="btn" id="dAlign" type="button" title="Turn the slices to run along and across this tooth’s long axis">Slices along the tooth</button></div>
       <div id="dOut"></div>
       <p class="tip">The tooth is everything at or above the threshold inside the region that is reached from your tap before it is reached from the region’s edge, taking the thickest and brightest parts first: the two meet in the dark ligament space round the root and at the narrow neck of a contact. If it leaks into the bone or the next tooth, tap there with “Not tooth”, cut the bridge with the eraser, raise the threshold, or narrow the region. Pulp spaces are filled. This works best on a scan with small voxels (0.3 mm or less, as from a small field of view): with larger voxels the ligament space may not show, and the tooth runs into the bone.</p>` },
     { id: 'replica', title: 'Replica', optional: true, html: `
@@ -155,6 +167,14 @@ const shell = N.createShell({
       <div class="btns"><button class="btn pri" id="rMake" type="button" title="Make the replica as a closed, smooth surface">Make the replica</button><button class="btn" id="rStl" type="button" title="Download the replica as an STL file, in the scan’s coordinates">Download STL</button></div>
       <div id="rOut"></div>
       <p class="tip">“Enlarge by” adds the same thickness all over (0 to 0.5 mm), for example to allow for the ligament space. The replica is a planning aid made from the CBCT, not certified medical-device software: compare it with the scan and check its fit before using it, and follow your printing resin’s instructions for anything that goes in the mouth.</p>` },
+    { id: 'canal', title: 'Root canals', optional: true, html: `
+      <p class="lead" id="cLead"></p>
+      <div class="row"><label>Canal threshold</label><input type="range" id="cT" step="1"><span class="val"></span></div>
+      <div class="row"><label>Tooth shown as</label><div class="seg" id="cShow"><button data-v="glass" type="button" title="The tooth as clear glass round the canals">Glass</button><button data-v="hide" type="button" title="The canals on their own">Hidden</button></div></div>
+      <div class="btns"><button class="btn pri" id="cFind" type="button" title="Find the pulp chamber and canals again, at the threshold worked out from this tooth">Find the canals</button><button class="btn" id="cAlign" type="button" title="Turn the slices to run along and across this tooth’s long axis">Slices along the tooth</button><button class="btn" id="cStl" type="button" title="Download the canals as an STL file, in the scan’s coordinates">Download STL</button></div>
+      <div id="cOut"></div>
+      <p class="tip">The canals are the hollows ringed by the tooth’s hard tissue: in each slice across the tooth, whatever lies well below the brightness of the walls round it, as far as the root end (so a wide-open apex is followed to its end). Each hollow is judged against its own walls, because on a CBCT the pulp deep in a root reads brighter than the pulp in the crown. The threshold sets where a hollow’s edge is cut: it starts half way between this tooth’s own pulp and dentine. Raise it to catch fainter canals, at the cost of specks; lower it if dentine is being taken. Check the red against the grey in the slices: “Slices along the tooth” turns them so the axial slice walks down the root.</p>
+      <p class="tip">A canal narrower than the scan’s voxels only dims a voxel slightly and may not show, so a canal that is missing here is not proof that the tooth has none; canals filled with a bright root filling are not shown. This is a way of looking at the scan, not certified medical-device software.</p>` },
   ],
 });
 if (N.EMBED) $('empty').innerHTML = EMPTY;
@@ -162,7 +182,7 @@ shell.setEmpty(true);
 
 // ───────────── the views ─────────────
 const grid = N.el('div', { id: 'cb', hidden: '' }, `
-  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><span class="sp"></span><span class="rd" id="cbRead"></span></div>
+  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><button class="btn" id="cbStraight" type="button" title="Turn the cross-hair back square to the scan" hidden>Straighten</button><span class="sp"></span><span class="rd" id="cbRead"></span></div>
   <div id="cbGrid" class="mpr">
     ${['ax', 'co', 'sa'].map((v) => `<div class="vp" data-v="${v}" data-a="${v}" style="grid-area:${v}"></div>`).join('')}
     <div class="vp r3" data-v="r3" data-a="r3" style="grid-area:r3"></div>
@@ -176,7 +196,7 @@ function makeView(id, kind, cell, m = 0) {
   const cv = N.el('canvas', { tabindex: '0' }), lab = N.el('div', { class: 'vl' }), vx = N.el('div', { class: 'vx' }, `<button type="button" data-max="${id}" title="Make this view fill the space (again to go back)">⤢</button>`);
   cell.append(cv, lab, vx);
   const v = { id, kind, m, cell, cv, ctx: cv.getContext('2d'), lab, z: 1, cx: 0, cy: 0, fitted: false, off: document.createElement('canvas'), offKey: '', w: 1, h: 1 };
-  if (kind === 'ax' || kind === 'co' || kind === 'sa') { const s = N.el('input', { type: 'range', class: 'vs', min: '0', max: '1', step: '1', title: 'Move through the slices' }); cell.appendChild(s); v.slider = s; s.addEventListener('input', () => { const a = axisOf(kind); S.cur[a] = +s.value; crossChanged(); }); }
+  if (kind === 'ax' || kind === 'co' || kind === 'sa') { const s = N.el('input', { type: 'range', class: 'vs', min: '0', max: '1', step: '1', title: 'Move through the slices' }); cell.appendChild(s); v.slider = s; s.addEventListener('input', () => { const o = obl(v); if (o) moveAlong(v, (+s.value + 0.5) * o.s - o.Wn / 2 - o.t); else { S.cur[axisOf(kind)] = +s.value; crossChanged(); } }); }
   views[id] = v; hookView(v); return v;
 }
 const axisOf = (kind) => (kind === 'ax' ? 2 : kind === 'co' ? 1 : 0);
@@ -200,8 +220,32 @@ r3cell.addEventListener('click', (e) => { const b = e.target.closest('[data-r3]'
 // ───────────── geometry of each view ─────────────
 // Each 2D view shows an image of cols × rows pixels, pixel size su × sv mm; (a, b) are millimetres across and down that image.
 const vol = () => S.vol;
+const w2v = (p) => D.voxelOf(S.vol, p[0], p[1], p[2]), v2w = (q) => D.worldOf(S.vol, q[0], q[1], q[2]);
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const straight = (k) => { const f = S.fr[k], f0 = FR0[k]; return ['u', 'v', 'n'].every((e) => f[e][0] === f0[e][0] && f[e][1] === f0[e][1] && f[e][2] === f0[e][2]); };
+const allStraight = () => SL.every(straight);
+/**
+ * A turned slice view's plane → null when the view is straight (or not a slice), else { f, C, Wu, Wv, Wn, s, cols, rows,
+ * su, sv, t, tq }. The image is centred on the scan's centre C and as big as the scan's box seen along n (so it is exactly
+ * the straight image when the angle is 0): (a, b) = ((P − C)·u + Wu/2, (P − C)·v + Wv/2). The plane goes through the
+ * cross-hair, t from C along n; the image shows it at tq, t to the nearest step s (the smallest voxel size), as a straight
+ * slice shows the nearest voxel.
+ */
+function obl(v) {
+  if (!S.vol || !SLICE.has(v.kind) || straight(v.kind)) return null;
+  const V = S.vol, f = S.fr[v.kind], E = V.dims.map((n, a) => n * V.spacing[a]), C = V.origin.map((o, a) => o + (V.dims[a] - 1) / 2 * V.spacing[a]);
+  const ext = (e) => Math.abs(e[0]) * E[0] + Math.abs(e[1]) * E[1] + Math.abs(e[2]) * E[2], s = Math.min(...V.spacing);
+  const Wu = ext(f.u), Wv = ext(f.v), Wn = ext(f.n), cols = Math.max(1, Math.round(Wu / s)), rows = Math.max(1, Math.round(Wv / s));
+  const P = v2w(S.cur), t = (P[0] - C[0]) * f.n[0] + (P[1] - C[1]) * f.n[1] + (P[2] - C[2]) * f.n[2];
+  return { f, C, Wu, Wv, Wn, s, cols, rows, su: Wu / cols, sv: Wv / rows, t, tq: Math.round(t / s) * s };
+}
+/** the patient point at (a, b) on a turned view (on its plane at t; the shown plane by default) */
+const obPt = (o, a, b, t = o.tq) => [0, 1, 2].map((i) => o.C[i] + (a - o.Wu / 2) * o.f.u[i] + (b - o.Wv / 2) * o.f.v[i] + t * o.f.n[i]);
+let frKeys = { ver: -1 };
+const frameKey = (k) => { if (frKeys.ver !== S.frVer) frKeys = { ver: S.frVer }; return frKeys[k] || (frKeys[k] = N.crc32(new TextEncoder().encode(S.fr[k].u.concat(S.fr[k].v).map((x) => x.toFixed(6)).join(','))).toString(36)); };
 function geom(v) {
-  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing;
+  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, o = obl(v);
+  if (o) return { cols: o.cols, rows: o.rows, su: o.su, sv: o.sv, key: `ob${v.kind}:${frameKey(v.kind)}:${o.tq.toFixed(2)}`, ob: o };
   if (v.kind === 'ax') return { cols: nx, rows: ny, su: sx, sv: sy, key: 'ax:' + Math.round(S.cur[2]) };
   if (v.kind === 'co') return { cols: nx, rows: nz, su: sx, sv: sz, key: 'co:' + Math.round(S.cur[1]) };
   if (v.kind === 'sa') return { cols: ny, rows: nz, su: sy, sv: sz, key: 'sa:' + Math.round(S.cur[0]) };
@@ -210,7 +254,8 @@ function geom(v) {
 }
 /** (a, b) on a view → voxel coordinates (fractional) */
 function toVox(v, a, b) {
-  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, k = nz - 0.5 - b / sz;
+  const V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, k = nz - 0.5 - b / sz, o = obl(v);
+  if (o) return w2v(obPt(o, a, b, o.t));
   if (v.kind === 'ax') return [a / sx - 0.5, b / sy - 0.5, S.cur[2]];
   if (v.kind === 'co') return [a / sx - 0.5, S.cur[1], k];
   if (v.kind === 'sa') return [S.cur[0], a / sy - 0.5, k];
@@ -218,15 +263,37 @@ function toVox(v, a, b) {
   let p; if (v.kind === 'pan') p = c.at(a).p; else { const X = S.xs[v.m]; if (!X) return null; const t = X.width / 2 - a; p = [X.p[0] + t * X.n[0], X.p[1] + t * X.n[1]]; }
   return [(p[0] - V.origin[0]) / sx, (p[1] - V.origin[1]) / sy, k];
 }
-/** voxel coordinates → (a, b) on a slice view */
+/** voxel coordinates → (a, b) on a slice view (a turned view: the point seen square onto its plane) */
 function fromVox(v, i, j, k) {
-  const V = S.vol, nz = V.dims[2], [sx, sy, sz] = V.spacing, b = (nz - 1 - k + 0.5) * sz;
+  const V = S.vol, nz = V.dims[2], [sx, sy, sz] = V.spacing, b = (nz - 1 - k + 0.5) * sz, o = obl(v);
+  if (o) { const P = v2w([i, j, k]), d = [P[0] - o.C[0], P[1] - o.C[1], P[2] - o.C[2]]; return [dot3(d, o.f.u) + o.Wu / 2, dot3(d, o.f.v) + o.Wv / 2]; }
   if (v.kind === 'ax') return [(i + 0.5) * sx, (j + 0.5) * sy];
   if (v.kind === 'co') return [(i + 0.5) * sx, b];
   if (v.kind === 'sa') return [(j + 0.5) * sy, b];
   return [0, b];
 }
-const w2v = (p) => D.voxelOf(S.vol, p[0], p[1], p[2]), v2w = (q) => D.worldOf(S.vol, q[0], q[1], q[2]);
+/** how far a patient point is from the slice a view shows (mm) */
+function planeDist(v, p) {
+  const o = obl(v); if (o) return Math.abs((p[0] - o.C[0]) * o.f.n[0] + (p[1] - o.C[1]) * o.f.n[1] + (p[2] - o.C[2]) * o.f.n[2] - o.tq);
+  const q = w2v(p), ax = axisOf(v.kind); return Math.abs(q[ax] - Math.round(S.cur[ax])) * S.vol.spacing[ax];
+}
+/** where a point of the axial plane (x, y) shows on the axial view, at the height the view's plane has there (null if it is near upright) */
+function xyOnView(v, x, y) {
+  const V = S.vol, o = obl(v); if (!o) return [x - V.origin[0] + V.spacing[0] / 2, y - V.origin[1] + V.spacing[1] / 2];
+  const n = o.f.n; if (Math.abs(n[2]) < 0.2) return null; const P0 = obPt(o, o.Wu / 2, o.Wv / 2), z = P0[2] - (n[0] * (x - P0[0]) + n[1] * (y - P0[1])) / n[2];
+  return fromVox(v, ...w2v([x, y, z]));
+}
+/** keep the part of a convex polygon [[x, y], …] where A·x + B·y + C ≥ 0 */
+function clipPoly(P, A, B, C) {
+  const out = []; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length], fp = A * p[0] + B * p[1] + C, fq = A * q[0] + B * q[1] + C; if (fp >= 0) out.push(p); if ((fp >= 0) !== (fq >= 0)) { const t = fp / (fp - fq); out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); } }
+  return out;
+}
+/** the plane through P0 spanned by unit u, v, cut to the box lo…hi → its outline as patient points */
+function planeInBox(P0, u, v, lo, hi) {
+  const D = (hi[0] - lo[0]) + (hi[1] - lo[1]) + (hi[2] - lo[2]) + 1; let poly = [[-D, -D], [D, -D], [D, D], [-D, D]];
+  for (let a = 0; a < 3; a++) { poly = clipPoly(poly, u[a], v[a], P0[a] - lo[a]); poly = clipPoly(poly, -u[a], -v[a], hi[a] - P0[a]); }
+  return poly.map(([s, t]) => [0, 1, 2].map((a) => P0[a] + s * u[a] + t * v[a]));
+}
 const toScreen = (v, a, b) => [v.w / 2 + (a - v.cx) * v.z, v.h / 2 + (b - v.cy) * v.z];
 const fromScreen = (v, X, Y) => [v.cx + (X - v.w / 2) / v.z, v.cy + (Y - v.h / 2) / v.z];
 function fitView(v) { const g = geom(v); if (!g) return; const W = g.cols * g.su, H = g.rows * g.sv; v.z = Math.max(1e-3, Math.min(v.w / W, v.h / H) * 0.96); v.cx = W / 2; v.cy = H / 2; v.fitted = true; }
@@ -241,6 +308,7 @@ function buildLUT() {
 const bufs = {};
 function imageData(v, g) {
   const V = S.vol, [nx, ny, nz] = V.dims, d = V.data;
+  if (g.ob) return obliqueData(v, g);
   if (v.kind === 'ax') { const k = Math.round(S.cur[2]); return d.subarray(k * nx * ny, (k + 1) * nx * ny); }
   if (v.kind === 'pan') return S.pano.data;
   if (v.kind === 'xs') return S.xs[v.m].data;
@@ -249,11 +317,65 @@ function imageData(v, g) {
   else { const i = Math.round(S.cur[0]); for (let r = 0; r < nz; r++) { const base = i + nx * ny * (nz - 1 - r); for (let j = 0; j < ny; j++) b[r * ny + j] = d[base + nx * j]; } }
   return b;
 }
+/** a turned slice: the volume sampled on its plane at each pixel's centre (trilinear; nearest while the cross-hair is being turned) */
+function obliqueData(v, g) {
+  const o = g.ob, V = S.vol, [nx, ny, nz] = V.dims, d = V.data, lo = V.min, id = 'o' + v.kind, n = g.cols * g.rows, f = o.f, sp = V.spacing, org = V.origin;
+  const b = bufs[id] && bufs[id].length === n ? bufs[id] : (bufs[id] = new Int16Array(n));
+  const P0 = obPt(o, o.su / 2, o.sv / 2), q0 = P0.map((p, a) => (p - org[a]) / sp[a]), du = f.u.map((x, a) => x * o.su / sp[a]), dv = f.v.map((x, a) => x * o.sv / sp[a]);
+  const fast = !!S.rotating, nxy = nx * ny, X1 = nx - 1, Y1 = ny - 1, Z1 = nz - 1, X2 = Math.max(0, nx - 2), Y2 = Math.max(0, ny - 2), Z2 = Math.max(0, nz - 2);
+  for (let r = 0; r < g.rows; r++) {
+    let x = q0[0] + r * dv[0], y = q0[1] + r * dv[1], z = q0[2] + r * dv[2]; const row = r * g.cols;
+    for (let c = 0; c < g.cols; c++, x += du[0], y += du[1], z += du[2]) {
+      if (x < -0.5 || y < -0.5 || z < -0.5 || x > nx - 0.5 || y > ny - 0.5 || z > nz - 0.5) { b[row + c] = lo; continue; }
+      const xc = x < 0 ? 0 : x > X1 ? X1 : x, yc = y < 0 ? 0 : y > Y1 ? Y1 : y, zc = z < 0 ? 0 : z > Z1 ? Z1 : z;
+      if (fast) { b[row + c] = d[Math.round(xc) + nx * Math.round(yc) + nxy * Math.round(zc)]; continue; }
+      const i = Math.min(X2, xc | 0), j = Math.min(Y2, yc | 0), k = Math.min(Z2, zc | 0), tx = xc - i, ty = yc - j, tz = zc - k, q = i + nx * j + nxy * k;
+      const a0 = d[q] + (d[q + 1] - d[q]) * tx, a1 = d[q + nx] + (d[q + nx + 1] - d[q + nx]) * tx, a2 = d[q + nxy] + (d[q + nxy + 1] - d[q + nxy]) * tx, a3 = d[q + nxy + nx] + (d[q + nxy + nx + 1] - d[q + nxy + nx]) * tx;
+      const b0 = a0 + (a1 - a0) * ty, b1 = a2 + (a3 - a2) * ty; b[row + c] = Math.round(b0 + (b1 - b0) * tz);
+    }
+  }
+  return b;
+}
+const tintPx = (px, q) => { const p = px[q], r = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.5 + 0.55 * 166) | 0) << 16) | (((gg * 0.5 + 0.55 * 212) | 0) << 8) | ((r * 0.5 + 0.55 * 45) | 0); };
+/** the tooth found, tinted into a turned slice: each pixel looks up the label of the voxel it falls in */
+function tintOblique(v, px, g) {
+  const sg = S.tooth.seg, W = sg.vol || S.vol, { lab, box } = sg, { i0, j0, k0, nx, ny, nz } = box, o = g.ob, f = o.f, b0 = [i0, j0, k0];
+  const P0 = obPt(o, o.su / 2, o.sv / 2), q0 = P0.map((p, a) => (p - W.origin[a]) / W.spacing[a] - b0[a]), du = f.u.map((x, a) => x * o.su / W.spacing[a]), dv = f.v.map((x, a) => x * o.sv / W.spacing[a]);
+  // the pixels the box can cover: its corners seen on the view
+  let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity;
+  for (let m = 0; m < 8; m++) { const P = [0, 1, 2].map((a) => W.origin[a] + (b0[a] + ((m >> a) & 1 ? [nx, ny, nz][a] - 0.5 : -0.5)) * W.spacing[a]), [aa, bb] = fromVox(v, ...w2v(P)); c0 = Math.min(c0, aa / o.su); c1 = Math.max(c1, aa / o.su); r0 = Math.min(r0, bb / o.sv); r1 = Math.max(r1, bb / o.sv); }
+  c0 = Math.max(0, Math.floor(c0) - 1); c1 = Math.min(g.cols - 1, Math.ceil(c1) + 1); r0 = Math.max(0, Math.floor(r0) - 1); r1 = Math.min(g.rows - 1, Math.ceil(r1) + 1);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const i = Math.round(q0[0] + c * du[0] + r * dv[0]), j = Math.round(q0[1] + c * du[1] + r * dv[1]), k = Math.round(q0[2] + c * du[2] + r * dv[2]);
+    if (i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && lab[i + nx * (j + ny * k)]) tintPx(px, r * g.cols + c);
+  }
+}
+/** a slice view's pixels in the patient: pixel (c, r)'s centre is at P0 + c·du + r·dv (straight or turned) */
+function pixelFrame(v, g) {
+  const V = S.vol, [sx, sy, sz] = V.spacing, o = V.origin, nz = V.dims[2];
+  if (g.ob) return { P0: obPt(g.ob, g.ob.su / 2, g.ob.sv / 2), du: g.ob.f.u.map((x) => x * g.ob.su), dv: g.ob.f.v.map((x) => x * g.ob.sv) };
+  if (v.kind === 'ax') return { P0: [o[0], o[1], o[2] + Math.round(S.cur[2]) * sz], du: [sx, 0, 0], dv: [0, sy, 0] };
+  if (v.kind === 'co') return { P0: [o[0], o[1] + Math.round(S.cur[1]) * sy, o[2] + (nz - 1) * sz], du: [sx, 0, 0], dv: [0, 0, -sz] };
+  return { P0: [o[0] + Math.round(S.cur[0]) * sx, o[1], o[2] + (nz - 1) * sz], du: [0, sy, 0], dv: [0, 0, -sz] };
+}
+/** the canals found, tinted red into a slice image (on the Root canals step, in place of the tooth's tint) */
+function tintCanal(v, px, g) {
+  const cs = S.canal.seg, F = pixelFrame(v, g); let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity;
+  for (let m = 0; m < 8; m++) { const P = [0, 1, 2].map((a) => ((m >> a) & 1 ? cs.hi[a] + cs.grid.h : cs.lo[a] - cs.grid.h)), [aa, bb] = fromVox(v, ...w2v(P)); c0 = Math.min(c0, aa / g.su); c1 = Math.max(c1, aa / g.su); r0 = Math.min(r0, bb / g.sv); r1 = Math.max(r1, bb / g.sv); }
+  c0 = Math.max(0, Math.floor(c0) - 1); c1 = Math.min(g.cols - 1, Math.ceil(c1) + 1); r0 = Math.max(0, Math.floor(r0) - 1); r1 = Math.min(g.rows - 1, Math.ceil(r1) + 1);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    if (!cs.has(F.P0[0] + c * F.du[0] + r * F.dv[0], F.P0[1] + c * F.du[1] + r * F.dv[1], F.P0[2] + c * F.du[2] + r * F.dv[2])) continue;
+    const q = r * g.cols + c, p = px[q], rr = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.35 + 0.65 * 40) | 0) << 16) | (((gg * 0.35 + 0.65 * 50) | 0) << 8) | ((rr * 0.35 + 0.65 * 255) | 0);
+  }
+}
+const canalShown = () => stepId() === 'canal' && S.canal.seg && !S.canal.seg.error;
 /** the tooth found, tinted into a slice image (the tooth may have been found on a coarser copy of the scan: seg.vol) */
 function tint(v, px, g) {
   const sg = S.tooth.seg; if (!sg || sg.error || !['ax', 'co', 'sa'].includes(v.kind)) return;
+  if (stepId() === 'canal') { if (canalShown()) tintCanal(v, px, g); return; }
+  if (g.ob) return tintOblique(v, px, g);
   const V = S.vol, W = sg.vol || V, { lab, box } = sg, { i0, j0, k0, nx, ny, nz } = box, NZ = V.dims[2];
-  const c = (q) => { const p = px[q], r = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.5 + 0.55 * 166) | 0) << 16) | (((gg * 0.5 + 0.55 * 212) | 0) << 8) | ((r * 0.5 + 0.55 * 45) | 0); };
+  const c = (q) => tintPx(px, q);
   // the native voxel range the box covers, along each axis, and the box index of each native index
   const map = (a, i0b, nb) => { const lo = Math.max(0, Math.floor((W.origin[a] + (i0b - 0.5) * W.spacing[a] - V.origin[a]) / V.spacing[a])), hi = Math.min(V.dims[a] - 1, Math.ceil((W.origin[a] + (i0b + nb - 0.5) * W.spacing[a] - V.origin[a]) / V.spacing[a])), m = new Int32Array(hi - lo + 1); for (let i = lo; i <= hi; i++) { const b = Math.round((V.origin[a] + i * V.spacing[a] - W.origin[a]) / W.spacing[a]) - i0b; m[i - lo] = b >= 0 && b < nb ? b : -1; } return { lo, hi, m }; };
   const X = map(0, i0, nx), Y = map(1, j0, ny), Z = map(2, k0, nz), at = (i, j, k) => { const a = X.m[i - X.lo], b = Y.m[j - Y.lo], cc = Z.m[k - Z.lo]; return a >= 0 && b >= 0 && cc >= 0 && lab[a + nx * (b + ny * cc)]; };
@@ -272,7 +394,7 @@ function drawView(v) {
   const g = geom(v);
   if (!g) { ctx.fillStyle = '#9fb6cf'; ctx.font = '13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(v.kind === 'pan' || v.kind === 'xs' ? 'Tap along the arch on the axial slice, or “Propose the arch”' : '', W / 2, H / 2); v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${TITLE[v.kind]}`; return; }
   if (!v.fitted || (sizeChanged && v.autoFit !== false)) fitView(v);
-  const key = `${g.key}|${S.win.l}|${S.win.w}|${segVer}|${g.cols}x${g.rows}`;
+  const key = `${g.key}|${S.win.l}|${S.win.w}|${segVer}|${g.cols}x${g.rows}${g.ob && S.rotating ? '|fast' : ''}${stepId() === 'canal' ? '|canal' + S.canal.ver : ''}`;
   if (v.offKey !== key) {
     v.off.width = g.cols; v.off.height = g.rows; const oc = v.off.getContext('2d'), im = oc.createImageData(g.cols, g.rows), px = new Uint32Array(im.data.buffer), dat = imageData(v, g), lo = S.vol.min;
     for (let q = 0; q < px.length; q++) px[q] = LUT[dat[q] - lo];
@@ -287,16 +409,19 @@ function dot(ctx, p, colour, r = 4) { ctx.save(); ctx.fillStyle = colour; ctx.st
 function tag(ctx, text, p, colour = 'rgba(15,42,68,.9)') { ctx.save(); ctx.font = '600 11px system-ui,sans-serif'; const w = ctx.measureText(text).width + 10; ctx.fillStyle = colour; ctx.fillRect(p[0] - w / 2, p[1] - 9, w, 18); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, p[0], p[1]); ctx.restore(); }
 function overlays(v, g) {
   const ctx = v.ctx, V = S.vol, [nx, ny, nz] = V.dims, [sx, sy, sz] = V.spacing, W = v.w, H = v.h, cur = S.cur, sc = (a, b) => toScreen(v, a, b);
-  // the cross-hair
-  if (v.kind === 'ax' || v.kind === 'co' || v.kind === 'sa') {
-    const [a, b] = fromVox(v, cur[0], cur[1], cur[2]), [X, Y] = sc(a, b), cv = v.kind === 'ax' ? [COL.sa, COL.co] : v.kind === 'co' ? [COL.sa, COL.ax] : [COL.co, COL.ax];
-    line(ctx, [[X, 0], [X, Y - 12]], cv[0]); line(ctx, [[X, Y + 12], [X, H]], cv[0]); line(ctx, [[0, Y], [X - 12, Y]], cv[1]); line(ctx, [[X + 12, Y], [W, Y]], cv[1]);
+  // the cross-hair: where the other two slices cut this one, each in its own colour; round handles to turn it (with Point)
+  if (SLICE.has(v.kind)) {
+    const [X, Y] = crossScreen(v), R = W + H;
+    for (const L of crossLines(v)) { const [dx, dy] = L.d; line(ctx, [[X + dx * 12, Y + dy * 12], [X + dx * R, Y + dy * R]], COL[L.kind]); line(ctx, [[X - dx * 12, Y - dy * 12], [X - dx * R, Y - dy * R]], COL[L.kind]); }
+    if (S.tool === 'browse') for (const h of handles(v)) { ctx.save(); ctx.fillStyle = COL[h.kind]; ctx.strokeStyle = S.rotating === v.kind ? '#fff' : 'rgba(8,19,31,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.p[0], h.p[1], 6, 0, 7); ctx.fill(); ctx.stroke(); ctx.restore(); }
+    if (S.rotTag && S.rotTag.view === v.kind) tag(ctx, `${Math.abs(lineAngle(v.kind)).toFixed(1)}°`, [S.rotTag.p[0], S.rotTag.p[1] - 20]);
   }
   // the arch and where the cross-sections are
   const c = S.arch.curve;
   if (v.kind === 'ax' && (S.layout === 'pano' || shell.current === stepIx('pano'))) {
-    if (c) { line(ctx, c.pts.map((p) => sc((p[0] - V.origin[0]) / sx * sx + sx / 2, (p[1] - V.origin[1]) / sy * sy + sy / 2)), COL.pan, 2); for (const X of S.xs) { const h = X.width / 2, A = [X.p[0] + h * X.n[0], X.p[1] + h * X.n[1]], B = [X.p[0] - h * X.n[0], X.p[1] - h * X.n[1]]; line(ctx, [A, B].map((p) => sc(p[0] - V.origin[0] + sx / 2, p[1] - V.origin[1] + sy / 2)), '#fff', 1.2, [4, 3]); } }
-    S.arch.points.forEach((p) => dot(ctx, sc(p[0] - V.origin[0] + sx / 2, p[1] - V.origin[1] + sy / 2), COL.pan, 5));
+    const xy = (p) => { const q = xyOnView(v, p[0], p[1]); return q && sc(q[0], q[1]); };
+    if (c) { const P = c.pts.map(xy); if (P.every(Boolean)) line(ctx, P, COL.pan, 2); for (const X of S.xs) { const h = X.width / 2, A = xy([X.p[0] + h * X.n[0], X.p[1] + h * X.n[1]]), B = xy([X.p[0] - h * X.n[0], X.p[1] - h * X.n[1]]); if (A && B) line(ctx, [A, B], '#fff', 1.2, [4, 3]); } }
+    S.arch.points.forEach((p) => { const q = xy(p); if (q) dot(ctx, q, COL.pan, 5); });
   }
   if (v.kind === 'pan' && S.xs.length) {
     for (const X of S.xs) { const [Xs] = sc(X.s, 0); line(ctx, [[Xs, 0], [Xs, H]], X === S.xs[(S.xs.length - 1) >> 1] ? '#fff' : 'rgba(255,255,255,.55)', 1, [5, 4]); }
@@ -313,16 +438,40 @@ function overlays(v, g) {
     else { P.forEach((p) => dot(ctx, p, COL.meas, 3.5)); if (P.length >= 2) line(ctx, P, COL.meas, 2); if (P.length === 3) tag(ctx, measureValue(m).toFixed(1) + '°', [P[1][0], P[1][1] - 16]); }
   }
   // orientation letters and a 10 mm scale bar
-  const OR = { ax: ['A', 'P', 'R', 'L'], co: ['S', 'I', 'R', 'L'], sa: ['S', 'I', 'A', 'P'], pan: ['S', 'I', '', ''], xs: ['S', 'I', 'B', 'L'] }[v.kind];
+  const OR = SLICE.has(v.kind) ? orient(v.kind) : { pan: ['S', 'I', '', ''], xs: ['S', 'I', 'B', 'L'] }[v.kind];
   ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '600 11px system-ui,sans-serif'; ctx.textAlign = 'center';
   if (v.kind !== 'xs') { ctx.fillText(OR[0], W / 2, 34); ctx.fillText(OR[1], W / 2, H - 22); ctx.textAlign = 'left'; ctx.fillText(OR[2], 6, H / 2); ctx.textAlign = 'right'; ctx.fillText(OR[3], W - 6, H / 2); }
   ctx.restore();
   if (v.kind !== 'xs') { const L = 10 * v.z; line(ctx, [[12, H - 12], [12 + L, H - 12]], '#fff', 2); ctx.save(); ctx.fillStyle = '#fff'; ctx.font = '11px system-ui,sans-serif'; ctx.fillText('10 mm', 16 + L, H - 8); ctx.restore(); }
   // the label
-  const lab = v.kind === 'ax' ? `Axial ${Math.round(cur[2]) + 1}/${nz} · z ${(V.origin[2] + Math.round(cur[2]) * sz).toFixed(1)}` : v.kind === 'co' ? `Coronal ${Math.round(cur[1]) + 1}/${ny} · y ${(V.origin[1] + Math.round(cur[1]) * sy).toFixed(1)}` : v.kind === 'sa' ? `Sagittal ${Math.round(cur[0]) + 1}/${nx} · x ${(V.origin[0] + Math.round(cur[0]) * sx).toFixed(1)}`
+  const ob = g.ob, turned = SLICE.has(v.kind) ? Math.abs(lineAngle(v.kind)) : 0, tilt = ob ? Math.acos(N.clamp(Math.abs(dot3(ob.f.n, FR0[v.kind].n)), 0, 1)) * 180 / Math.PI : 0;
+  const lab = ob ? `${TITLE[v.kind]} · oblique ${tilt.toFixed(1)}°${turned >= 0.05 ? ` · lines ${turned.toFixed(1)}°` : ''}` : v.kind === 'ax' ? `Axial ${Math.round(cur[2]) + 1}/${nz} · z ${(V.origin[2] + Math.round(cur[2]) * sz).toFixed(1)}` : v.kind === 'co' ? `Coronal ${Math.round(cur[1]) + 1}/${ny} · y ${(V.origin[1] + Math.round(cur[1]) * sy).toFixed(1)}` : v.kind === 'sa' ? `Sagittal ${Math.round(cur[0]) + 1}/${nx} · x ${(V.origin[0] + Math.round(cur[0]) * sx).toFixed(1)}`
     : v.kind === 'pan' ? `Panoramic · slab ${S.arch.slab} mm` : `${S.xs.length > 3 ? '' : 'Section '}${(S.xs[v.m].s).toFixed(1)} mm`;
-  v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${N.esc(lab)}`;
+  const lab2 = !ob && turned >= 0.05 ? `${lab} · lines ${turned.toFixed(1)}°` : lab;
+  v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${N.esc(lab2)}`;
 }
+/** the letters for the patient's sides at the top, bottom, left and right of a slice view (from its plane, so also when turned) */
+function orient(k) {
+  const f = S.fr[k], L = (e) => { const a = [0, 1, 2].reduce((m, i) => (Math.abs(e[i]) > Math.abs(e[m]) ? i : m), 0); return (e[a] > 0 ? 'LPS' : 'RAI')[a]; }, neg = (e) => e.map((x) => -x);
+  return [L(neg(f.v)), L(f.v), L(neg(f.u)), L(f.u)];
+}
+/** the cross-hair on a slice view, in screen pixels */
+const crossScreen = (v) => { const [a, b] = fromVox(v, S.cur[0], S.cur[1], S.cur[2]); return toScreen(v, a, b); };
+/** the lines the other two slices make on this one: [{ kind, d: unit direction across and down the view }] */
+function crossLines(v) {
+  const f = S.fr[v.kind], out = [];
+  for (const j of SL) if (j !== v.kind) { const d = cross3(f.n, S.fr[j].n), a = dot3(d, f.u), b = dot3(d, f.v), L = Math.hypot(a, b) || 1; out.push({ kind: j, d: [a / L, b / L] }); }
+  return out;
+}
+/** the handles that turn the cross-hair: on both lines, both sides, part way to the edge of the view */
+function handles(v) {
+  const [X, Y] = crossScreen(v), R = N.clamp(Math.min(v.w, v.h) * 0.36, 46, 180), out = [];
+  for (const L of crossLines(v)) for (const sgn of [1, -1]) out.push({ kind: L.kind, p: [X + sgn * L.d[0] * R, Y + sgn * L.d[1] * R] });
+  return out;
+}
+const handleAt = (v, X, Y, r) => handles(v).find((h) => Math.hypot(h.p[0] - X, h.p[1] - Y) <= r) || null;
+/** the angle of the cross-hair's lines on a slice view to its edges, −45° to 45° (they stay square to each other) */
+function lineAngle(k) { const d = crossLines(views[k])[0].d, a = Math.atan2(d[1], d[0]) * 180 / Math.PI; return ((((a % 90) + 135) % 90) + 90) % 90 - 45; }
 /** millimetre rulers on a cross-section: along the bottom (from the arch curve, buccal −, lingual +) and the left side (scan height) */
 function xsRulers(v, g) {
   const ctx = v.ctx, X = S.xs[v.m], V = S.vol, nz = V.dims[2], sz = V.spacing[2], W = v.w, H = v.h;
@@ -339,8 +488,15 @@ function xsRulers(v, g) {
 }
 function toothOverlay(v) {
   const ctx = v.ctx, T = S.tooth, V = S.vol, cur = S.cur, sc = (p) => { const q = w2v(p), [a, b] = fromVox(v, q[0], q[1], q[2]); return toScreen(v, a, b); };
-  const onPlane = (p, tol) => { const q = w2v(p), ax = axisOf(v.kind); return Math.abs(q[ax] - Math.round(cur[ax])) * V.spacing[ax] <= tol; };
-  if (T.roi) {
+  const onPlane = (p, tol) => planeDist(v, p) <= tol, o = obl(v);
+  if (T.roi && o) {                                                 // a turned slice: where its plane cuts the region (a convex outline)
+    const R = T.roi, z0 = Math.min(R.z0, R.z1), z1 = Math.max(R.z0, R.z1), f = o.f, P0 = obPt(o, 0, 0);   // P(a, b) = P0 + a·u + b·v
+    const ring = R.shape === 'box' ? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => [R.c[0] + x * R.r, R.c[1] + y * R.r]) : Array.from({ length: 64 }, (_, i) => [R.c[0] + R.r * Math.cos(i * Math.PI / 32), R.c[1] + R.r * Math.sin(i * Math.PI / 32)]);
+    let poly = [[0, 0], [o.Wu, 0], [o.Wu, o.Wv], [0, o.Wv]];
+    poly = clipPoly(poly, f.u[2], f.v[2], P0[2] - z0); poly = clipPoly(poly, -f.u[2], -f.v[2], z1 - P0[2]);
+    for (let i = 0; i < ring.length && poly.length; i++) { const e0 = ring[i], e1 = ring[(i + 1) % ring.length], ex = e1[0] - e0[0], ey = e1[1] - e0[1]; poly = clipPoly(poly, ex * f.u[1] - ey * f.u[0], ex * f.v[1] - ey * f.v[0], ex * (P0[1] - e0[1]) - ey * (P0[0] - e0[0])); }
+    if (poly.length >= 3) { ctx.save(); ctx.strokeStyle = COL.roi; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); poly.forEach((q, i) => { const [X, Y] = toScreen(v, q[0], q[1]); if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); }); ctx.closePath(); ctx.stroke(); ctx.restore(); }
+  } else if (T.roi) {
     const R = T.roi, z0 = Math.min(R.z0, R.z1), z1 = Math.max(R.z0, R.z1), zc = V.origin[2] + Math.round(cur[2]) * V.spacing[2];
     if (v.kind === 'ax' && zc >= z0 && zc <= z1) {
       const C = sc([R.c[0], R.c[1], zc]), r = R.r * v.z; ctx.save(); ctx.strokeStyle = COL.roi; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); if (R.shape === 'box') ctx.rect(C[0] - r, C[1] - r, 2 * r, 2 * r); else ctx.arc(C[0], C[1], r, 0, 7); ctx.stroke(); ctx.restore();
@@ -350,7 +506,7 @@ function toothOverlay(v) {
       if (half > 0) { const lo = [R.c[0], R.c[1], z0], hi = [R.c[0], R.c[1], z1]; lo[across] -= half; hi[across] += half; const A = sc(lo), B = sc(hi); ctx.save(); ctx.strokeStyle = COL.roi; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.strokeRect(Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.abs(B[0] - A[0]), Math.abs(B[1] - A[1])); ctx.restore(); }
     }
   }
-  for (const e of T.erase) { const q = w2v(e.p), ax = axisOf(v.kind), dd = Math.abs(q[ax] - Math.round(cur[ax])) * V.spacing[ax]; if (dd >= e.r) continue; const P = sc(e.p), rr = Math.sqrt(e.r * e.r - dd * dd) * v.z; ctx.save(); ctx.strokeStyle = COL.not; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(P[0], P[1], rr, 0, 7); ctx.stroke(); ctx.restore(); }
+  for (const e of T.erase) { const dd = planeDist(v, e.p); if (dd >= e.r) continue; const P = sc(e.p), rr = Math.sqrt(e.r * e.r - dd * dd) * v.z; ctx.save(); ctx.strokeStyle = COL.not; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(P[0], P[1], rr, 0, 7); ctx.stroke(); ctx.restore(); }
   for (const p of T.seeds) if (onPlane(p, 1.5)) dot(ctx, sc(p), COL.tooth, 5);
   for (const p of T.not) if (onPlane(p, 1.5)) dot(ctx, sc(p), COL.not, 5);
 }
@@ -372,13 +528,42 @@ function applyLayout() {
 function clampCur() { const n = S.vol.dims; for (let a = 0; a < 3; a++) S.cur[a] = N.clamp(S.cur[a], 0, n[a] - 1); }
 function crossChanged() {
   if (!S.vol) return; clampCur();
-  for (const k of ['ax', 'co', 'sa']) { const v = views[k], a = axisOf(k); v.slider.max = String(S.vol.dims[a] - 1); v.slider.value = String(Math.round(S.cur[a])); }
+  for (const k of SL) { const v = views[k], o = obl(v); if (o) { v.slider.max = String(Math.max(1, Math.round(o.Wn / o.s)) - 1); v.slider.value = String(Math.round((o.t + o.Wn / 2) / o.s - 0.5)); } else { const a = axisOf(k); v.slider.max = String(S.vol.dims[a] - 1); v.slider.value = String(Math.round(S.cur[a])); } }
+  $('cbStraight').hidden = allStraight();
   const p = v2w(S.cur), q = S.cur.map(Math.round), val = S.vol.data[q[0] + S.vol.dims[0] * (q[1] + S.vol.dims[1] * q[2])] + (S.vol.shift || 0);
   $('cbRead').textContent = `x ${p[0].toFixed(1)}  y ${p[1].toFixed(1)}  z ${p[2].toFixed(1)} mm · value ${val}`;
   invalidate(); planes3D();
 }
 function setWindow(l, w, preset = null) {
   S.win = { l: Math.round(l), w: Math.max(1, Math.round(w)) }; S.preset = preset; buildLUT(); RB.level.set(S.win.l); RB.width.set(S.win.w); SEG.preset(preset || ''); mipUniforms(); invalidate(); viewer.invalidate();
+}
+/** move the cross-hair along a slice view's normal (mm): through a turned slice */
+function moveAlong(v, dt) { const n = S.fr[v.kind].n, P = v2w(S.cur); S.cur = w2v([P[0] + dt * n[0], P[1] + dt * n[1], P[2] + dt * n[2]]); crossChanged(); }
+
+// ───────────── turning the cross-hair ─────────────
+// Turning in view k turns the other two slices' planes (and their views' across and down) about k's normal by the same angle:
+// k's own picture stays as it is and its lines turn; the other two stay square to k and to each other, and as k's normal lies
+// in their planes they tilt without spinning on the screen. The cross-hair stays where it is in every view.
+function rotAbout(p, k, th) { const c = Math.cos(th), s = Math.sin(th), kd = dot3(k, p), kx = cross3(k, p); return [0, 1, 2].map((i) => p[i] * c + kx[i] * s + k[i] * kd * (1 - c)); }
+function tidyFrames() {
+  const nrm = (a) => { const L = Math.hypot(...a) || 1; return a.map((x) => x / L); };
+  for (const k of SL) {
+    const f = S.fr[k]; f.n = nrm(f.n); f.u = nrm(f.u.map((x, i) => x - dot3(f.u, f.n) * f.n[i])); const vv = f.v.map((x, i) => x - dot3(f.v, f.n) * f.n[i] - dot3(f.v, f.u) * f.u[i]); f.v = nrm(vv);
+    if (['u', 'v', 'n'].every((e) => f[e].every((x, i) => Math.abs(x - FR0[k][e][i]) < 1e-7))) S.fr[k] = JSON.parse(JSON.stringify(FR0[k]));
+  }
+}
+/** turn the cross-hair in slice view k by th radians (clockwise on the screen) */
+function turnIn(k, th) {
+  if (!S.vol || !th) return; const f = S.fr[k], axis = cross3(f.u, f.v), others = SL.filter((j) => j !== k), keep = others.map((j) => fromVox(views[j], ...S.cur));
+  for (const j of others) for (const e of ['u', 'v', 'n']) S.fr[j][e] = rotAbout(S.fr[j][e], axis, th);
+  tidyFrames(); S.frVer++;
+  others.forEach((j, i) => { const v = views[j], [a, b] = fromVox(v, ...S.cur); v.cx += a - keep[i][0]; v.cy += b - keep[i][1]; });
+  crossChanged();
+}
+function straighten() {
+  if (!S.vol || allStraight()) return; const keep = SL.map((j) => fromVox(views[j], ...S.cur));
+  S.fr = frames0(); S.frVer++; SL.forEach((j, i) => { const v = views[j], [a, b] = fromVox(v, ...S.cur); v.cx += a - keep[i][0]; v.cy += b - keep[i][1]; });
+  crossChanged(); shell.status('Cross-hair straightened');
 }
 const stepIx = (id) => shell.steps.findIndex((s) => s.id === id);
 const stepId = () => (shell.current >= 0 ? shell.steps[shell.current].id : 'load');
@@ -405,19 +590,29 @@ function hookView(v) {
   cv.addEventListener('pointerdown', (e) => {
     if (!S.vol) return; cv.focus({ preventScroll: true }); try { cv.setPointerCapture(e.pointerId); } catch (_) {}
     const p = pos(e); pts.set(e.pointerId, p);
-    if (pts.size === 2) { const [A, B] = [...pts.values()]; pinch = { d: Math.hypot(A[0] - B[0], A[1] - B[1]), c: [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], z: v.z, cx: v.cx, cy: v.cy }; drag = null; return; }
+    if (pts.size === 2) { if (drag && drag.mode === 'rot') endTurn(v); const [A, B] = [...pts.values()]; pinch = { d: Math.hypot(A[0] - B[0], A[1] - B[1]), c: [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], z: v.z, cx: v.cx, cy: v.cy }; drag = null; return; }
     if (pts.size > 2) return;
     const [a, b] = fromScreen(v, p[0], p[1]), mode = e.button === 1 || e.button === 2 ? 'pan' : S.tool;
+    if (mode === 'browse' && SLICE.has(v.kind) && handleAt(v, p[0], p[1], e.pointerType === 'mouse' ? 11 : 22)) {   // a handle: turn the cross-hair
+      const c = crossScreen(v); drag = { mode: 'rot', p0: p, moved: false, a, b, id: e.pointerId, c, phi: Math.atan2(p[1] - c[1], p[0] - c[0]), acc: 0, done: 0, a0: lineAngle(v.kind) };
+      S.rotating = v.kind; S.rotTag = { view: v.kind, p }; cv.style.cursor = 'grabbing'; invalidate(v.id); return;
+    }
     drag = { mode, p0: p, cx: v.cx, cy: v.cy, win: { ...S.win }, moved: false, a, b, id: e.pointerId };
     if (mode === 'browse') setCursorFrom(v, a, b);
     else if (mode === 'arch' && v.kind === 'ax') drag.arch = archDown(v, a, b);
     else if (mode === 'erase' && ['ax', 'co', 'sa'].includes(v.kind)) eraseAt(v, a, b, true);
   });
   cv.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId)) return; const p = pos(e); pts.set(e.pointerId, p);
+    if (!pts.has(e.pointerId)) { if (e.pointerType === 'mouse' && S.vol && S.tool === 'browse' && SLICE.has(v.kind)) { const p = pos(e); cv.style.cursor = handleAt(v, p[0], p[1], 11) ? 'grab' : 'crosshair'; } return; }
+    const p = pos(e); pts.set(e.pointerId, p);
     if (pinch && pts.size === 2) { const [A, B] = [...pts.values()], d = Math.hypot(A[0] - B[0], A[1] - B[1]), c = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], z = N.clamp(pinch.z * d / Math.max(1, pinch.d), 0.05, 400); const [a0, b0] = [pinch.cx + (pinch.c[0] - v.w / 2) / pinch.z, pinch.cy + (pinch.c[1] - v.h / 2) / pinch.z]; v.z = z; v.cx = a0 - (c[0] - v.w / 2) / z; v.cy = b0 - (c[1] - v.h / 2) / z; v.autoFit = false; invalidate(v.id); return; }
     if (!drag || drag.id !== e.pointerId) return; const dx = p[0] - drag.p0[0], dy = p[1] - drag.p0[1]; if (Math.hypot(dx, dy) > (e.pointerType === 'mouse' ? 4 : 9)) drag.moved = true;
     const [a, b] = fromScreen(v, p[0], p[1]);
+    if (drag.mode === 'rot') {                                       // the angle swept round the cross-hair, settling on straight within half a degree
+      if (!drag.moved) return; const phi = Math.atan2(p[1] - drag.c[1], p[0] - drag.c[0]); let d = phi - drag.phi; d -= 2 * Math.PI * Math.round(d / (2 * Math.PI)); drag.phi = phi; drag.acc += d;
+      const want = drag.a0 + drag.acc * 180 / Math.PI, red = ((((want % 90) + 135) % 90) + 90) % 90 - 45, target = Math.abs(red) < 0.5 ? drag.acc - red * Math.PI / 180 : drag.acc;
+      S.rotTag = { view: v.kind, p }; turnIn(v.kind, target - drag.done); drag.done = target; return;
+    }
     if (drag.mode === 'pan') { v.cx = drag.cx - dx / v.z; v.cy = drag.cy - dy / v.z; v.autoFit = false; invalidate(v.id); }
     else if (drag.mode === 'window') { const span = Math.max(200, S.vol.max - S.vol.min); setWindow(drag.win.l - dy * span / 600, drag.win.w + dx * span / 600, null); }
     else if (drag.mode === 'browse') setCursorFrom(v, a, b);
@@ -427,6 +622,7 @@ function hookView(v) {
   const up = (e) => {
     if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); if (pts.size < 2) pinch = null;
     if (!drag || drag.id !== e.pointerId) return; const d0 = drag; drag = null; const p = pos(e), [a, b] = fromScreen(v, p[0], p[1]);
+    if (d0.mode === 'rot') { endTurn(v); if (!d0.moved && e.type !== 'pointercancel') setCursorFrom(v, d0.a, d0.b); return; }
     if (e.type === 'pointercancel') return;
     if (d0.mode === 'dist' || d0.mode === 'angle') { if (!d0.moved) measureTap(v, a, b); else if (d0.mode === 'dist') { S.draft = null; measureTap(v, d0.a, d0.b); measureTap(v, a, b); } }
     else if (d0.mode === 'arch') { if (v.kind === 'ax') archUp(d0.arch, a, b, d0.moved); else if (!d0.moved) setCursorFrom(v, a, b); }
@@ -439,24 +635,28 @@ function hookView(v) {
     if (!S.vol) return; e.preventDefault();
     if (e.ctrlKey || e.metaKey) { const p = pos(e), [a, b] = fromScreen(v, p[0], p[1]), f = Math.exp(-e.deltaY * 0.0022); v.z = N.clamp(v.z * f, 0.05, 400); v.cx = a - (p[0] - v.w / 2) / v.z; v.cy = b - (p[1] - v.h / 2) / v.z; v.autoFit = false; invalidate(v.id); return; }
     const st = Math.sign(e.deltaY) * (Math.abs(e.deltaY) > 150 ? 3 : 1);
-    if (['ax', 'co', 'sa'].includes(v.kind)) { S.cur[axisOf(v.kind)] -= st; crossChanged(); }
+    if (SLICE.has(v.kind)) { const o = obl(v); if (o) moveAlong(v, -st * o.s); else { S.cur[axisOf(v.kind)] -= st; crossChanged(); } }
     else if (S.arch.curve) { S.arch.s = N.clamp(S.arch.s + st * (v.kind === 'xs' ? S.arch.step : 1), 0, S.arch.curve.length); makeXs(); }
   }, { passive: false });
   cv.addEventListener('keydown', (e) => {
-    if (!S.vol) return; const k = e.key, st = k === 'PageUp' || k === 'ArrowUp' ? 1 : k === 'PageDown' || k === 'ArrowDown' ? -1 : 0; if (!st) return; e.preventDefault();
-    if (['ax', 'co', 'sa'].includes(v.kind)) { S.cur[axisOf(v.kind)] += st * (v.kind === 'ax' ? 1 : -1); crossChanged(); }
+    if (!S.vol) return; const k = e.key;
+    if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && SLICE.has(v.kind)) { e.preventDefault(); turnIn(v.kind, (e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 0.1 : 1) * Math.PI / 180); return; }
+    const st = k === 'PageUp' || k === 'ArrowUp' ? 1 : k === 'PageDown' || k === 'ArrowDown' ? -1 : 0; if (!st) return; e.preventDefault();
+    if (SLICE.has(v.kind)) { const o = obl(v), sg = st * (v.kind === 'ax' ? 1 : -1); if (o) moveAlong(v, sg * o.s); else { S.cur[axisOf(v.kind)] += sg; crossChanged(); } }
   });
 }
+function endTurn(v) { S.rotating = null; S.rotTag = null; v.cv.style.cursor = 'crosshair'; invalidate(); }
 function setCursorFrom(v, a, b) {
   const q = toVox(v, a, b); if (!q) return;
-  if (v.kind === 'pan' || v.kind === 'xs') { S.cur = q; if (v.kind === 'pan') { S.arch.s = N.clamp(a, 0, S.arch.curve.length); makeXs(); } }
+  if (obl(v)) S.cur = q;                                           // a turned slice: the tapped point (on its plane)
+  else if (v.kind === 'pan' || v.kind === 'xs') { S.cur = q; if (v.kind === 'pan') { S.arch.s = N.clamp(a, 0, S.arch.curve.length); makeXs(); } }
   else { const ax = axisOf(v.kind); for (let i = 0; i < 3; i++) if (i !== ax) S.cur[i] = q[i]; }
   crossChanged();
 }
 
 // ───────────── the tool bar ─────────────
-const TOOLS = { browse: ['Point', 'Tap to move the cross-hair'], pan: ['Move', 'Drag to pan the view'], window: ['Window', 'Drag across for width, up and down for level'], dist: ['Distance', 'Tap two points'], angle: ['Angle', 'Tap three points: the angle is at the middle one'],
-  arch: ['Arch', 'Tap along the arch on the axial slice; drag a point to move it'], tooth: ['Pick tooth', 'Tap the donor tooth'], add: ['Tooth', 'Tap a part that should be tooth'], not: ['Not tooth', 'Tap where the tooth leaked into bone or a neighbour'], erase: ['Eraser', 'Drag over a bridge to cut it'] };
+const TOOLS = { browse: ['Point', 'Tap to move the cross-hair; drag a round handle on its lines to turn them'], pan: ['Move', 'Drag to pan the view'], window: ['Window', 'Drag across for width, up and down for level'], dist: ['Distance', 'Tap two points'], angle: ['Angle', 'Tap three points: the angle is at the middle one'],
+  arch: ['Arch', 'Tap along the arch on the axial slice; drag a point to move it'], tooth: ['Pick tooth', 'Tap the tooth'], add: ['Tooth', 'Tap a part that should be tooth'], not: ['Not tooth', 'Tap where the tooth leaked into bone or a neighbour'], erase: ['Eraser', 'Drag over a bridge to cut it'] };
 function setTools() {
   const id = stepId(), extra = id === 'pano' ? ['arch'] : id === 'tooth' ? (S.tooth.seg && !S.tooth.seg.error ? ['add', 'not', 'erase', 'tooth'] : ['tooth']) : [];
   const list = ['browse', 'pan', 'window', 'dist', 'angle', ...extra]; if (!list.includes(S.tool)) S.tool = 'browse';
@@ -465,6 +665,7 @@ function setTools() {
 }
 $('cbTool').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.tool = b.dataset.v; S.draft = null; setTools(); shell.hint(TOOLS[S.tool][1]); invalidate(); });
 $('cbClear').addEventListener('click', () => { S.measures = []; S.draft = null; invalidate(); syncUI(); });
+$('cbStraight').addEventListener('click', straighten);
 
 // ───────────── opening a scan ─────────────
 $('lFolder').addEventListener('click', () => $('lFolderIn').click());
@@ -519,7 +720,7 @@ $('lSeries').addEventListener('click', (e) => { const b = e.target.closest('.ser
 const fmtDate = (d) => { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(d || ''); return m ? `${+m[3]} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1]} ${m[1]}` : ''; };
 function setVolume(v) {
   S.vol = v; S.loads++; S.H = D.histogram(v); S.P = D.windowPresets(v, S.H);
-  S.cur = v.dims.map((n) => (n - 1) / 2); S.measures = []; S.draft = null;
+  S.cur = v.dims.map((n) => (n - 1) / 2); S.measures = []; S.draft = null; S.fr = frames0(); S.frVer++; S.rotating = null; S.rotTag = null;
   S.arch = { ...S.arch, points: [], curve: null, ver: S.arch.ver + 1, s: 0 }; S.pano = null; S.xs = [];
   S.surf.mesh = null; S.surf.info = null; S.tooth = { ...S.tooth, seeds: [], not: [], erase: [], roi: null, T: null, seg: null, hist: [], fitted: false }; S.rep.mesh = null; S.rep.info = null;
   for (const id of Object.keys(bufs)) delete bufs[id];
@@ -546,7 +747,7 @@ function syncInfo() {
 
 // ───────────── 3D ─────────────
 let box3 = null, tex3 = null, ds3 = null;
-const r3objs = { surf: null, tooth: null, rep: null, planes: [], roi: null };
+const r3objs = { surf: null, tooth: null, rep: null, canal: null, planes: [], roi: null };
 const VSHADER = `out vec3 vO; out vec3 vD; uniform vec3 uCam; void main(){ vO = uCam; vD = position - uCam; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const FSHADER = `precision highp float; precision highp sampler3D;
 in vec3 vO; in vec3 vD; out vec4 col;
@@ -592,17 +793,27 @@ function planes3D() {
   for (const l of r3objs.planes) l.dispose(); r3objs.planes = []; if (!S.vol) return;
   const V = S.vol, [nx, ny, nz] = V.dims, w = (i, j, k) => new THREE.Vector3(...D.worldOf(V, i, j, k)), c = S.cur.map(Math.round);
   const sets = [[COL.ax, [w(0, 0, c[2]), w(nx - 1, 0, c[2]), w(nx - 1, ny - 1, c[2]), w(0, ny - 1, c[2])]], [COL.co, [w(0, c[1], 0), w(nx - 1, c[1], 0), w(nx - 1, c[1], nz - 1), w(0, c[1], nz - 1)]], [COL.sa, [w(c[0], 0, 0), w(c[0], ny - 1, 0), w(c[0], ny - 1, nz - 1), w(c[0], 0, nz - 1)]]];
-  if (stepId() !== 'tooth' && stepId() !== 'replica') for (const [col, pts] of sets) r3objs.planes.push(viewer.line(pts, { color: new THREE.Color(col).getHex(), width: 1.5, closed: true }));
+  SL.forEach((k, i) => { const o = obl(views[k]); if (o) { const pts = planeInBox(obPt(o, o.Wu / 2, o.Wv / 2), o.f.u, o.f.v, V.origin, D.worldOf(V, nx - 1, ny - 1, nz - 1)); sets[i][1] = pts.length >= 3 ? pts.map((p) => new THREE.Vector3(...p)) : null; } });
+  if (stepId() !== 'tooth' && stepId() !== 'replica' && stepId() !== 'canal') for (const [col, pts] of sets) if (pts) r3objs.planes.push(viewer.line(pts, { color: new THREE.Color(col).getHex(), width: 1.5, closed: true }));
   viewer.invalidate();
 }
 function meshObj(mesh, colour, opacity = 1) { const g = N.toGeometry(mesh); return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide, transparent: opacity < 1, opacity })); }
-function clear3DMeshes() { for (const k of ['surf', 'tooth', 'rep', 'roi']) if (r3objs[k]) { viewer.remove(r3objs[k]); r3objs[k] = null; } }
+function clear3DMeshes() { for (const k of ['surf', 'tooth', 'rep', 'roi', 'canal']) if (r3objs[k]) { viewer.remove(r3objs[k]); r3objs[k] = null; } }
+// The tooth as glass, for the Root canals step: nearly clear where it faces the eye and brighter towards its outline, drawn
+// over the canals without hiding them — so the canals, in a bright solid colour, stand out inside the tooth's shape.
+let glassMat = null;
+function glass() {
+  return glassMat || (glassMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uCol: { value: new THREE.Color(0xbfe3ff) } },
+    vertexShader: 'varying vec3 vN; varying vec3 vE; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vE = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'uniform vec3 uCol; varying vec3 vN; varying vec3 vE; void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vE))); gl_FragColor = vec4(uCol, 0.05 + 0.6 * pow(f, 2.4)); }' }));
+}
 function show3D() {
   const id = stepId(); if (!box3) return;
-  const showVol = !((id === 'd3' && S.surf.mesh && S.r3.showSurf) || id === 'tooth' || id === 'replica');
+  const showVol = !((id === 'd3' && S.surf.mesh && S.r3.showSurf) || id === 'tooth' || id === 'replica' || id === 'canal');
   box3.visible = showVol;
   if (r3objs.surf) r3objs.surf.visible = id === 'd3' && S.r3.showSurf;
-  if (r3objs.tooth) r3objs.tooth.visible = id === 'tooth' || (id === 'replica' && !r3objs.rep);
+  if (r3objs.tooth) { const o = r3objs.tooth; o.visible = id === 'tooth' || (id === 'replica' && !r3objs.rep) || (id === 'canal' && S.canal.show === 'glass'); o.userData.solid = o.userData.solid || o.material; o.material = id === 'canal' ? glass() : o.userData.solid; o.renderOrder = id === 'canal' ? 2 : 0; }
+  if (r3objs.canal) r3objs.canal.visible = id === 'canal';
   if (r3objs.rep) r3objs.rep.visible = id === 'replica';
   if (r3objs.roi) r3objs.roi.visible = id === 'tooth';
   planes3D(); viewer.invalidate();
@@ -650,7 +861,7 @@ function makeXs() {
 const archPt = (v, a, b) => { const q = toVox(v, a, b); return [S.vol.origin[0] + q[0] * S.vol.spacing[0], S.vol.origin[1] + q[1] * S.vol.spacing[1]]; };
 function archDown(v, a, b) {
   const P = S.arch.points, [X, Y] = toScreen(v, a, b); let best = -1, bd = 14;
-  P.forEach((p, i) => { const q = w2v([p[0], p[1], 0]), [pa, pb] = fromVox(v, q[0], q[1], 0), [px, py] = toScreen(v, pa, pb), d = Math.hypot(px - X, py - Y); if (d < bd) { bd = d; best = i; } });
+  P.forEach((p, i) => { const q = xyOnView(v, p[0], p[1]); if (!q) return; const [px, py] = toScreen(v, q[0], q[1]), d = Math.hypot(px - X, py - Y); if (d < bd) { bd = d; best = i; } });
   return best >= 0 ? best : null;
 }
 function archMove(i, a, b) { S.arch.points[i] = archPt(views.ax, a, b); archChanged(); }
@@ -705,10 +916,13 @@ async function segment(o = {}) {
     const run = () => D.segmentTooth(S.vol, { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T });
     let sg = run();
     if (!sg.error && !t.fitted && o.fit !== false) {                 // first time: fit the region round what was found (2 mm clear all round), then again
+      // a tap off to one side of a broad tooth leaves part of it outside the region, which then cuts it: if centring the region on
+      // the thick middle of the crown finds much more tooth, that is the tooth
+      if (sg.top && Math.hypot(sg.top[0] - t.roi.c[0], sg.top[1] - t.roi.c[1]) > 1) { const roi0 = t.roi; t.roi = { ...roi0, c: [sg.top[0], sg.top[1]] }; const s2 = run(); if (!s2.error && s2.volume > 1.3 * sg.volume) sg = s2; else t.roi = roi0; }
       t.fitted = true; const c = [(sg.lo[0] + sg.hi[0]) / 2, (sg.lo[1] + sg.hi[1]) / 2], r = Math.max(sg.hi[0] - c[0], c[0] - sg.lo[0], sg.hi[1] - c[1], c[1] - sg.lo[1]) + 2;
       t.roi = { ...t.roi, c, r: N.clamp(Math.round(r * 4) / 4, 3, 12), z0: sg.lo[2] - 2, z1: sg.hi[2] + 2 }; syncRoiSliders(); sg = run();
     }
-    t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null;
+    t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null; dropCanal(o.keepCanalT);
     if (!sg.error) { const f = D.replicaField(S.vol, sg, { smooth: t.smooth }); const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 2 }); D.taubin(m, 2); t.preview = m; }
     if (r3objs.tooth) viewer.remove(r3objs.tooth); r3objs.tooth = null; if (r3objs.rep) { viewer.remove(r3objs.rep); r3objs.rep = null; }
     if (t.preview) { r3objs.tooth = meshObj(t.preview, 0x5eead4); viewer.add(r3objs.tooth); if (o.frame !== false && !t.framed) { t.framed = true; fit3D(r3objs.tooth); } }
@@ -726,9 +940,37 @@ function roi3D() {
 function syncRoiSliders() { const R = T().roi, s = T().seeds[0]; if (!R || !s) return; RB.dR.set(R.r); RB.dUp.set(N.clamp(R.z1 - s[2], 2, 30)); RB.dDown.set(N.clamp(s[2] - R.z0, 2, 30)); SEGV.setShape(R.shape); }
 function roiFromSliders() { const t = T(), s = t.seeds[0]; if (!t.roi || !s) return; pushHist(); t.roi = { ...t.roi, shape: SEGV.shape, r: RB.dR.get(), z0: s[2] - RB.dDown.get(), z1: s[2] + RB.dUp.get() }; t.fitted = true; segment(); }
 
+// ───────────── the root canals ─────────────
+function dropCanal(keepT) { const C = S.canal; C.seg = null; C.mesh = null; if (!keepT) C.T = null; C.ver++; if (r3objs.canal) { viewer.remove(r3objs.canal); r3objs.canal = null; } }
+/** find the pulp chamber and canals inside the picked tooth (auto: at the threshold worked out from the tooth itself) */
+async function findCanal(o = {}) {
+  const t = T(), C = S.canal; if (!S.vol || !t.seg || t.seg.error) { dropCanal(); syncUI(); return; }
+  const t0 = performance.now();
+  await shell.busy('Finding the canals…', async () => {
+    await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T }); let m = null;
+    if (!cs.error) { const f = D.canalField(cs); m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.03 }); if (m.indices.length) { D.taubin(m, 2); D.canalToPatient(m, cs); } else m = null; }
+    C.seg = cs; C.T = cs.T; C.mesh = m; C.ver++;
+  });
+  const cs = C.seg; cs.seconds = (performance.now() - t0) / 1000;
+  if (cs.pulp != null) { const sp = cs.dentine - cs.pulp, inp = $('cT'); inp.min = Math.min(Math.round(cs.pulp + 0.1 * sp), cs.T); inp.max = Math.max(Math.round(cs.pulp + 0.95 * sp), cs.T); RB.cT.set(cs.T); }
+  if (r3objs.canal) { viewer.remove(r3objs.canal); r3objs.canal = null; }
+  if (C.mesh) { const g = N.toGeometry(C.mesh); r3objs.canal = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xff4b2b, emissive: 0xd62a10, emissiveIntensity: 0.55, roughness: 0.45, metalness: 0, side: THREE.DoubleSide })); r3objs.canal.renderOrder = 1; r3objs.canal.userData.noFit = true; viewer.add(r3objs.canal); }
+  show3D(); invalidate(); syncUI();
+  shell.status(cs.error ? cs.error : `Canals found: ${cs.volume.toFixed(1)} mm³, ${mm(cs.length)} long`, !!cs.error);
+}
+/** turn the slices to the picked tooth: the axial slice square to its long axis, the other two along it, zoomed on the tooth */
+function alignToTooth() {
+  const sg = T().seg; if (!S.vol || !sg || sg.error) return shell.status('Pick the tooth first (Pick a tooth step)', true);
+  const w = sg.axis.slice(), r0 = Math.abs(w[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], ud = dot3(r0, w), u0 = r0.map((x, i) => x - ud * w[i]), ul = Math.hypot(...u0), u = u0.map((x) => x / ul), v = cross3(w, u), neg = (a) => a.map((x) => -x);
+  S.fr = { ax: { u, v, n: w }, co: { u: u.slice(), v: neg(w), n: v.slice() }, sa: { u: v.slice(), v: neg(w), n: u.slice() } }; tidyFrames(); S.frVer++;
+  const cs = S.canal.seg, c = cs && !cs.error ? cs.lo.map((x, i) => (x + cs.hi[i]) / 2) : sg.centre; S.cur = w2v(c); clampCur();
+  for (const k of SL) { const vw = views[k]; if (vw.w < 20) continue; const [a, b] = fromVox(vw, ...S.cur); vw.z = Math.max(vw.z, Math.min(vw.w, vw.h) / (sg.length + 8)); vw.cx = a; vw.cy = b; vw.autoFit = false; vw.fitted = true; }
+  crossChanged(); shell.status('Slices turned along the tooth: scroll the axial slice to walk down the root');
+}
+
 // the replica
 async function makeReplica() {
-  const t = T(); if (!t.seg || t.seg.error) return shell.status('Pick the donor tooth first (Donor tooth step)', true);
+  const t = T(); if (!t.seg || t.seg.error) return shell.status('Pick the tooth first (Pick a tooth step)', true);
   const R = S.rep, t0 = performance.now();
   const mesh = await shell.busy('Making the replica…', async () => {
     await N.sleep(20); const f = D.replicaField(S.vol, t.seg, { smooth: t.smooth, handle: R.handle ? { r: R.hd / 2 - R.pdl, length: R.hl - R.pdl } : null });
@@ -758,6 +1000,7 @@ const RB = {
   dBrush: N.rangeBind('dBrush', (v) => { T().brush = v; }, { fmt: (v) => mm(v) }),
   rPdl: N.rangeBind('rPdl', (v, done) => { S.rep.pdl = v; if (done && S.rep.mesh) makeReplica(); }, { fmt: (v) => mm(v, 2) }),
   rHd: N.rangeBind('rHd', (v, done) => { S.rep.hd = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v) }),
+  cT: N.rangeBind('cT', (v, done) => { if (done && S.canal.seg && Math.round(v) !== S.canal.T) { S.canal.T = Math.round(v); findCanal().catch(() => {}); } }, { fmt: (v) => String(Math.round(v)) }),
   rHl: N.rangeBind('rHl', (v, done) => { S.rep.hl = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v, 0) }),
 };
 const SEG = {
@@ -767,9 +1010,11 @@ const SEG = {
   pmode: N.segBind($('pMode'), (v) => { S.arch.mode = v; schedulePano(); }, 'mean'),
   pcount: N.segBind($('pCount'), (v) => { S.arch.count = +v; makeXs(); }, '3'),
 };
+SEG.cshow = N.segBind($('cShow'), (v) => { S.canal.show = v; show3D(); }, 'glass');
 const SEGV = { shape: 'cyl', setShape: null };
 SEGV.setShape = N.segBind($('dShape'), (v) => { SEGV.shape = v; if (T().roi) roiFromSliders(); }, 'cyl');
 $('vFit').addEventListener('click', () => { for (const v of Object.values(views)) { v.fitted = false; v.autoFit = true; } invalidate(); });
+$('vStraight').addEventListener('click', straighten);
 $('vCentre').addEventListener('click', () => { if (S.vol) { S.cur = S.vol.dims.map((n) => (n - 1) / 2); crossChanged(); } });
 $('tBone').addEventListener('click', () => { if (!S.vol) return; S.r3.iso = isoPreset('bone'); RB.iso.set(S.r3.iso); S.r3.mode = 'iso'; SEG.mode('iso'); S.r3.showSurf = false; mipUniforms(); show3D(); });
 $('tTeeth').addEventListener('click', () => { if (!S.vol) return; S.r3.iso = isoPreset('teeth'); RB.iso.set(S.r3.iso); S.r3.mode = 'iso'; SEG.mode('iso'); S.r3.showSurf = false; mipUniforms(); show3D(); });
@@ -782,7 +1027,10 @@ $('pUndo').addEventListener('click', () => { S.arch.points.pop(); archChanged();
 $('pClear').addEventListener('click', () => { S.arch.points = []; archChanged(); });
 $('dFit').addEventListener('click', () => { const t = T(); if (!t.seg || t.seg.error) return; pushHist(); t.fitted = false; segment(); });
 $('dUndo').addEventListener('click', () => { const t = T(); const h = t.hist.pop(); if (!h) return; Object.assign(t, JSON.parse(h)); t.fitted = true; syncRoiSliders(); RB.dT.set(t.T); segment(); });
-$('dClear').addEventListener('click', () => { const t = T(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
+$('dClear').addEventListener('click', () => { const t = T(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; dropCanal(); if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
+$('cFind').addEventListener('click', () => findCanal({ auto: true }).catch(() => {}));
+$('cAlign').addEventListener('click', alignToTooth); $('dAlign').addEventListener('click', alignToTooth);
+$('cStl').addEventListener('click', () => { if (!S.canal.mesh) return shell.status('Find the canals first', true); download(`root-canals${S.rep.fdi ? '-' + S.rep.fdi : ''}.stl`, S.canal.mesh, `Notile CBCT root canals${S.rep.fdi ? ' ' + S.rep.fdi : ''}, LPS mm`); });
 $('rHandle').addEventListener('change', (e) => { S.rep.handle = e.target.checked; syncUI(); if (S.rep.mesh) makeReplica(); });
 $('rFdi').addEventListener('change', (e) => { S.rep.fdi = /^[1-4][1-8]$/.test(e.target.value) ? e.target.value : ''; });
 $('rMake').addEventListener('click', () => makeReplica().catch(() => {}));
@@ -791,8 +1039,8 @@ $('rStl').addEventListener('click', () => { if (!S.rep.mesh) return shell.status
 // ───────────── what is shown on each step ─────────────
 function syncUI() {
   const has = !!S.vol, id = stepId();
-  for (const b of ['vPreset', 'tMode', 'tDetail', 'pMode', 'pCount', 'dShape']) for (const x of $(b).querySelectorAll('button')) x.disabled = !has;
-  for (const b of ['tMake', 'tBone', 'tTeeth', 'pPropose', 'pUndo', 'pClear', 'dFit', 'dUndo', 'dClear', 'rMake', 'vFit', 'vCentre']) $(b).disabled = !has;
+  for (const b of ['vPreset', 'tMode', 'tDetail', 'pMode', 'pCount', 'dShape', 'cShow']) for (const x of $(b).querySelectorAll('button')) x.disabled = !has;
+  for (const b of ['tMake', 'tBone', 'tTeeth', 'pPropose', 'pUndo', 'pClear', 'dFit', 'dUndo', 'dClear', 'rMake', 'vFit', 'vCentre', 'vStraight']) $(b).disabled = !has;
   $('tStl').disabled = !S.surf.mesh; $('rStl').disabled = !S.rep.mesh; $('tShowRow').hidden = !S.surf.mesh; $('tShow').checked = !!S.r3.showSurf;
   // the view step's read-out
   if (has) { const V = S.vol; $('vInfo').innerHTML = `<div class="sum"><h5>Window</h5><div><span>Level / width</span><b>${S.win.l} / ${S.win.w}</b></div><div><span>Measurements</span><b>${S.measures.length}</b></div></div>`; }
@@ -802,7 +1050,7 @@ function syncUI() {
   shell.markDone('d3', !!S.surf.mesh);
   // the tooth
   const t = T(), sg = t.seg;
-  $('dLead').textContent = !t.seeds.length ? 'Tap the donor tooth in a slice, near the middle of its crown.' : sg && sg.error ? sg.error : 'Check the tooth (teal) in all three slices. Fix any leak with the tools in the bar above the slices.';
+  $('dLead').textContent = !t.seeds.length ? 'Tap the tooth in a slice, near the middle of its crown: a donor tooth for a replica, or a tooth whose root canals you want to see.' : sg && sg.error ? sg.error : 'Check the tooth (teal) in all three slices. Fix any leak with the tools in the bar above the slices.';
   let out = '';
   if (sg && !sg.error) {
     out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 ? ' warn' : ''}">${sg.touch > 20 ? 'reaches the edge' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div><div><span>Threshold</span><b>${t.T}</b></div><div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
@@ -813,6 +1061,18 @@ function syncUI() {
   const ri = S.rep.info; $('rHdRow').hidden = $('rHlRow').hidden = !S.rep.handle;
   $('rOut').innerHTML = ri ? `<div class="sum"><h5>Replica<span class="okb${ri.closed && ri.parts === 1 ? '' : ' bad'}">${ri.closed ? (ri.parts === 1 ? 'closed, one piece' : ri.parts + ' pieces') : 'not closed'}</span></h5><div><span>Volume</span><b>${ri.volume.toFixed(0)} mm³</b></div><div><span>Tooth length</span><b>${mm(ri.toothLength)}</b></div><div><span>Enlarged by</span><b>${mm(ri.pdl, 2)}</b></div><div><span>Handle</span><b>${ri.handle ? 'yes' : 'no'}</b></div><div><span>Triangles</span><b>${ri.tris.toLocaleString('en-GB')}</b></div></div>` : '';
   shell.markDone('replica', !!S.rep.mesh); shell.markDone('view', has);
+  // the root canals
+  const cs = S.canal.seg, toothOk = !!(sg && !sg.error), vx = has ? Math.min(...S.vol.spacing) : 0;
+  $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null;
+  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. Check the red against the grey of the slices.';
+  let co = '';
+  if (cs && !cs.error) {
+    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div>${cs.by === 'tooth' ? `<div><span>Stops short of the root end by</span><b>${mm(Math.max(0, cs.apexGap))}</b></div>` : ''}<div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
+    co += `<p class="note${vx > 0.21 ? ' warn' : ''}">Canals narrower than about ${mm(vx, 2)} (one voxel) may not show on this scan.</p>`;
+    if (cs.by === 'walls') co += '<p class="note warn">The tooth as picked does not ring its own pulp (only part of it was taken, or a root was lost in bone as bright as dentine), so the canals were followed from this tooth’s pulp chamber inside the scan’s own bright walls. Check in the slices where they end; picking the tooth more fully (“Tooth” taps on the Pick a tooth step) makes this surer.</p>';
+    if (cs.pieces > 1) co += '<p class="note">In more than one piece: a canal too thin to follow all the way, or specks from a high threshold.</p>';
+  }
+  $('cOut').innerHTML = co; shell.markDone('canal', !!S.canal.mesh);
 }
 shell.onStepChange(() => {
   const id = stepId(); S.draft = null;
@@ -821,6 +1081,7 @@ shell.onStepChange(() => {
   setTools(); applyLayout(); show3D(); syncUI();
   shell.hint(S.vol ? TOOLS[S.tool][1] : '');
   if (id === 'pano' && S.vol && !S.pano && S.arch.curve) makePano();
+  if (id === 'canal' && S.vol && T().seg && !T().seg.error) { if (!S.canal.seg) findCanal().catch(() => {}); if (r3objs.tooth) fit3D(r3objs.tooth); }
 });
 
 // ───────────── inside Scan Card: the case ─────────────
@@ -833,8 +1094,8 @@ function extendCase(c) {
   c.remove('cbct-replica');
   const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
   const t = T();
-  c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
-    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+  c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
   if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
 }
 function readCase(c) {
@@ -847,9 +1108,10 @@ function applyPending() {
   const d = S.pending; if (!d || !S.vol) return; S.pending = null;
   if (d.volume !== fingerprint()) { shell.status('The saved CBCT work belongs to a different scan, so it was not applied', true); return; }
   if (d.window) setWindow(d.window.l, d.window.w, null);
+  if (d.frames && SL.every((k) => d.frames[k] && ['u', 'v', 'n'].every((e) => Array.isArray(d.frames[k][e]) && d.frames[k][e].length === 3 && d.frames[k][e].every(Number.isFinite)))) { S.fr = { ax: d.frames.ax, co: d.frames.co, sa: d.frames.sa }; tidyFrames(); S.frVer++; crossChanged(); }
   if (Array.isArray(d.arch) && d.arch.length >= 2) { S.arch.points = d.arch; S.arch.slab = d.slab ?? S.arch.slab; RB.slab.set(S.arch.slab); archChanged(); }
   if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
-  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); segment({ fit: false }); }
+  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; segment({ fit: false, keepCanalT: true }); }
   if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
   invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
 }
@@ -866,7 +1128,7 @@ if (N.EMBED) setTimeout(() => {
 }, 0);
 
 setTools(); syncUI(); shell.goto(0);
-window.APP = { N, D, THREE, shell, viewer, S, views, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
+window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
 </script>
 </body>
 </html>

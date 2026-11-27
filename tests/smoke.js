@@ -375,7 +375,17 @@ run({name:'Landing page',fn:async()=>{
     expect(await ob.evaluate(()=>APP.SOL.ready().then(()=>true)),'Obturator: the solid engine did not start');
     await pg.click('#tabs [data-tab=cbct]');await settle();const cb=tool('cbct');expect(!!cb,'CBCT did not open');await cb.waitForFunction(()=>window.APP&&APP.loadDemo,null,{timeout:60000});
     await cb.evaluate(()=>APP.loadDemo());await cb.waitForFunction(()=>APP.S.vol&&APP.S.vol.dims,null,{timeout:120000});
-    const d=await cb.evaluate(()=>APP.S.vol.dims);expect(d.every(n=>n>50),'CBCT demo volume '+JSON.stringify(d));await noErrors(pg)});
+    const d=await cb.evaluate(()=>APP.S.vol.dims);expect(d.every(n=>n>50),'CBCT demo volume '+JSON.stringify(d));
+    // the cross-hair turned 20 degrees in the axial slice: the other two slices become oblique; Straighten puts them back
+    const tn=await cb.evaluate(()=>{APP.shell.goto('view');APP.turnIn('ax',20*Math.PI/180);const o=APP.obl(APP.views.co);return{ang:APP.lineAngle('ax'),ob:!!o,n:o&&o.f.n,btn:!document.querySelector('#cbStraight').hidden}});
+    expect(Math.abs(tn.ang-20)<1e-6&&tn.ob&&Math.abs(tn.n[0]+Math.sin(20*Math.PI/180))<1e-9&&tn.btn,'CBCT cross-hair turn: '+JSON.stringify(tn));
+    await cb.click('#cbStraight');expect(await cb.evaluate(()=>APP.lineAngle('ax')===0&&!APP.obl(APP.views.co)),'CBCT Straighten did not put the slices back');
+    // a tooth of the demo picked, and its root canals found
+    await cb.evaluate(()=>{const t=APP.D.phantomTeeth().find(x=>String(x.name)==='45'),p=[0,1,2].map(q=>t.base[q]+t.w[q]*t.crown*0.3),T=APP.S.tooth;APP.shell.goto('tooth');T.seeds=[p];T.not=[];T.erase=[];T.T=1000;T.fitted=false;T.roi={shape:'cyl',c:[p[0],p[1]],r:7,z0:p[2]-20,z1:p[2]+20};return APP.segment()});
+    await cb.waitForFunction(()=>APP.S.tooth.seg&&!APP.S.tooth.seg.error,null,{timeout:120000});
+    await cb.evaluate(()=>APP.shell.goto('canal'));await cb.waitForFunction(()=>APP.S.canal.seg&&APP.S.canal.mesh,null,{timeout:120000});
+    const cn=await cb.evaluate(()=>{const c=APP.S.canal.seg;return{err:c.error||null,vol:c.volume,canals:c.canals,by:c.by,glass:APP.r3objs.tooth.material.type,shown:APP.r3objs.canal.visible}});
+    expect(!cn.err&&cn.vol>15&&cn.vol<26&&cn.canals===1&&cn.by==='tooth'&&cn.glass==='ShaderMaterial'&&cn.shown,'CBCT root canals of the demo premolar: '+JSON.stringify(cn));await noErrors(pg)});
   await test('Scan Card’s tools still open on their own, and their logo leads back to Scan Card',async()=>{const pg=await page('/scan-card/model/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect(await pg.evaluate(()=>!APP.N.EMBED&&!APP.shell.stepEl('load').hidden&&document.querySelectorAll('#topBtns button').length===2),'Model Card on its own should have its own loading steps');

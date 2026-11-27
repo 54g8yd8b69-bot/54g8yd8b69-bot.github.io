@@ -26,7 +26,7 @@ function compare(mesh, t) {
     const [x, y] = await screenOf(page, 'ax', p); await page.mouse.click(x, y); await a.idle(); await page.waitForFunction(() => APP.S.tooth.seg && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 120000 }); await page.waitForTimeout(400);
     return page.evaluate(() => { const s = APP.S.tooth.seg; return s.error ? { error: s.error } : { volume: s.volume, touch: s.touch, roi: APP.S.tooth.roi, T: APP.S.tooth.T, crown: s.crown, axis: s.axis, length: s.length }; });
   };
-  ok((await page.evaluate(() => document.querySelector('#cbTool .on').dataset.v)) === 'tooth', 'the Donor tooth step starts with “Pick tooth” selected');
+  ok((await page.evaluate(() => document.querySelector('#cbTool .on').dataset.v)) === 'tooth', 'the Pick a tooth step starts with “Pick tooth” selected');
   let s = await tapTooth(45);
   ok(!s.error && Math.abs(s.volume - TV[45]) / TV[45] < 0.03 && s.touch === 0 && s.crown * s.axis[2] > 0, `45 tapped in the axial slice: ${s.volume && s.volume.toFixed(0)} mm³ of voxels (true ${TV[45].toFixed(0)} mm³), threshold ${s.T} (from the tooth's own brightness), crown up, length ${s.length && s.length.toFixed(1)} mm, region fitted to r ${s.roi && s.roi.r} mm, z ${s.roi && s.roi.z0.toFixed(1)} … ${s.roi && s.roi.z1.toFixed(1)}`);
   await page.screenshot({ path: OUT + 't5-tooth45.png' });

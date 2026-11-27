@@ -83,10 +83,20 @@ to print (not added); clasps are not added yet. Roles `obturator`, `obturator-li
 Lossless, and 12-bit lossy JPEG as i-CAT and other CBCT machines write it; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
 dates of birth and the like are never decoded. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
 surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
-angle. Donor tooth: tap the tooth, it is separated from bone and neighbours by a marker flood that meets in the ligament
-space, with fixes (not-tooth taps, eraser, threshold); then a closed replica STL, optionally enlarged and with a handle,
-for preparing the socket in autotransplantation. Needs voxels of about 0.4 mm or smaller. The case keeps the CBCT work
-and the replica (`cbct-replica`), never the CBCT itself.
+angle. The cross-hair can be turned: drag a round handle on its lines (or `[` / `]`) and the other two slices become
+oblique slices at that angle, square to each other; taps, scrolling, measurements and the tooth overlay follow the turned
+planes, and Straighten puts them back. Pick a tooth: tap it (anywhere on the crown: the region re-centres on the crown's
+thick middle), it is separated from bone and neighbours by a marker flood that meets in the ligament space, with fixes
+(not-tooth taps, eraser, threshold); then a closed replica STL, optionally enlarged and with a handle, for preparing the
+socket in autotransplantation. Root canals: the pulp chamber and canals of the picked tooth — in each slice across the
+tooth, the hollows that lie well below the brightness of the walls ringing them (judged against their own walls, because
+on a CBCT the pulp deep in a root reads brighter than the pulp in the crown), each cut half way between its own darkest
+value and the dentine; followed to an open apex and found under an access cavity. When the tooth as picked does not ring
+its own pulp (only part of a crown taken, a root lost in bone as bright as dentine) the canals are followed from the
+tooth's chamber inside the scan's own bright walls, and the page says so. Tinted red in the slices and shown as a bright
+solid inside a glass tooth in 3D, with volume, length and canals side by side in the root, "Slices along the tooth" to walk
+down the root, and an STL. A canal thinner than a voxel may not show. Needs voxels of about 0.4 mm or smaller. The case keeps the CBCT work, the turned planes and
+the replica (`cbct-replica`), never the CBCT itself.
 
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
 hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
