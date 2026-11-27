@@ -28,10 +28,13 @@ var CONFIG = {
 function setup() {
   stop();
   ScriptApp.newTrigger('sortPhotos').timeBased().everyMinutes(CONFIG.EVERY_MINUTES).create();
-  DriveApp.getRootFolder(); // asks for access to Drive
   console.log('Photo Card will check for new photos every ' + CONFIG.EVERY_MINUTES + ' minutes.');
   sortPhotos();
 }
+
+// Never runs. Apps Script decides which permissions to ask for from the code it finds, and this line makes it ask to
+// add and move files in Drive, not just read them (the sorter itself works through the Drive API below).
+function driveAccess_() { DriveApp.createFolder(CONFIG.CASES_FOLDER); }
 
 function stop() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'sortPhotos') ScriptApp.deleteTrigger(t); });
