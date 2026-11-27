@@ -55,7 +55,7 @@ def check(name, frames):
         p = origin + np.array([i * sp[0], j * sp[1], k * sp[2]])       # where truth says the voxel is
         dn = float(np.dot(p, Nn)); s = int(np.argmin([abs(x - dn) for x in d]))
         rel = p - np.array(frames[s][0]); c = int(round(np.dot(rel, R) / ps[1])); r = int(round(np.dot(rel, C) / ps[0]))
-        if not (0 <= r < rows and 0 <= c < cols) or abs(d[s] - dn) > 1e-3 or abs(int(round(frames[s][2][r, c])) - v) > t.get('tol', 0): bad += 1
+        if not (0 <= r < rows and 0 <= c < cols) or abs(d[s] - dn) > 1e-3 or abs(int(round(frames[s][2][r, c])) - v) > t.get('tolOther', t.get('tol', 0)): bad += 1
     print(('  ok  ' if bad == 0 else '  BAD ') + f'{name}: {len(frames)} slices of {rows}x{cols}, {bad} of {len(t["samples"])} samples wrong')
     if bad: fails += 1
 
@@ -69,7 +69,7 @@ def series_dir(name):
         fr += frames_of(ds)
     return fr
 
-for n in ['a-explicit', 'b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16', 'n-jpeg8']:
+for n in ['a-explicit', 'b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16', 'n-jpeg8', 'o-jpeg12']:
     check(n, series_dir(n))
 check('e-enhanced', frames_of(pydicom.dcmread(os.path.join(D, 'e-enhanced.dcm'))))
 check('k-legacymf', frames_of(pydicom.dcmread(os.path.join(D, 'k-legacymf.dcm'))))

@@ -10,7 +10,7 @@ import zlib from 'node:zlib';
 
 export const TS = {
   implicit: '1.2.840.10008.1.2', explicit: '1.2.840.10008.1.2.1', deflated: '1.2.840.10008.1.2.1.99', big: '1.2.840.10008.1.2.2',
-  rle: '1.2.840.10008.1.2.5', jpeg: '1.2.840.10008.1.2.4.50', jpegll57: '1.2.840.10008.1.2.4.57', jpegll70: '1.2.840.10008.1.2.4.70', j2k: '1.2.840.10008.1.2.4.90',
+  rle: '1.2.840.10008.1.2.5', jpeg: '1.2.840.10008.1.2.4.50', jpeg12: '1.2.840.10008.1.2.4.51', jpegll57: '1.2.840.10008.1.2.4.57', jpegll70: '1.2.840.10008.1.2.4.70', j2k: '1.2.840.10008.1.2.4.90',
 };
 const LONG = new Set(['OB', 'OW', 'OF', 'SQ', 'UT', 'UN', 'OD', 'OL', 'UC', 'UR', 'OV', 'SV', 'UV']);
 const NUM = { US: 2, SS: 2, UL: 4, SL: 4, FL: 4, FD: 8 };
@@ -87,6 +87,74 @@ function huffLengths(freq) {
   // no symbol may get the all-ones code: JPEG reserves it. Giving the longest code one more bit (a spare slot) avoids it.
   const maxL = Math.max(...len), longest = len.indexOf(maxL); if (maxL < 16) len[longest]++;
   return len;
+}
+// ───────── JPEG extended (process 2/4): sequential DCT, Huffman, 12-bit — as i-CAT and other CBCT machines write it ─────────
+const ZZ = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+  35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
+const STD_LUMA = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
+  18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99];
+const DCT_C = (() => { const c = new Float64Array(64); for (let x = 0; x < 8; x++) for (let u = 0; u < 8; u++) c[x * 8 + u] = (u ? 1 : Math.SQRT1_2) * Math.cos((2 * x + 1) * u * Math.PI / 16) / 2; return c; })();
+/** optimal Huffman table limited to 16 bits (ITU T.81 Annex K.2 / K.3, as libjpeg does it): → { bits[1..16] counts, vals } */
+function optimalTable(freq) {
+  const f = Array.from({ length: 257 }, (_, i) => (i < 256 ? freq[i] || 0 : 1)), size = new Int32Array(257), others = new Int32Array(257).fill(-1);
+  for (;;) {
+    let c1 = -1, c2 = -1;
+    for (let i = 0; i <= 256; i++) if (f[i] && (c1 < 0 || f[i] <= f[c1])) c1 = i;
+    for (let i = 0; i <= 256; i++) if (f[i] && i !== c1 && (c2 < 0 || f[i] <= f[c2])) c2 = i;
+    if (c2 < 0) break;
+    f[c1] += f[c2]; f[c2] = 0;
+    size[c1]++; while (others[c1] >= 0) { c1 = others[c1]; size[c1]++; } others[c1] = c2;
+    size[c2]++; while (others[c2] >= 0) { c2 = others[c2]; size[c2]++; }
+  }
+  const bits = new Int32Array(33); for (let i = 0; i <= 256; i++) if (size[i]) bits[size[i]]++;
+  for (let i = 32; i > 16; i--) while (bits[i] > 0) { let j = i - 2; while (bits[j] === 0) j--; bits[i] -= 2; bits[i - 1]++; bits[j + 1] += 2; bits[j]--; }
+  let i = 16; while (bits[i] === 0) i--; bits[i]--;                 // drop the reserved symbol's code (all ones)
+  const vals = []; for (let l = 1; l <= 32; l++) for (let s = 0; s < 256; s++) if (size[s] === l) vals.push(s);
+  return { bits: Array.from(bits.subarray(1, 17)), vals };
+}
+const canon = (t) => { const code = new Int32Array(256), len = new Int32Array(256); let c = 0, k = 0; for (let l = 1; l <= 16; l++) { for (let i = 0; i < t.bits[l - 1]; i++) { code[t.vals[k]] = c; len[t.vals[k]] = l; c++; k++; } c <<= 1; } return { code, len }; };
+const cat = (v) => { let a = Math.abs(v), n = 0; while (a) { n++; a >>= 1; } return n; };
+/** encodeJpegDCT(words, rows, cols, { precision 12, qdiv, restart }) → { jpeg: Buffer, recon: Uint16Array } — recon is the image an exact
+ *  decoder must give back (the dequantised coefficients through the inverse DCT, rounded and clamped), so a decoder can be held to ±1 */
+export function encodeJpegDCT(words, rows, cols, o = {}) {
+  const P = o.precision || 12, top = (1 << P) - 1, shift = 1 << (P - 1), ri = o.restart || 0, q = STD_LUMA.map((v) => Math.max(1, Math.round(v / (o.qdiv || 4))));
+  const bw = Math.ceil(cols / 8), bh = Math.ceil(rows / 8), blocks = [], recon = new Uint16Array(rows * cols), f = new Float64Array(64), t = new Float64Array(64), F = new Float64Array(64);
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const r = Math.min(rows - 1, by * 8 + y), c = Math.min(cols - 1, bx * 8 + x); f[y * 8 + x] = (words[r * cols + c] & top) - shift; }
+    for (let y = 0; y < 8; y++) for (let u = 0; u < 8; u++) { let a = 0; for (let x = 0; x < 8; x++) a += DCT_C[x * 8 + u] * f[y * 8 + x]; t[y * 8 + u] = a; }
+    for (let v = 0; v < 8; v++) for (let u = 0; u < 8; u++) { let a = 0; for (let y = 0; y < 8; y++) a += DCT_C[y * 8 + v] * t[y * 8 + u]; F[v * 8 + u] = a; }
+    const zz = new Int32Array(64); for (let k = 0; k < 64; k++) zz[k] = Math.round(F[ZZ[k]] / q[ZZ[k]]); blocks.push(zz);
+    // what the decoder must make of it
+    const D = new Float64Array(64); for (let k = 0; k < 64; k++) D[ZZ[k]] = zz[k] * q[ZZ[k]];
+    for (let v = 0; v < 8; v++) for (let x = 0; x < 8; x++) { let a = 0; for (let u = 0; u < 8; u++) a += DCT_C[x * 8 + u] * D[v * 8 + u]; t[v * 8 + x] = a; }
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const r = by * 8 + y, c = bx * 8 + x; if (r >= rows || c >= cols) continue; let a = 0; for (let v = 0; v < 8; v++) a += DCT_C[y * 8 + v] * t[v * 8 + x]; recon[r * cols + c] = Math.min(top, Math.max(0, Math.round(a + shift))); }
+  }
+  const walk = (emit) => {                                         // DC differences and AC run/size symbols, block by block, restarts included
+    let pred = 0;
+    blocks.forEach((zz, b) => {
+      if (ri && b && b % ri === 0) { emit({ restart: (b / ri - 1) & 7 }); pred = 0; }
+      const d = zz[0] - pred; pred = zz[0]; emit({ dc: cat(d), v: d });
+      let run = 0; for (let k = 1; k < 64; k++) { const v = zz[k]; if (!v) { run++; continue; } while (run > 15) { emit({ ac: 0xF0 }); run -= 16; } emit({ ac: (run << 4) | cat(v), v, s: cat(v) }); run = 0; }
+      if (run) emit({ ac: 0x00 });
+    });
+  };
+  const dcF = new Array(256).fill(0), acF = new Array(256).fill(0); walk((e) => { if (e.dc !== undefined) dcF[e.dc]++; else if (e.ac !== undefined) acF[e.ac]++; });
+  const dcT = optimalTable(dcF), acT = optimalTable(acF), dcC = canon(dcT), acC = canon(acT), out = []; let acc = 0, nb = 0;
+  const put = (v, bits) => { for (let b = bits - 1; b >= 0; b--) { acc = (acc << 1) | ((v >>> b) & 1); nb++; if (nb === 8) { out.push(acc); if (acc === 0xFF) out.push(0); acc = 0; nb = 0; } } };
+  const flush = () => { while (nb) put(1, 1); };
+  const val = (v, s) => (v > 0 ? v : v + (1 << s) - 1);
+  walk((e) => {
+    if (e.restart !== undefined) { flush(); out.push(0xFF, 0xD0 + e.restart); return; }
+    if (e.dc !== undefined) { put(dcC.code[e.dc], dcC.len[e.dc]); if (e.dc) put(val(e.v, e.dc), e.dc); return; }
+    put(acC.code[e.ac], acC.len[e.ac]); if (e.s) put(val(e.v, e.s), e.s);
+  });
+  flush();
+  const dqt = [0xFF, 0xDB, 0, 2 + 1 + 128, 0x10]; for (let k = 0; k < 64; k++) dqt.push(q[ZZ[k]] >> 8, q[ZZ[k]] & 255);   // 16-bit table entries (Pq = 1)
+  const dht = (cls, T) => [0xFF, 0xC4, 0, 3 + 16 + T.vals.length, cls << 4, ...T.bits, ...T.vals];
+  const head = [0xFF, 0xD8, ...dqt, 0xFF, 0xC1, 0, 11, P, rows >> 8, rows & 255, cols >> 8, cols & 255, 1, 1, 0x11, 0, ...dht(0, dcT), ...dht(1, acT)];
+  if (ri) head.push(0xFF, 0xDD, 0, 4, ri >> 8, ri & 255);
+  head.push(0xFF, 0xDA, 0, 8, 1, 1, 0x00, 0, 63, 0);
+  return { jpeg: Buffer.concat([Buffer.from(head), Buffer.from(out), Buffer.from([0xFF, 0xD9])]), recon };
 }
 /** JPEG Lossless (process 14), one component. words: stored values (taken modulo 2^precision). */
 export function encodeJpegLossless(words, rows, cols, o = {}) {

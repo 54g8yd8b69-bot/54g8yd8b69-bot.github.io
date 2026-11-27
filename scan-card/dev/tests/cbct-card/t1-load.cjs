@@ -15,7 +15,7 @@ const fs = require('fs'), path = require('path');
   let t0 = Date.now(); await page.setInputFiles('#lFolderIn', DATA + 'a-explicit'); await page.waitForFunction(() => APP.S.vol, null, { timeout: 120000 }); await a.idle();
   await check('a-explicit'); ok((await page.evaluate(() => APP.S.skipped)) === 2, `folder: 111 slices read in ${((Date.now() - t0) / 1000).toFixed(1)} s, the DICOMDIR and the text file passed over`);
   await page.screenshot({ path: OUT + 't1-folder.png' });
-  for (const n of ['b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16', 'n-jpeg8']) {
+  for (const n of ['b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16', 'n-jpeg8', 'o-jpeg12']) {
     const L = await page.evaluate(() => APP.S.loads); await page.setInputFiles('#lFilesIn', dir(n)); await page.waitForFunction((L) => APP.S.loads > L, L, { timeout: 120000 }); await a.idle(); await check(n);
   }
   for (const [n, f] of [['e-enhanced', 'e-enhanced.dcm'], ['k-legacymf', 'k-legacymf.dcm'], ['f-zip', 'f-zip.zip']]) {

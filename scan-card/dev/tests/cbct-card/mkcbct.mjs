@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { makePhantom } from '../../../shared/dicom.js';
-import { writeDicom, zipBuffer, TS, FAKE, fakeTags } from './dcmwrite.mjs';
+import { writeDicom, zipBuffer, TS, FAKE, fakeTags, encodeJpegDCT } from './dcmwrite.mjs';
 import { createRequire } from 'node:module';
 const sharp = createRequire(import.meta.url)('../../../node_modules/sharp');
 
@@ -135,6 +135,19 @@ writeSeries('m-u16', half, sp6, { ts: TS.explicit, enc: { signed: false, bits16:
     fs.writeFileSync(path.join(d, `IMG${String(n + 1).padStart(4, '0')}.dcm`), writeDicom({ ts: TS.jpeg, sopClass: '1.2.840.10008.5.1.4.1.1.2', sopInstance: uid(), rows: s.rows, cols: s.cols, bits: 8, elements: els, frames: [], compressed: [jpg] }));
   }
   truth.variants['n-jpeg8'] = { dims: half.dims, spacing: sp6, origin: half.origin, samples: HALF_S.map(([i, j, k, v]) => [i, j, k, q8(v) * 16 - 1200]), tol: 48, lossy: true };
+}
+{ // JPEG extended, 12-bit lossy (process 2/4) as i-CAT writes it: unsigned 12-bit with an intercept, restart markers. The truth is
+  // the encoder's own reconstruction, so the reader is held to ±1 (rounding in the inverse DCT), not to a lossy tolerance.
+  const d = path.join(OUT, 'o-jpeg12'); fs.mkdirSync(d, { recursive: true }); const sl = slicesOf(half, sp6, 'axial'), series = uid(), [nx, ny] = half.dims, recon = new Int16Array(half.data.length);
+  for (let n = 0; n < sl.length; n++) {
+    const s = sl[n], words = stored(s.f, U12), e = encodeJpegDCT(words, s.rows, s.cols, { precision: 12, qdiv: 4, restart: 23 });
+    for (let i = 0; i < e.recon.length; i++) recon[n * nx * ny + i] = e.recon[i] + U12.intercept;
+    const extra = [[0x00080016, 'UI', '1.2.840.10008.5.1.4.1.1.2'], [0x00080018, 'UI', uid()], [0x0020000D, 'UI', STUDY], [0x0020000E, 'UI', series], [0x00200013, 'IS', String(n + 1)],
+      [0x00200032, 'DS', s.ipp.map(ds)], [0x00200037, 'DS', s.iop.map(ds)], [0x00180050, 'DS', ds(s.step)], [0x00281052, 'DS', ds(U12.intercept)], [0x00281053, 'DS', '1']];
+    fs.writeFileSync(path.join(d, `IMG${String(n + 1).padStart(4, '0')}.dcm`), writeDicom({ ts: TS.jpeg12, sopClass: '1.2.840.10008.5.1.4.1.1.2', sopInstance: uid(), rows: s.rows, cols: s.cols, bits: 16, elements: imageTags(s, U12, extra), frames: [], compressed: [e.jpeg] }));
+  }
+  let err = 0; for (let i = 0; i < recon.length; i++) err = Math.max(err, Math.abs(recon[i] - half.data[i]));
+  truth.variants['o-jpeg12'] = { dims: half.dims, spacing: sp6, origin: half.origin, samples: HALF_S.map(([i, j, k]) => [i, j, k, recon[i + nx * (j + ny * k)]]), tol: 1, tolOther: 2, lossy: true, lossyMax: err };   // other decoders (libjpeg's integer inverse DCT) may round 2 away
 }
 fs.writeFileSync(path.join(OUT, 'truth.json'), JSON.stringify(truth));
 let total = 0; const walk = (p) => { for (const f of fs.readdirSync(p)) { const q = path.join(p, f), st = fs.statSync(q); if (st.isDirectory()) walk(q); else total += st.size; } }; walk(OUT);

@@ -9,8 +9,9 @@
 // What it reads
 //   transfer syntaxes  implicit VR little endian, explicit VR little endian, deflated explicit VR little endian,
 //                      explicit VR big endian, RLE Lossless, JPEG Lossless (process 14, any predictor, .57 and .70),
-//                      JPEG baseline 8-bit (through the browser's own decoder).
-//   not yet            JPEG 2000, JPEG-LS, 12-bit lossy JPEG — these are named clearly so the user can export again.
+//                      JPEG baseline 8-bit (through the browser's own decoder); JPEG Extended 12-bit (lossy, as i-CAT and
+//                      others write it) by the DCT decoder here.
+//   not yet            JPEG 2000, JPEG-LS, progressive JPEG — these are named clearly so the user can export again.
 //   layouts            one file per slice (classic CT), multi-frame files (Enhanced CT with functional groups, or a
 //                      plain multi-frame file with a frame spacing), several series mixed in one folder, a .zip of any of these.
 //
@@ -236,6 +237,81 @@ export function decodeJpegLossless(u8) {
   if (pt) for (let k = 0; k < total; k++) out[k] <<= pt;
   return { data: out, width: X, height: Y, precision: P };
 }
+// ───────────── JPEG baseline / extended (DCT, Huffman, 8- or 12-bit) ─────────────
+// Browsers decode only 8-bit JPEG, and 12-bit lossy JPEG ("JPEG Extended", 1.2.840.10008.1.2.4.51) is what several CBCT
+// machines write (i-CAT among them), so the sequential DCT decoder is done here: frame and Huffman tables, restart markers,
+// dequantisation, a separable 8×8 inverse DCT, level shift and clamping. Greyscale (one component) only; progressive and
+// hierarchical JPEG are named, not read.
+const ZIGZAG = Int32Array.from([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+  35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]);
+const IDCT_C = (() => { const c = new Float64Array(64); for (let x = 0; x < 8; x++) for (let u = 0; u < 8; u++) c[x * 8 + u] = (u ? 1 : Math.SQRT1_2) * Math.cos((2 * x + 1) * u * Math.PI / 16) / 2; return c; })();
+/** decodeJpegDCT(bytes) → { data: Uint8Array | Uint16Array (width × height), width, height, precision } */
+export function decodeJpegDCT(u8) {
+  let p = 0; const n = u8.length, u16 = () => { const v = (u8[p] << 8) | u8[p + 1]; p += 2; return v; };
+  if (u8[0] !== 0xFF || u8[1] !== 0xD8) throw new Error('not a JPEG stream'); p = 2;
+  const qt = [], dc = [], ac = []; let P = 0, X = 0, Y = 0, comp = null, ri = 0, scan = null;
+  while (p < n && !scan) {
+    if (u8[p] !== 0xFF) { p++; continue; }
+    const m = u8[p + 1]; p += 2;
+    if (m === 0xFF || m === 0x00 || m === 0x01 || (m >= 0xD0 && m <= 0xD8)) { if (m === 0xFF) p--; continue; }
+    const len = u16(), end = p + len - 2;
+    if (m === 0xC0 || m === 0xC1) {
+      P = u8[p]; Y = (u8[p + 1] << 8) | u8[p + 2]; X = (u8[p + 3] << 8) | u8[p + 4]; const nf = u8[p + 5];
+      if (nf !== 1) throw new Error('Colour JPEG is not supported'); comp = { id: u8[p + 6], tq: u8[p + 8] };
+    } else if (m === 0xC2 || m === 0xC6 || m === 0xCA || m === 0xCE) throw new Error('Progressive JPEG is not supported yet');
+    else if (m === 0xC3) throw new Error('This JPEG is the lossless kind');
+    else if ((m >= 0xC5 && m <= 0xCF) && m !== 0xC8 && m !== 0xCC) throw new Error('This kind of JPEG (hierarchical or arithmetic-coded) is not supported');
+    else if (m === 0xDB) {
+      let q = p;
+      while (q < end) { const pq = u8[q] >> 4, tq = u8[q] & 15, t = new Float64Array(64); q++; for (let k = 0; k < 64; k++) { t[ZIGZAG[k]] = pq ? (u8[q] << 8) | u8[q + 1] : u8[q]; q += pq ? 2 : 1; } qt[tq] = t; }
+    } else if (m === 0xC4) {
+      let q = p;
+      while (q < end) {
+        const cls = u8[q] >> 4, id = u8[q] & 15, counts = u8.subarray(q + 1, q + 17); q += 17; let total = 0; for (let i = 0; i < 16; i++) total += counts[i];
+        const look = new Uint16Array(65536); let code = 0, k = q;       // indexed by the next 16 bits: (code length << 8) | symbol
+        for (let l = 1; l <= 16; l++) { for (let i = 0; i < counts[l - 1]; i++) { const sym = u8[k++], lo = code << (16 - l); look.fill((l << 8) | sym, lo, lo + (1 << (16 - l))); code++; } code <<= 1; }
+        (cls ? ac : dc)[id] = look; q += total;
+      }
+    } else if (m === 0xDD) ri = (u8[p] << 8) | u8[p + 1];
+    else if (m === 0xDA) { const ns = u8[p]; if (ns !== 1) throw new Error('Colour JPEG is not supported'); scan = { td: u8[p + 2] >> 4, ta: u8[p + 2] & 15 }; }
+    p = end;
+  }
+  if (!scan || !comp || !X || !Y) throw new Error('JPEG: no image found');
+  const q = qt[comp.tq], dcl = dc[scan.td], acl = ac[scan.ta]; if (!q || !dcl || !acl) throw new Error('JPEG: missing tables');
+  const out = P > 8 ? new Uint16Array(X * Y) : new Uint8Array(X * Y), top = (1 << P) - 1, shift = 1 << (P - 1);
+  const bw = Math.ceil(X / 8), bh = Math.ceil(Y / 8), coef = new Float64Array(64), tmp = new Float64Array(64);
+  let buf = 0, cnt = 0;                                            // bit buffer: `cnt` valid bits at the top of a 32-bit word
+  const fill = () => { while (cnt <= 24) { let b = 0; if (p < n) { b = u8[p]; if (b === 0xFF) { if (u8[p + 1] === 0) p += 2; else b = 0; } else p++; } buf |= b << (24 - cnt); cnt += 8; } };
+  const decode = (look) => { fill(); const e = look[buf >>> 16], l = e >> 8; if (!l) throw new Error('JPEG: bad Huffman code'); buf <<= l; cnt -= l; return e & 255; };
+  const receive = (s) => { fill(); const v = buf >>> (32 - s); buf <<= s; cnt -= s; return v < (1 << (s - 1)) ? v - (1 << s) + 1 : v; };
+  let pred = 0, mcu = 0;
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++, mcu++) {
+    if (ri && mcu && mcu % ri === 0) {                             // a restart marker: bytes realign and the DC prediction starts again
+      buf = 0; cnt = 0; while (p < n - 1 && !(u8[p] === 0xFF && u8[p + 1] >= 0xD0 && u8[p + 1] <= 0xD7)) p++; p += 2; pred = 0;
+    }
+    coef.fill(0);
+    const t = decode(dcl); if (t) pred += receive(t); coef[0] = pred * q[0];
+    for (let k = 1; k < 64;) {
+      const rs = decode(acl), r = rs >> 4, s = rs & 15;
+      if (!s) { if (r === 15) { k += 16; continue; } break; }
+      k += r; if (k > 63) break; const z = ZIGZAG[k]; coef[z] = receive(s) * q[z]; k++;
+    }
+    for (let v = 0; v < 8; v++) {                                  // rows (horizontal frequencies), skipping empty ones
+      const o = v * 8; let any = false; for (let u = 0; u < 8; u++) if (coef[o + u]) { any = true; break; }
+      if (!any) { for (let x = 0; x < 8; x++) tmp[o + x] = 0; continue; }
+      for (let x = 0; x < 8; x++) { const c = x * 8; let a = 0; for (let u = 0; u < 8; u++) a += IDCT_C[c + u] * coef[o + u]; tmp[o + x] = a; }
+    }
+    const x0 = bx * 8, y0 = by * 8;
+    for (let x = 0; x < 8; x++) {                                  // columns
+      const xx = x0 + x; if (xx >= X) break;
+      for (let y = 0; y < 8; y++) {
+        const yy = y0 + y; if (yy >= Y) break; const c = y * 8; let a = 0; for (let v = 0; v < 8; v++) a += IDCT_C[c + v] * tmp[v * 8 + x];
+        const val = Math.round(a + shift); out[yy * X + xx] = val < 0 ? 0 : val > top ? top : val;
+      }
+    }
+  }
+  return { data: out, width: X, height: Y, precision: P };
+}
 async function decodeJpegBrowser(u8, n) {
   if (typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') throw new Error('This browser cannot open JPEG-compressed slices');
   const bmp = await createImageBitmap(new Blob([u8], { type: 'image/jpeg' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
@@ -262,7 +338,6 @@ export function unsupported(h) {
   if (info.codec === null) return `it is compressed with ${info.name}, which this viewer cannot read yet`;
   if ((h.samples || 1) !== 1) return 'it is a colour image, not a scan';
   if (h.bitsAllocated !== 8 && h.bitsAllocated !== 16) return `it stores ${h.bitsAllocated}-bit values`;
-  if (info.codec === 'jpeg' && h.bitsAllocated !== 8) return 'it is compressed with 12-bit lossy JPEG, which this viewer cannot read yet';
   return '';
 }
 /** → a function frame(i) → typed array of the stored values (rows × cols), masked to the bits stored and sign-extended */
@@ -291,6 +366,9 @@ export function frameReader(h) {
     const b = frames[f];
     if (info.codec === 'rle') return finish(decodeRLE(b, n, bytesPer));
     if (info.codec === 'jpegll') { const r = decodeJpegLossless(b); if (r.width * r.height !== n) throw new Error('JPEG Lossless: the image size does not match the header'); return finish(r.data); }
+    if (h.bitsAllocated === 16 || typeof createImageBitmap === 'undefined') {   // 12-bit lossy JPEG (and any JPEG where the browser can't decode it): done here
+      const r = decodeJpegDCT(b); if (r.width * r.height !== n) throw new Error('JPEG: the image size does not match the header'); return finish(r.data);
+    }
     return finish(await decodeJpegBrowser(b, n));
   };
 }

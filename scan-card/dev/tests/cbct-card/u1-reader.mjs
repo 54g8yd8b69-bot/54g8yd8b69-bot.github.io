@@ -13,7 +13,7 @@ const filesIn = async (dir) => Promise.all(fs.readdirSync(path.join(DATA, dir)).
 const near = (a, b, e = 1e-4) => a.every((v, i) => Math.abs(v - b[i]) < e);
 function checkVol(name, vol) {
   const t = truth.variants[name]; let bad = 0;
-  for (const [i, j, k, v] of t.samples) if (vol.data[i + vol.dims[0] * (j + vol.dims[1] * k)] + vol.shift !== v) bad++;
+  for (const [i, j, k, v] of t.samples) if (Math.abs(vol.data[i + vol.dims[0] * (j + vol.dims[1] * k)] + vol.shift - v) > (t.tol || 0)) bad++;
   ok(near(vol.dims, t.dims, 0.5) && near(vol.spacing, t.spacing) && near(vol.origin, t.origin, 1e-3) && bad === 0,
     `${name}: ${vol.dims.join('×')} at ${vol.spacing.join(' × ')} mm, origin ${vol.origin.map((v) => v.toFixed(2)).join(', ')}, ${bad} of ${t.samples.length} voxels wrong${vol.warnings.length ? ' · warnings: ' + vol.warnings.join(' | ') : ''}`);
   return vol;
@@ -23,7 +23,7 @@ async function load(name, files) {
   checkVol(name, vol); return { set, vol, ms: Date.now() - t0 };
 }
 (async () => {
-  for (const n of ['a-explicit', 'b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16']) {
+  for (const n of ['a-explicit', 'b-implicit-flip', 'c-rle', 'd-jpegll', 'g-bigendian', 'h-deflated', 'i-jpegll57', 'j-coronal', 'm-u16', 'o-jpeg12']) {
     const r = await load(n, await filesIn(n));
     if (n === 'a-explicit') ok(r.set.series.length === 1 && r.set.skipped === 2, `a-explicit: one series, the DICOMDIR and the text file passed over (skipped ${r.set.skipped})`);
     if (n === 'm-u16') ok(r.vol.shift === 0 && r.vol.min === Math.min(...truth.variants[n].samples.map((x) => x[3]).concat([r.vol.min])), `m-u16: unsigned 16-bit with intercept −1200 needs no shift (shift ${r.vol.shift}, values ${r.vol.min} … ${r.vol.max})`);

@@ -80,7 +80,7 @@ A surgical obturator variant gives a plate up to and past a resection line on a 
 to print (not added); clasps are not added yet. Roles `obturator`, `obturator-lid`.
 
 **CBCT.** Opens DICOM on the device (a folder, files, multi-frame files or a zip; uncompressed, deflated, RLE and JPEG
-Lossless; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
+Lossless, and 12-bit lossy JPEG as i-CAT and other CBCT machines write it; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
 dates of birth and the like are never decoded. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
 surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
 angle. Donor tooth: tap the tooth, it is separated from bone and neighbours by a marker flood that meets in the ligament
