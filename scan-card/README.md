@@ -122,8 +122,8 @@ the tap, so cuts with the eraser, "Not tooth" (a 1 mm ball) and going back to "R
 replica's surface is set between voxels at the grey half way across the model's outline. On the two real scans it
 was tried on (0.25 mm and 0.2 mm voxels, from two makes of scanner) its outlines followed the roots to their tips without
 the bumps the rules leave, and the canal finder reached further inside them; it has no ground truth there, it was
-trained on other scanners, and it is not certified medical-device software. In the single-file copy of the suite the
-pack cannot be loaded, and the rules are used. Then a closed replica STL, optionally enlarged and
+trained on other scanners, and it is not certified medical-device software. In the single-file copy of the suite and in
+the Claude artifact copy the pack is not there: “Model” says so, and the rules are used. Then a closed replica STL, optionally enlarged and
 with a handle, for preparing the socket in autotransplantation. Root canals: the pulp chamber and canals of the picked
 tooth. A canal narrower than the scan's blur is only a faint dip in the dentine's grey, so two things are done. The wide
 hollows (chamber, wide canals) are cut where the grey is midway between pulp and dentine. Narrow canals are followed

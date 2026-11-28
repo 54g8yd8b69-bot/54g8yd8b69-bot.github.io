@@ -36,8 +36,9 @@ What this script does for the site:
   network's weights in parts, manifest.json, NOTICE.txt). The page asks before it fetches the pack; nothing is inlined.
 
 --artifact <folder> also writes the files for the Claude artifact copy: the source pages as they are, plus
-manifold-wasm.js (the artifact loads the libraries from jsdelivr, so nothing is bundled) and the tooth-model pack in
-toothseg/ (an artifact may only fetch its own files, so the pack is published with it). --tray and --wax name folders
+manifold-wasm.js (the artifact loads the libraries from jsdelivr, so nothing is bundled). The tooth-model pack is not
+part of the artifact copy (76 MB of binary files): there the CBCT tab's "Model" says it cannot be loaded, and the rules
+are used. --tray and --wax name folders
 holding the Tray Card and Wax Card artifact files (index.html, and for Tray Card library.js and manifold-wasm.js); they
 are copied to <folder>/tray/ and <folder>/wax/ so that the two tabs work inside the artifact too. One line is added
 to the head of each copy: inside an artifact only the top page can save files, and that line points the page at the hub
@@ -174,9 +175,6 @@ if a.artifact:
     for f in ['model.html', 'analysis.html', 'splint.html', 'compare.html', 'prep.html', 'survey.html', 'shell.html', 'articulator.html', 'obturator.html', 'cbct.html', 'core.js', 'solid.js', 'dicom.js']:
         shutil.copy(src / f, art / f)
     (art / 'manifold-wasm.js').write_text(wasm_js)
-    (art / 'toothseg').mkdir(exist_ok=True)
-    for f in sorted(pack.iterdir()):                              # the tooth-model pack, beside cbct.html as on the site
-        shutil.copy(f, art / 'toothseg' / f.name)
     doc = (src / 'index.html').read_text(encoding='utf-8')
     # frames: 'both' = load each tool's page as a frame address and, if that does not start, fetch it and hand it over
     conf = '<script>window.SCAN_CARD=' + json.dumps({'urls': {'tray': 'tray/index.html', 'wax': 'wax/index.html'}, 'frames': 'both'}, separators=(',', ':')) + '</script>\n'
