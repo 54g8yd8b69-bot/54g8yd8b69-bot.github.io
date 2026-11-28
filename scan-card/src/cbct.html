@@ -28,6 +28,7 @@ html.embed #cbBar{padding-left:8px}
 #cbGrid>[data-a]{min-width:0;min-height:0}
 .vp{position:relative;overflow:hidden;background:#000}
 .vp>canvas{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;outline:none}
+.vp.r3.pulp{background:radial-gradient(120% 95% at 50% 42%,#3d6a9c 0%,#284a78 38%,#142a4c 72%,#0a1830 100%)}
 .vp .vl{position:absolute;left:6px;top:5px;font:600 11px/1.3 system-ui,sans-serif;color:#fff;background:rgba(0,0,0,.5);padding:2px 6px;border-radius:4px;pointer-events:none;white-space:nowrap;max-width:calc(100% - 36px);overflow:hidden;text-overflow:ellipsis}
 .vp .vl i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:0}
 .vp .vx{position:absolute;right:5px;top:4px;display:flex;gap:3px;z-index:2}
@@ -148,7 +149,7 @@ const shell = N.createShell({
     { id: 'tooth', title: 'Pick a tooth', optional: true, html: `
       <p class="lead" id="dLead">Tap the donor tooth in a slice, near the middle of its crown.</p>
       <div class="row"><label>Region</label><div class="seg" id="dShape"><button data-v="cyl" type="button" title="A cylinder round the tooth">Cylinder</button><button data-v="box" type="button" title="A box round the tooth">Box</button></div></div>
-      <div class="row"><label>Width</label><input type="range" id="dR" min="3" max="12" step="0.25" value="7"><span class="val"></span></div>
+      <div class="row"><label>Width</label><input type="range" id="dR" min="3" max="14" step="0.25" value="7"><span class="val"></span></div>
       <div class="row"><label>Above the tap</label><input type="range" id="dUp" min="2" max="30" step="0.5" value="20"><span class="val"></span></div>
       <div class="row"><label>Below the tap</label><input type="range" id="dDown" min="2" max="30" step="0.5" value="20"><span class="val"></span></div>
       <div class="row"><label>Threshold</label><input type="range" id="dT" step="1"><span class="val"></span></div>
@@ -803,9 +804,9 @@ function clear3DMeshes() { for (const k of ['surf', 'tooth', 'rep', 'roi', 'cana
 // over the canals without hiding them — so the canals, in a bright solid colour, stand out inside the tooth's shape.
 let glassMat = null;
 function glass() {
-  return glassMat || (glassMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uCol: { value: new THREE.Color(0xbfe3ff) } },
+  return glassMat || (glassMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uCol: { value: new THREE.Color(0xf4ecd8) } },
     vertexShader: 'varying vec3 vN; varying vec3 vE; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vE = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
-    fragmentShader: 'uniform vec3 uCol; varying vec3 vN; varying vec3 vE; void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vE))); gl_FragColor = vec4(uCol, 0.05 + 0.6 * pow(f, 2.4)); }' }));
+    fragmentShader: 'uniform vec3 uCol; varying vec3 vN; varying vec3 vE; void main(){ float f = 1.0 - abs(dot(normalize(vN), normalize(vE))); gl_FragColor = vec4(uCol, 0.07 + 0.62 * pow(f, 2.2)); }' }));
 }
 function show3D() {
   const id = stepId(); if (!box3) return;
@@ -813,7 +814,7 @@ function show3D() {
   box3.visible = showVol;
   if (r3objs.surf) r3objs.surf.visible = id === 'd3' && S.r3.showSurf;
   if (r3objs.tooth) { const o = r3objs.tooth; o.visible = id === 'tooth' || (id === 'replica' && !r3objs.rep) || (id === 'canal' && S.canal.show === 'glass'); o.userData.solid = o.userData.solid || o.material; o.material = id === 'canal' ? glass() : o.userData.solid; o.renderOrder = id === 'canal' ? 2 : 0; }
-  if (r3objs.canal) r3objs.canal.visible = id === 'canal';
+  if (r3objs.canal) r3objs.canal.visible = id === 'canal'; r3cell.classList.toggle('pulp', id === 'canal' && !!S.canal.mesh);
   if (r3objs.rep) r3objs.rep.visible = id === 'replica';
   if (r3objs.roi) r3objs.roi.visible = id === 'tooth';
   planes3D(); viewer.invalidate();
@@ -915,12 +916,14 @@ async function segment(o = {}) {
   try {
     const run = () => D.segmentTooth(S.vol, { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T });
     let sg = run();
-    if (!sg.error && !t.fitted && o.fit !== false) {                 // first time: fit the region round what was found (2 mm clear all round), then again
-      // a tap off to one side of a broad tooth leaves part of it outside the region, which then cuts it: if centring the region on
-      // the thick middle of the crown finds much more tooth, that is the tooth
-      if (sg.top && Math.hypot(sg.top[0] - t.roi.c[0], sg.top[1] - t.roi.c[1]) > 1) { const roi0 = t.roi; t.roi = { ...roi0, c: [sg.top[0], sg.top[1]] }; const s2 = run(); if (!s2.error && s2.volume > 1.3 * sg.volume) sg = s2; else t.roi = roi0; }
-      t.fitted = true; const c = [(sg.lo[0] + sg.hi[0]) / 2, (sg.lo[1] + sg.hi[1]) / 2], r = Math.max(sg.hi[0] - c[0], c[0] - sg.lo[0], sg.hi[1] - c[1], c[1] - sg.lo[1]) + 2;
-      t.roi = { ...t.roi, c, r: N.clamp(Math.round(r * 4) / 4, 3, 12), z0: sg.lo[2] - 2, z1: sg.hi[2] + 2 }; syncRoiSliders(); sg = run();
+    if (!sg.error && !t.fitted && o.fit !== false) {
+      // first time: the region is moved onto the middle of the crown (a tap may lie off to one side of a broad tooth) and widened
+      // while the tooth reaches its side, the tooth found again each time. Then the region is drawn round what was found, 3 mm
+      // clear all round: the tooth's outline is followed by the grey up to 2 mm beyond it, which that leaves in view
+      for (let pass = 0; pass < 4; pass++) { const off = sg.top ? Math.hypot(sg.top[0] - t.roi.c[0], sg.top[1] - t.roi.c[1]) : 0, wide = (sg.touch > 0 || sg.near > 20) && t.roi.r < 13; if (off <= 1 && !wide) break;
+        const roi0 = t.roi; t.roi = { ...roi0, c: off > 1 ? [sg.top[0], sg.top[1]] : roi0.c, r: wide ? roi0.r + 2 : roi0.r }; const s2 = run(); if (s2.error) { t.roi = roi0; break; } sg = s2; }
+      t.fitted = true; const c = [(sg.lo[0] + sg.hi[0]) / 2, (sg.lo[1] + sg.hi[1]) / 2], r = Math.max(sg.hi[0] - c[0], c[0] - sg.lo[0], sg.hi[1] - c[1], c[1] - sg.lo[1]) + 3;
+      t.roi = { ...t.roi, c, r: N.clamp(Math.round(r * 4) / 4, 3, 14), z0: Math.min(t.seeds[0][2] - 1, sg.lo[2] - 3), z1: Math.max(t.seeds[0][2] + 1, sg.hi[2] + 3) }; syncRoiSliders();
     }
     t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null; dropCanal(o.keepCanalT);
     if (!sg.error) { const f = D.replicaField(S.vol, sg, { smooth: t.smooth }); const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 2 }); D.taubin(m, 2); t.preview = m; }
@@ -948,13 +951,13 @@ async function findCanal(o = {}) {
   const t0 = performance.now();
   await shell.busy('Finding the canals…', async () => {
     await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T }); let m = null;
-    if (!cs.error) { const f = D.canalField(cs); m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.03 }); if (m.indices.length) { D.taubin(m, 2); D.canalToPatient(m, cs); } else m = null; }
+    if (!cs.error) { const f = D.canalField(cs); m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.004 }); if (m.indices.length) { D.taubin(m, 3); D.canalToPatient(m, cs); } else m = null; }
     C.seg = cs; C.T = cs.T; C.mesh = m; C.ver++;
   });
   const cs = C.seg; cs.seconds = (performance.now() - t0) / 1000;
   if (cs.pulp != null) { const sp = cs.dentine - cs.pulp, inp = $('cT'); inp.min = Math.min(Math.round(cs.pulp + 0.1 * sp), cs.T); inp.max = Math.max(Math.round(cs.pulp + 0.95 * sp), cs.T); RB.cT.set(cs.T); }
   if (r3objs.canal) { viewer.remove(r3objs.canal); r3objs.canal = null; }
-  if (C.mesh) { const g = N.toGeometry(C.mesh); r3objs.canal = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xff4b2b, emissive: 0xd62a10, emissiveIntensity: 0.55, roughness: 0.45, metalness: 0, side: THREE.DoubleSide })); r3objs.canal.renderOrder = 1; r3objs.canal.userData.noFit = true; viewer.add(r3objs.canal); }
+  if (C.mesh) { const g = N.toGeometry(C.mesh); r3objs.canal = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xff6a1f, emissive: 0xe0450a, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0, side: THREE.DoubleSide })); r3objs.canal.renderOrder = 1; r3objs.canal.userData.noFit = true; viewer.add(r3objs.canal); }
   show3D(); invalidate(); syncUI();
   shell.status(cs.error ? cs.error : `Canals found: ${cs.volume.toFixed(1)} mm³, ${mm(cs.length)} long`, !!cs.error);
 }
@@ -1064,13 +1067,13 @@ function syncUI() {
   // the root canals
   const cs = S.canal.seg, toothOk = !!(sg && !sg.error), vx = has ? Math.min(...S.vol.spacing) : 0;
   $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null;
-  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. Check the red against the grey of the slices.';
+  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Check the red against the grey of the slices.';
   let co = '';
   if (cs && !cs.error) {
-    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div>${cs.by === 'tooth' ? `<div><span>Stops short of the root end by</span><b>${mm(Math.max(0, cs.apexGap))}</b></div>` : ''}<div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
-    co += `<p class="note${vx > 0.21 ? ' warn' : ''}">Canals narrower than about ${mm(vx, 2)} (one voxel) may not show on this scan.</p>`;
-    if (cs.by === 'walls') co += '<p class="note warn">The tooth as picked does not ring its own pulp (only part of it was taken, or a root was lost in bone as bright as dentine), so the canals were followed from this tooth’s pulp chamber inside the scan’s own bright walls. Check in the slices where they end; picking the tooth more fully (“Tooth” taps on the Pick a tooth step) makes this surer.</p>';
-    if (cs.pieces > 1) co += '<p class="note">In more than one piece: a canal too thin to follow all the way, or specks from a high threshold.</p>';
+    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Stops short of the tooth’s root end by</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
+    co += `<p class="note${vx > 0.21 ? ' warn' : ''}">A scan with ${mm(vx, 2)} voxels blurs a canal over about ${mm(3 * vx, 1)}: canals narrower than ${mm(vx, 2)} or so, the last millimetres towards an apex, side canals and the fine webs between canals do not show on it, and are not drawn. Where a canal stops short of the root’s end, that is where its dip was lost in the noise — not where the canal ends.</p>`;
+    if (cs.faint > 0) co += '<p class="note">Raise the threshold to follow fainter canals (more may be drawn than are there); lower it to keep to what is plain.</p>';
+    if (cs.pieces > 1) co += '<p class="note">In more than one piece: a wide stretch of canal with nothing to be followed between it and the rest.</p>';
   }
   $('cOut').innerHTML = co; shell.markDone('canal', !!S.canal.mesh);
 }

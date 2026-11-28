@@ -85,17 +85,27 @@ dates of birth and the like are never decoded. Axial, coronal and sagittal slice
 surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
 angle. The cross-hair can be turned: drag a round handle on its lines (or `[` / `]`) and the other two slices become
 oblique slices at that angle, square to each other; taps, scrolling, measurements and the tooth overlay follow the turned
-planes, and Straighten puts them back. Pick a tooth: tap it (anywhere on the crown: the region re-centres on the crown's
-thick middle), it is separated from bone and neighbours by a marker flood that meets in the ligament space, with fixes
-(not-tooth taps, eraser, threshold); then a closed replica STL, optionally enlarged and with a handle, for preparing the
-socket in autotransplantation. Root canals: the pulp chamber and canals of the picked tooth — in each slice across the
-tooth, the hollows that lie well below the brightness of the walls ringing them (judged against their own walls, because
-on a CBCT the pulp deep in a root reads brighter than the pulp in the crown), each cut half way between its own darkest
-value and the dentine; followed to an open apex and found under an access cavity. When the tooth as picked does not ring
-its own pulp (only part of a crown taken, a root lost in bone as bright as dentine) the canals are followed from the
-tooth's chamber inside the scan's own bright walls, and the page says so. Tinted red in the slices and shown as a bright
-solid inside a glass tooth in 3D, with volume, length and canals side by side in the root, "Slices along the tooth" to walk
-down the root, and an STL. A canal thinner than a voxel may not show. Needs voxels of about 0.4 mm or smaller. The case keeps the CBCT work, the turned planes and
+planes, and Straighten puts them back. Pick a tooth: tap it anywhere on the crown. Its outline is drawn in the slice where the crown is widest (rays from its
+middle to the edge of the bright tissue, carried across where it touches the next tooth) and followed from slice to slice
+both ways: at each slice the edge is looked for near where it was — a fall in grey from the tooth's own level there —
+and where none can be seen (a root lying against bone as bright as dentine) the outline stays as it was. A root or cusp
+that has split off only narrows; the biting side ends where the crown stops narrowing (the tooth above); a root ends at
+its tip, or where what is followed stops narrowing in bone. Where the bone is as bright as the root the outline may take in
+a little of it, and its end is a guess: the eraser and "Not tooth" taps tidy it. A tooth lying across the slices (impacted,
+on its side) is outlined by the older flood from the taps instead. Then a closed replica STL, optionally enlarged and
+with a handle, for preparing the socket in autotransplantation. Root canals: the pulp chamber and canals of the picked
+tooth. A canal narrower than the scan's blur is only a faint dip in the dentine's grey, so two things are done. The wide
+hollows (chamber, wide canals) are cut where the grey is midway between pulp and dentine. Narrow canals are followed
+as lines from slice to slice across the tooth's own axis: at each voxel the dip below the dentine walling it in (in at
+least three of four directions, so the tooth's darker rim is not a canal) is measured, and the line along which that dip
+adds up to more than noise does — moving at most one voxel sideways per slice, starting from the chamber or a canal
+already found — is a canal; it ends where the dip ahead is lost in the noise. Each is drawn as a tube as wide as its dip
+says it is for the scan's blur. Tinted red in the slices and shown as an orange solid inside a pale glass tooth in 3D,
+with volume, length, canals side by side in the root and how much was followed by its faint dip alone, "Slices along the
+tooth" to walk down the root, and an STL. What a scan cannot show is not drawn: canals narrower than about a voxel, the
+last millimetres towards an apex, side canals and the webs between canals; a canal that stops short of the root's end
+marks where its dip was lost, not where it ends. Root fillings (bright) are not canals. Needs voxels of about 0.4 mm or
+smaller; 0.2 mm or finer shows far more. The case keeps the CBCT work, the turned planes and
 the replica (`cbct-replica`), never the CBCT itself.
 
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or

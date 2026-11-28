@@ -59,11 +59,14 @@ function compare(mesh, t) {
   // a leak: threshold set too low, then three "Not tooth" taps where it went
   await page.evaluate(() => { const i = document.querySelector('#dT'); i.value = 600; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); }); await a.idle(); await page.waitForTimeout(300);
   const leak = await page.evaluate(() => APP.S.tooth.seg.volume);
-  const spots = await page.evaluate(() => { const s = APP.S.tooth.seg, t = APP.S.demo.teeth.find((x) => x.name === 35), f = APP.D.phantomToothField(t), ex = []; const { lab, box } = s; for (let k = 0; k < box.nz; k++) for (let j = 0; j < box.ny; j++) for (let i = 0; i < box.nx; i++) if (lab[i + box.nx * (j + box.ny * k)]) { const p = APP.D.worldOf(APP.S.vol, box.i0 + i, box.j0 + j, box.k0 + k); if (f(...p) > 0.5) ex.push(p); } ex.sort((a, b) => a[2] - b[2]); return ex.length ? [0.25, 0.5, 0.75].map((q) => ex[Math.floor(q * ex.length)]) : []; });
-  await page.click('#cbTool [data-v=not]');
-  for (const p of spots) { await page.evaluate((z) => { APP.S.cur[2] = Math.round(APP.D.voxelOf(APP.S.vol, 0, 0, z)[2]); APP.crossChanged(); }, p[2]); await page.waitForTimeout(200); const [x, y] = await screenOf(page, 'ax', p); await page.mouse.click(x, y); await a.idle(); await page.waitForTimeout(300); }
+  // “Not tooth”: a tap on the tooth's own root takes the root away (what a tap claims is cut from what was found); Undo puts it back
+  const t35n = teeth[35], rootPt = [0, 1, 2].map((q) => t35n.base[q] - t35n.w[q] * 7);
+  await page.click('#cbTool [data-v=not]'); await page.evaluate((z) => { APP.S.cur[2] = Math.round(APP.D.voxelOf(APP.S.vol, 0, 0, z)[2]); APP.crossChanged(); }, rootPt[2]); await page.waitForTimeout(200);
+  { const [x, y] = await screenOf(page, 'ax', rootPt); await page.mouse.click(x, y); await a.idle(); await page.waitForTimeout(300); }
+  const less = await page.evaluate(() => ({ v: APP.S.tooth.seg.error ? 0 : APP.S.tooth.seg.volume, n: APP.S.tooth.not.length }));
+  await page.click('#dUndo'); await a.idle(); await page.waitForTimeout(400);
   const fixed = await page.evaluate(() => ({ v: APP.S.tooth.seg.volume, n: APP.S.tooth.not.length }));
-  ok(leak > TV[35] * 1.08 && fixed.n === 3 && Math.abs(fixed.v - TV[35]) / TV[35] < 0.04, `threshold 600 leaks into the bone (${leak.toFixed(0)} mm³); three “Not tooth” taps where it leaked bring it back to ${fixed.v.toFixed(0)} mm³ (true ${TV[35].toFixed(0)})`);
+  ok(Math.abs(leak - TV[35]) / TV[35] < 0.04 && less.n === 1 && less.v < leak - 3 && fixed.n === 0 && Math.abs(fixed.v - TV[35]) / TV[35] < 0.04, `threshold 600: the tooth is still found whole, by its edge and not by the threshold (${leak.toFixed(0)} mm³, true ${TV[35].toFixed(0)}); a “Not tooth” tap on its root takes what lies round the tap away (${less.v.toFixed(0)} mm³); Undo: ${fixed.v.toFixed(0)} mm³`);
   await page.screenshot({ path: OUT + 't5-leak-fixed.png' });
   // the eraser cuts, Undo puts it back
   const before = fixed.v, t35 = teeth[35], pc = [0, 1, 2].map((q) => t35.base[q] + t35.w[q] * t35.crown * 0.8);

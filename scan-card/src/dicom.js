@@ -554,6 +554,11 @@ export function reorient(vol, dirs) {
 // in sockets with a thin dark periodontal ligament space and a bright socket lining. All of it is plain geometry, so the
 // tests know exactly where everything is. Coordinates are the patient's (LPS, mm): +X left, +Y posterior, +Z up.
 export const PHANTOM = { air: -1000, soft: 60, spongy: 550, cortex: 1300, pdl: 150, pulp: 80, dentine: 1700, enamel: 2800, pdlWidth: 0.3, crest: 0, boneBottom: -17, boneHalf: 5.6 };
+// A second set of values and shapes, "clinical": measured from a real 0.25 mm CBCT (i-CAT) — what each tissue reads once the
+// scanner's blur is allowed for, the blur itself (a Gaussian of sigma 0.32 mm in the slice, 0.28 mm along the axis) and the
+// noise (sd 27, smooth over about a voxel). Narrow canals, a thin ligament space, bone as bright as dentine: what a real
+// scan gives the tooth and canal finders to work with.
+export const CLINICAL = { air: -1000, soft: 60, spongy: 550, marrow: 220, trabecula: 980, cortex: 1300, pdl: 60, pulp: 60, dentine: 1350, enamel: 2900, pdlWidth: 0.2, lining: 0.3, cortexWidth: 1.5, crest: 0, boneBottom: -17, boneHalf: 5.6, blur: 0.32, blurZ: 0.28, noise: 27, noiseBlur: 0.26, noiseBlurZ: 0.19 };
 const TEETH = [ // one side, from the midline back: name digit, mesiodistal width, buccolingual width, root length, crown height, two roots?
   [1, 5.4, 6.0, 12.0, 9.0, 0], [2, 6.0, 6.3, 13.0, 9.2, 0], [3, 7.0, 7.6, 15.0, 10.0, 0], [4, 7.0, 7.8, 13.5, 8.4, 0], [5, 7.2, 8.2, 14.0, 8.0, 0], [6, 10.8, 10.0, 12.5, 7.4, 1], [7, 10.2, 9.8, 12.0, 7.0, 1],
 ];
@@ -581,8 +586,46 @@ function roundCone(px, py, pz, a, b, r1, r2) {                    // exact dista
   return (Math.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
 }
 const ellipsoid = (x, y, z, rx, ry, rz) => { const a = x / rx, b = y / ry, c = z / rz, k0 = Math.sqrt(a * a + b * b + c * c), d = a / rx, e = b / ry, f = c / rz, k1 = Math.sqrt(d * d + e * e + f * f); return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(rx, ry, rz); };
-/** The phantom's teeth with their frames: [{ name (FDI), s, base:[x,y,0], u (mesiodistal), v (buccolingual), w (axis, up), md, bl, root, crown, two }] */
-export function phantomTeeth() {
+/** distance to a chain of round cones through pts = [[a, b, c, radius], …] */
+function chain(a, b, c, pts) { let d = Infinity; for (let i = 0; i + 1 < pts.length; i++) { const v = roundCone(a, b, c, pts[i], pts[i + 1], pts[i][3], pts[i + 1][3]); if (v < d) d = v; } return d; }
+const cappedCyl = (a, b, c, c0, hh, r) => { const dr = Math.hypot(a, b) - r, dz = Math.abs(c - c0) - hh; return Math.min(Math.max(dr, dz), 0) + Math.hypot(Math.max(dr, 0), Math.max(dz, 0)); };
+/**
+ * The clinical shapes of a tooth, in its own coordinates (a towards +u, b towards the tongue, c up the axis from the bone crest):
+ * { lobes: [chain, …] (each root, or each half of a figure-of-eight root, as a chain of round cones, curving at the apex),
+ *   trunk: { c0, hh, r } | null, canals: [chain, …] (one per lobe, from inside the chamber to about a millimetre short of the
+ *   apex, tapering from about 0.9 mm across to 0.25 mm), horns: [chain, …], chamber: { c, ra, rb, rc }, roots (how many) }
+ * dist: +1 or −1, which way along a is distal. Lower molars have a figure-of-eight mesial root with two canals and a distal
+ * root; with three (46) the distal root is two separate roots.
+ */
+function clinicalShape(t, d, dist) {
+  const R = t.root, md = t.md, bl = t.bl, m = -dist;
+  if (!t.two) {
+    const R0 = 0.40 * Math.min(md, bl), bend = 0.5 + 0.1 * d;
+    return { roots: 1, trunk: null, chamber: { c: 2.6, ra: md / 5.5, rb: bl / 5.5, rc: 1.7 }, horns: [],
+      lobes: [[[0, 0, 1.5, R0], [0.25 * bend * dist, 0, -0.45 * R, 0.72 * R0], [bend * dist, 0.2, -R + 0.7, 0.55]]],
+      canals: [[[0, 0, 2.4, 0.5], [0.08 * bend * dist, 0, -0.2 * R, 0.3], [0.25 * bend * dist, 0, -0.45 * R, 0.2], [0.85 * bend * dist, 0.17, -R + 1.25, 0.125]]] };
+  }
+  const off = 0.27 * md, s = 0.16 * bl, three = t.name === 46, lobes = [], canals = [];
+  for (const sb of [-1, 1]) {                                       // the mesial root: two lobes that run into one another, a canal in each
+    lobes.push([[m * off * 0.85, sb * s, 1.0, 2.0], [m * off * 1.05, sb * s * 0.95, -0.5 * R, 1.45], [m * off * 0.93, sb * s * 0.8, -R + 0.7, 0.6]]);
+    canals.push([[m * 1.2, sb * 0.9, 1.1, 0.45], [m * off * 0.8, sb * s, -1.6, 0.34], [m * off * 1.05, sb * s * 0.95, -0.5 * R, 0.2], [m * off * 0.95, sb * s * 0.82, -R + 1.3, 0.12]]);
+  }
+  if (three) for (const sb of [-1, 1]) {                            // two separate distal roots
+    const len = sb > 0 ? 0.88 * R : R;
+    lobes.push([[dist * off * 0.85, sb * 1.7, 1.0, 1.65], [dist * off * 1.1, sb * 2.2, -0.5 * len, 1.25], [dist * off * 1.2, sb * 2.5, -len + 0.9, 0.55]]);
+    canals.push([[dist * 1.2, sb * 0.9, 1.1, 0.45], [dist * off * 0.85, sb * 1.8, -1.6, 0.36], [dist * off * 1.1, sb * 2.2, -0.5 * len, 0.22], [dist * off * 1.19, sb * 2.45, -len + 1.5, 0.13]]);
+  } else {
+    lobes.push([[dist * off * 0.85, 0, 1.0, 2.15], [dist * off * 1.1, 0, -0.5 * R, 1.6], [dist * off * 1.25, 0, -R + 0.9, 0.65]]);
+    canals.push([[dist * 1.2, 0, 1.1, 0.55], [dist * off * 0.85, 0, -1.6, 0.42], [dist * off * 1.1, 0, -0.5 * R, 0.26], [dist * off * 1.23, 0, -R + 1.5, 0.14]]);
+  }
+  const horns = []; for (const sa of [-1, 1]) for (const sb of [-1, 1]) horns.push([[sa * 1.2, sb * 1.0, 3.0, 0.35], [sa * md * 0.25, sb * bl * 0.22, 4.5, 0.1]]);
+  return { roots: three ? 3 : 2, trunk: { c0: -0.8, hh: 2.0, r: 0.38 * md }, chamber: { c: 2.2, ra: md / 5.5, rb: bl / 5.5, rc: 1.5 }, horns, lobes, canals };
+}
+/**
+ * The phantom's teeth with their frames: [{ name (FDI), s, base:[x,y,0], u (mesiodistal), v (buccolingual), w (axis, up), md, bl, root, crown, two }]
+ * { clinical: true }: each also has clin, its clinical shapes (clinicalShape): the fields below then follow those.
+ */
+export function phantomTeeth(o = {}) {
   const L = archLine(), mid = L.length / 2, out = [];
   for (const side of [-1, 1]) {
     let s = 0.1;                                                    // from the midline outwards
@@ -594,7 +637,9 @@ export function phantomTeeth() {
       const tu = 0.05 * Math.sin(1.7 * d + side), tv = 0.09 + 0.03 * Math.cos(2.3 * d), wl = Math.hypot(1, tu, tv), w = [(tu * u[0] + tv * v[0]) / wl, (tu * u[1] + tv * v[1]) / wl, 1 / wl];
       // an orthonormal frame about the tilted axis
       const ud = u[0] * w[0] + u[1] * w[1] + u[2] * w[2], u2 = [u[0] - ud * w[0], u[1] - ud * w[1], u[2] - ud * w[2]], ul = Math.hypot(...u2), uu = u2.map((c) => c / ul), vv = cross(w, uu);
-      out.push({ name, side, s: mid + side * sc, base: [at.p[0], at.p[1], PHANTOM.crest], u: uu, v: vv, w, md, bl, root, crown, two: !!two });
+      const t = { name, side, s: mid + side * sc, base: [at.p[0], at.p[1], PHANTOM.crest], u: uu, v: vv, w, md, bl, root, crown, two: !!two };
+      if (o.clinical) t.clin = clinicalShape(t, d, uu[0] * at.t[0] + uu[1] * at.t[1] > 0 ? side : -side);   // (the arch line runs right to left: distal is along it on the left side, against it on the right)
+      out.push(t);
     });
   }
   return out.sort((a, b) => a.s - b.s);
@@ -602,6 +647,7 @@ export function phantomTeeth() {
 /** A tooth's outer surface as a field: negative inside, positive outside, close to millimetres near the surface. Local coordinates. */
 function toothLocal(t, a, b, c) {
   const hc = t.crown / 2 + 0.5, crown = ellipsoid(a, b, c - (hc - 0.9), t.md / 2, t.bl / 2, hc);
+  if (t.clin) { let d = crown; if (t.clin.trunk) d = sminK(d, cappedCyl(a, b, c, t.clin.trunk.c0, t.clin.trunk.hh, t.clin.trunk.r), 1.0); for (const L of t.clin.lobes) d = sminK(d, chain(a, b, c, L), 0.9); return d; }
   let root;
   if (t.two) { const r = 0.36 * Math.min(t.md / 2, t.bl) , off = t.md * 0.27; root = Math.min(roundCone(a, b, c, [-off, 0, 1.5], [-off * 1.15, 0, -t.root + 0.8], r, 0.8), roundCone(a, b, c, [off, 0, 1.5], [off * 1.15, 0, -t.root + 0.8], r, 0.8)); }
   else root = roundCone(a, b, c, [0, 0, 1.5], [0, 0, -t.root + 0.8], 0.40 * Math.min(t.md, t.bl), 0.8);
@@ -612,6 +658,7 @@ const toLocal = (t, x, y, z) => { const dx = x - t.base[0], dy = y - t.base[1], 
 export function phantomToothField(t) { return (x, y, z) => { const [a, b, c] = toLocal(t, x, y, z); return toothLocal(t, a, b, c); }; }
 /** the pulp (chamber and canals) as a field, negative inside. Local coordinates. */
 function pulpLocal(t, a, b, c) {
+  if (t.clin) { const ch = t.clin.chamber; let p = ellipsoid(a, b, c - ch.c, ch.ra, ch.rb, ch.rc); for (const L of t.clin.canals) p = Math.min(p, chain(a, b, c, L)); for (const L of t.clin.horns) p = Math.min(p, chain(a, b, c, L)); return p; }
   let p = ellipsoid(a, b, c - 3.2, t.md / 5.5, t.bl / 5.5, 1.7);
   if (t.two) { const off = t.md * 0.27; p = Math.min(p, roundCone(a, b, c, [-off, 0, 3], [-off * 1.15, 0, -t.root + 2.2], 0.45, 0.3), roundCone(a, b, c, [off, 0, 3], [off * 1.15, 0, -t.root + 2.2], 0.45, 0.3)); }
   else p = Math.min(p, roundCone(a, b, c, [0, 0, 3], [0, 0, -t.root + 2.2], 0.5, 0.3));
@@ -621,20 +668,36 @@ function pulpLocal(t, a, b, c) {
 export function phantomPulpField(t) { return (x, y, z) => { const [a, b, c] = toLocal(t, x, y, z); return pulpLocal(t, a, b, c); }; }
 /** what a point inside a tooth is made of → [value, margin]: margin is about how far (mm) the point is from where that changes */
 function toothMaterial(t, a, b, c, T) {
-  const p = pulpLocal(t, a, b, c); if (p < 0) return [PHANTOM.pulp, -p];
+  const p = pulpLocal(t, a, b, c);
+  if (t.clin) {                                                     // (dentine a few per cent brighter or darker from place to place, as on a real scan)
+    if (p < 0) return [CLINICAL.pulp, -p]; const hc = t.crown / 2 + 0.5, ce = ellipsoid(a, b, c - (hc - 0.9), t.md / 2, t.bl / 2, hc), en = c > 1.6 && T > -1.3 && ce > -1.3;
+    return [en ? CLINICAL.enamel : CLINICAL.dentine * (1 + 0.05 * Math.sin(0.8 * a + 0.45 * c + t.name)), Math.min(p, Math.abs(c - 1.6), Math.abs(T + 1.3), Math.abs(ce + 1.3))];
+  }
+  if (p < 0) return [PHANTOM.pulp, -p];
   const hc = t.crown / 2 + 0.5, ce = ellipsoid(a, b, c - (hc - 0.9), t.md / 2, t.bl / 2, hc);
   return [c > 1.6 && T > -1.3 && ce > -1.3 ? PHANTOM.enamel : PHANTOM.dentine, Math.min(p, Math.abs(c - 1.6), Math.abs(T + 1.3), Math.abs(ce + 1.3))];
+}
+/** smooth random values in [0, 1) at any point (the same for the same point): for the texture of spongy bone */
+function vnoise(x, y, z) {
+  const i = Math.floor(x), j = Math.floor(y), k = Math.floor(z), sm = (t) => t * t * (3 - 2 * t), tx = sm(x - i), ty = sm(y - j), tz = sm(z - k);
+  const hsh = (a, b, c) => { let q = (Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 1274126177)) | 0; q = Math.imul(q ^ (q >>> 13), 1274126177); return ((q ^ (q >>> 16)) >>> 0) / 4294967296; };
+  const l = (p, q, t) => p + (q - p) * t;
+  return l(l(l(hsh(i, j, k), hsh(i + 1, j, k), tx), l(hsh(i, j + 1, k), hsh(i + 1, j + 1, k), tx), ty), l(l(hsh(i, j, k + 1), hsh(i + 1, j, k + 1), tx), l(hsh(i, j + 1, k + 1), hsh(i + 1, j + 1, k + 1), tx), ty), tz);
 }
 /**
  * makePhantom({ voxel = 0.3, noise = 25, seed = 7, sub = 3 }) → { vol, truth }
  *   vol    as loadVolume gives it (modality 'CT')
  *   truth  { teeth (phantomTeeth()), arch:{ pts, s, length }, values: PHANTOM, bounds, boneField(x, y, z) (negative inside the bone) }
  * Each voxel near a boundary is the average of sub³ samples, as a real scanner averages what lies inside a voxel.
+ * { clinical: true, voxel = 0.25 }: the same jaw as a real scanner shows it (CLINICAL): teeth with curved roots, a trunk and
+ * narrow tapering canals that join the chamber (46 has three roots), a 0.2 mm ligament space with a thin socket lining,
+ * spongy bone with a texture of trabeculae and marrow, the scanner's blur and its smooth noise, air clipped at −1000.
+ * blur, blurZ, noise override the measured values.
  */
 export function makePhantom(o = {}) {
-  const h = o.voxel || 0.3, sub = o.sub || 3, L = archLine(), teeth = phantomTeeth(), V = PHANTOM;
+  const clin = !!o.clinical, h = o.voxel || (clin ? 0.25 : 0.3), sub = o.sub || 3, L = archLine(), teeth = phantomTeeth({ clinical: clin }), V = clin ? CLINICAL : PHANTOM;
   const lo = [-36.2, -40.4, -20.6], hi = [36.2, 21.4, 12.4], nx = Math.round((hi[0] - lo[0]) / h) + 1, ny = Math.round((hi[1] - lo[1]) / h) + 1, nz = Math.round((hi[2] - lo[2]) / h) + 1;
-  const data = new Int16Array(nx * ny * nz);
+  const data = clin ? new Float32Array(nx * ny * nz) : new Int16Array(nx * ny * nz);
   // distance to the arch line in the axial plane, on a fine map (the bone and the soft tissue depend only on it and on z)
   const mh = h / 2, mx = Math.round((hi[0] - lo[0]) / mh) + 3, my = Math.round((hi[1] - lo[1]) / mh) + 3, dmap = new Float32Array(mx * my), P = L.pts;
   for (let j = 0; j < my; j++) for (let i = 0; i < mx; i++) {
@@ -647,12 +710,14 @@ export function makePhantom(o = {}) {
   const zc = (V.crest + V.boneBottom) / 2, zh = (V.crest - V.boneBottom) / 2, rr = 2.5;
   const boneD = (d, z) => { const qx = d - (V.boneHalf - rr), qy = Math.abs(z - zc) - (zh - rr), px = qx > 0 ? qx : 0, py = qy > 0 ? qy : 0; return Math.sqrt(px * px + py * py) + Math.min(Math.max(qx, qy), 0) - rr; };   // < 0 inside the bone
   const softD = (d, z) => { const qx = d - (V.boneHalf + 1.2), qy = Math.abs(z - (zc - 0.2)) - (zh - 1.2), px = qx > 0 ? qx : 0, py = qy > 0 ? qy : 0; return Math.sqrt(px * px + py * py) + Math.min(Math.max(qx, qy), 0) - 3.2; };
-  const ground = (x, y, z) => { const d = dArch(x, y), bd = boneD(d, z); if (bd < 0) return bd > -1.4 ? V.cortex : V.spongy; return softD(d, z) < 0 ? V.soft : V.air; };
+  const cw = clin ? V.cortexWidth : 1.4, lining = clin ? V.lining : 0.45;
+  const inBone = clin ? (bd, x, y, z) => (bd > -cw ? V.cortex : Math.abs(vnoise(x / 0.9, y / 0.9, z / 0.9) - 0.5) < 0.13 ? V.trabecula : V.marrow) : (bd) => (bd > -1.4 ? V.cortex : V.spongy);   // (clinical: plates of trabeculae where the random field crosses its middle value)
+  const ground = (x, y, z) => { const d = dArch(x, y), bd = boneD(d, z); if (bd < 0) return inBone(bd, x, y, z); return softD(d, z) < 0 ? V.soft : V.air; };
   // 1) bone, soft tissue and air (boundaries smoothed over a voxel by sampling)
   const offs = []; for (let a = 0; a < sub; a++) offs.push(((a + 0.5) / sub - 0.5) * h);
   for (let k = 0; k < nz; k++) { const z = lo[2] + k * h; for (let j = 0; j < ny; j++) { const y = lo[1] + j * h; for (let i = 0; i < nx; i++) {
     const x = lo[0] + i * h, d = dArch(x, y), bd = boneD(d, z), sd = softD(d, z); let v;
-    if (Math.abs(bd) > h && Math.abs(bd + 1.4) > h && Math.abs(sd) > h) v = bd < 0 ? (bd > -1.4 ? V.cortex : V.spongy) : (sd < 0 ? V.soft : V.air);
+    if (Math.abs(bd) > h && Math.abs(bd + cw) > h && Math.abs(sd) > h) v = bd < 0 ? inBone(bd, x, y, z) : (sd < 0 ? V.soft : V.air);
     else { let sum = 0; for (const oz of offs) for (const oy of offs) for (const ox of offs) sum += ground(x + ox, y + oy, z + oz); v = sum / (sub * sub * sub); }
     data[i + nx * (j + ny * k)] = v;
   } } }
@@ -664,7 +729,7 @@ export function makePhantom(o = {}) {
     for (const q of near) { const T = q.f(x, y, z); if (T < best) { second = best; best = T; bt = q.t; } else if (T < second) second = T; }
     if (best < 0) { const [a, b, c] = toLocal(bt, x, y, z), r = toothMaterial(bt, a, b, c, best); return [r[0], Math.min((second - best) / 2, -best, r[1])]; }
     const d = dArch(x, y), bd = boneD(d, z);
-    if (bd < 0) return [best < V.pdlWidth ? V.pdl : best < V.pdlWidth + 0.45 ? V.cortex : bd > -1.4 ? V.cortex : V.spongy, Math.min(-bd, Math.abs(bd + 1.4), best, Math.abs(best - V.pdlWidth), Math.abs(best - V.pdlWidth - 0.45))];
+    if (bd < 0) return [best < V.pdlWidth ? V.pdl : best < V.pdlWidth + lining ? V.cortex : inBone(bd, x, y, z), Math.min(-bd, Math.abs(bd + cw), best, Math.abs(best - V.pdlWidth), Math.abs(best - V.pdlWidth - lining))];
     const sd = softD(d, z); return [sd < 0 ? V.soft : V.air, Math.min(best, bd, Math.abs(sd))];
   };
   const tv = new Float64Array(fields.length), cand = [];
@@ -675,7 +740,7 @@ export function makePhantom(o = {}) {
     const i0 = Math.max(0, Math.floor((t.base[0] - R - tilt - lo[0]) / h)), i1 = Math.min(nx - 1, Math.ceil((t.base[0] + R + tilt - lo[0]) / h)), j0 = Math.max(0, Math.floor((t.base[1] - R - tilt - lo[1]) / h)), j1 = Math.min(ny - 1, Math.ceil((t.base[1] + R + tilt - lo[1]) / h)), k0 = Math.max(0, Math.floor((zt[0] - lo[2]) / h)), k1 = Math.min(nz - 1, Math.ceil((zt[1] - lo[2]) / h));
     for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const x = lo[0] + i * h, y = lo[1] + j * h, z = lo[2] + k * h;
-      const Tq = q.f(x, y, z); if (Tq > V.pdlWidth + 0.45 + h) continue;   // not this tooth's business
+      const Tq = q.f(x, y, z); if (Tq > V.pdlWidth + lining + h) continue;   // not this tooth's business
       // only the teeth that can be the nearest somewhere inside this voxel take part
       let best = Infinity; for (let g = 0; g < near.length; g++) { tv[g] = near[g] === q ? Tq : near[g].f(x, y, z); if (tv[g] < best) best = tv[g]; }
       cand.length = 0; for (let g = 0; g < near.length; g++) if (tv[g] <= best + 2 * h) cand.push(near[g]);
@@ -683,6 +748,20 @@ export function makePhantom(o = {}) {
       if (m < safe) { let sum = 0; for (const oz of offs) for (const oy of offs) for (const ox of offs) sum += mat(x + ox, y + oy, z + oz, cand)[0]; v = sum / (sub * sub * sub); }
       data[i + nx * (j + ny * k)] = v;
     }
+  }
+  // 3) clinical: the scanner's blur (the voxel's own averaging is part of it), then noise that is smooth over about a voxel
+  if (clin) {
+    const dims = [nx, ny, nz], bs = [o.blur ?? V.blur, o.blur ?? V.blur, o.blurZ ?? V.blurZ].map((b) => Math.sqrt(Math.max(0, b * b - h * h / 12)) / h); gauss3(data, dims, bs);
+    const sg = o.noise ?? V.noise, out = new Int16Array(data.length);
+    if (sg > 0) {
+      let sd = (o.seed || 7) >>> 0; const rnd = () => { sd = (sd + 0x6D2B79F5) >>> 0; let t = Math.imul(sd ^ (sd >>> 15), 1 | sd); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+      const nse = new Float32Array(data.length); for (let i = 0; i < nse.length; i += 2) { const u = Math.sqrt(-2 * Math.log(rnd() + 1e-12)), a = 6.283185307 * rnd(); nse[i] = u * Math.cos(a); if (i + 1 < nse.length) nse[i + 1] = u * Math.sin(a); }
+      gauss3(nse, dims, [V.noiseBlur / h, V.noiseBlur / h, V.noiseBlurZ / h]); let s2 = 0; for (let i = 0; i < nse.length; i += 7) s2 += nse[i] * nse[i]; const k = sg / Math.sqrt(s2 / Math.ceil(nse.length / 7));
+      for (let i = 0; i < data.length; i++) data[i] += k * nse[i];
+    }
+    let mn = 32767, mx2 = -32768; for (let i = 0; i < data.length; i++) { const v = Math.round(Math.max(V.air, Math.min(3095, data[i]))); out[i] = v; if (v < mn) mn = v; if (v > mx2) mx2 = v; }
+    const vol = { data: out, dims: [nx, ny, nz], spacing: [h, h, h], origin: lo.slice(), min: mn, max: mx2, shift: 0, modality: 'CT', date: '', compression: 'made up', warnings: [] };
+    return { vol, truth: { teeth, arch: L, values: V, bounds: { lo, hi }, boneField: (x, y, z) => boneD(dArch(x, y), z) } };
   }
   // 3) noise
   const sigma = o.noise ?? 25;
@@ -877,6 +956,283 @@ export function proposeArch(vol, H = histogram(vol)) {
 
 // ── one tooth out of the scan ──
 const N6 = (nx, ny) => [1, -1, nx, -nx, nx * ny, -nx * ny];
+// ── one tooth out of the scan, followed from slice to slice ──
+// The grey values that mark a tooth off from what is round it are local: dentine reads up to a quarter brighter in one part of
+// a tooth than in another, cortical bone reads as bright as dentine, and the ligament space between a root and its socket is
+// only a faint dark line (a dip of about a third, less than a voxel wide). So the tooth is not cut out by one threshold. Its
+// outline is found in the slice through the widest part of the crown, where it stands in air and soft tissue, and followed
+// from there slice by slice towards the cusps and towards the root ends:
+//   · each piece of the outline (the crown, then each root) is a closed curve round its own middle. Along rays from the
+//     middle, the edge is where the grey falls from the tooth's own level into something darker — soft tissue, marrow, or
+//     the dip of the ligament space — close to where the edge was in the slice before. Where no fall shows (a root against
+//     bone as bright as itself, a crown against its neighbour) the outline carries on as it was going: shifting and
+//     narrowing at the rate it had.
+//   · inside the outline a voxel is tooth if it is not much darker than the tooth's own tissue next to it in the slice
+//     before (so the pulp, the gap between two roots and the fissures drop out, and each root goes its own way);
+//   · the tooth may only grow sideways where a fall in grey shows just beyond the new voxels, so it cannot spread into bone.
+const NRAY = 72, RCOS = new Float64Array(NRAY), RSIN = new Float64Array(NRAY); for (let t = 0; t < NRAY; t++) { RCOS[t] = Math.cos(2 * Math.PI * t / NRAY); RSIN[t] = Math.sin(2 * Math.PI * t / NRAY); }
+/** out[p] = 1 for a slice's mask and for what it shuts in (not reachable from the slice's edge) */
+function solid2(M, n0, n1, out) {
+  out.fill(1); const st = [], push = (p) => { if (!M[p] && out[p]) { out[p] = 0; st.push(p); } };
+  for (let i = 0; i < n0; i++) { push(i); push(i + n0 * (n1 - 1)); } for (let j = 0; j < n1; j++) { push(n0 * j); push(n0 - 1 + n0 * j); }
+  while (st.length) { const p = st.pop(), i = p % n0, j = (p / n0) | 0; if (i > 0) push(p - 1); if (i < n0 - 1) push(p + 1); if (j > 0) push(p - n0); if (j < n1 - 1) push(p + n0); }
+  return out;
+}
+/**
+ * The cheapest closed chain: one of S states for each of n rays (cost U[t·S + s]), changing by at most maxStep states from
+ * one ray to the next at lam a state → Int16Array of states. Closed by starting at ray t0 — one whose cost is telling — in
+ * each of its three best states in turn.
+ */
+function closedChain(U, n, S, maxStep, lam, t0 = 0) {
+  const cost = new Float32Array(S), nxt = new Float32Array(S), back = new Int16Array(n * S), tries = [], u0 = t0 * S, order = Array.from({ length: S }, (_, s) => s).sort((a, b) => U[u0 + a] - U[u0 + b]);
+  for (const s of order) { if (tries.every((c) => Math.abs(c - s) > maxStep)) tries.push(s); if (tries.length >= 3) break; }
+  let best = null;
+  for (const s0 of tries) {
+    cost.fill(Infinity); cost[s0] = U[u0 + s0];
+    for (let m = 1; m < n; m++) { const t = (t0 + m) % n; for (let s = 0; s < S; s++) { let b = Infinity, bi = 0; for (let d = -maxStep; d <= maxStep; d++) { const p = s + d; if (p < 0 || p >= S) continue; const c = cost[p] + lam * Math.abs(d); if (c < b) { b = c; bi = p; } } nxt[s] = b + U[t * S + s]; back[m * S + s] = bi; } cost.set(nxt); }
+    let e = -1, eb = Infinity; for (let d = -maxStep; d <= maxStep; d++) { const s = s0 + d; if (s < 0 || s >= S) continue; const c = cost[s] + lam * Math.abs(d); if (c < eb) { eb = c; e = s; } }
+    if (e >= 0 && (!best || eb < best.c)) { const path = new Int16Array(n); let s = e; for (let m = n - 1; m >= 1; m--) { path[(t0 + m) % n] = s; s = back[m * S + s]; } path[t0] = s0; best = { c: eb, path }; }
+  }
+  return best ? best.path : new Int16Array(n);
+}
+/** a closed outline given as a radius (voxels) for each ray about (ci, cj) → its area and centroid; and whether a voxel lies inside it */
+function outlineStats(r, ci, cj) { let A = 0, sx = 0, sy = 0; for (let t = 0; t < NRAY; t++) { const u = (t + 1) % NRAY, x0 = r[t] * RCOS[t], y0 = r[t] * RSIN[t], x1 = r[u] * RCOS[u], y1 = r[u] * RSIN[u], c = x0 * y1 - x1 * y0; A += c; sx += (x0 + x1) * c; sy += (y0 + y1) * c; } A /= 2; return { area: A, cx: A ? ci + sx / (6 * A) : ci, cy: A ? cj + sy / (6 * A) : cj }; }
+function radiusAt(r, dx, dy) { let a = Math.atan2(dy, dx) * NRAY / (2 * Math.PI); if (a < 0) a += NRAY; const t = Math.floor(a) % NRAY, f = a - Math.floor(a); return r[t] * (1 - f) + r[(t + 1) % NRAY] * f; }
+/** the middle value of the darker and of the brighter of two groups a list of values falls into best (Otsu) → { lo, hi, cut, share } (share: how much of the list is in the brighter group) */
+function twoLevels(v) {
+  const a = Float64Array.from(v).sort(), n = a.length; if (n < 8) return null; let tot = 0; for (let i = 0; i < n; i++) tot += a[i];
+  let best = -1, bi = 0, s = 0; for (let i = 0; i < n - 1; i++) { s += a[i]; const w0 = (i + 1) / n, m0 = s / (i + 1), m1 = (tot - s) / (n - i - 1), bv = w0 * (1 - w0) * (m1 - m0) * (m1 - m0); if (bv > best) { best = bv; bi = i; } }
+  return { lo: a[bi >> 1], hi: a[(bi + n) >> 1], cut: (a[bi] + a[bi + 1]) / 2, share: (n - bi - 1) / n };
+}
+/**
+ * trackTooth(G, seed, P) — the tooth a point lies on, followed through the slices of a grid.
+ *   G     { I (Int16Array), n0, n1, n2, h (mm in a slice), hz (mm between slices), allow (Uint8Array: 1 where the tooth may be, 0 where it was
+ *         cut away, 2 outside the region it must lie in) }: slices run across the tooth
+ *   seed  [i, j, k] on the crown        P  { T (the level between soft tissue and tooth), more:[[i, j, k]…] (points that are tooth too) }
+ * → { mask (Uint8Array, 1 = tooth; the pulp is left out), kEq (the slice the outline started in), cEq [i, j], D0 (the dentine's
+ *     level), E0 (the enamel's, or null), Dcap, C (dentine against soft tissue), dark }  or { error }
+ */
+const polyArea = (r) => { let a = 0; for (let t = 0; t < NRAY; t++) a += r[t] * r[(t + 1) % NRAY]; return 0.5 * a * Math.sin(2 * Math.PI / NRAY); };
+const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+function trackTooth(G, seed, P) {
+  const { I, n0, n1, n2, h, allow } = G, hz = G.hz || h, sl = n0 * n1, n = sl * n2, T = P.T, mm = (x) => x / h;
+  const B = new Uint8Array(sl), S2 = new Uint8Array(sl), rraw = new Float32Array(NRAY), rmax = Math.min(mm(12), Math.max(n0, n1));
+  // ── the outline of the crown in one slice: the bright blob the point is in (holes filled), its edge along rays, smoothed
+  //    round so that where it runs on into the next tooth it is carried across from either side ──
+  const outline = (k, ci, cj) => {
+    const base = k * sl; for (let p = 0; p < sl; p++) B[p] = allow[base + p] && I[base + p] >= T ? 1 : 0; solid2(B, n0, n1, S2);   // (bright outside the region too: the region's edge is not an edge of the tooth)
+    let i0 = Math.round(ci), j0 = Math.round(cj); if (i0 < 0 || j0 < 0 || i0 >= n0 || j0 >= n1) return null;
+    if (!S2[i0 + n0 * j0]) { let bd = mm(1.5) ** 2 + 1e-6, f = -1; const R = Math.ceil(mm(1.5)); for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = i0 + a, jj = j0 + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1 || !S2[ii + n0 * jj]) continue; const d = a * a + b * b; if (d < bd) { bd = d; f = ii + n0 * jj; } } if (f < 0) return null; i0 = f % n0; j0 = (f / n0) | 0; ci = i0; cj = j0; }
+    let r = null, q = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      const Sn = Math.ceil(rmax * 2) + 1, U = new Float32Array(NRAY * Sn), cap = mm(1.5);
+      for (let t = 0; t < NRAY; t++) { let tt = 0.5, out = -1; for (; tt <= rmax; tt += 0.5) { const ii = Math.round(ci + tt * RCOS[t]), jj = Math.round(cj + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; const p = ii + n0 * jj; if (!S2[p]) { out = tt - 0.25; break; } if (allow[base + p] === 2) break; } rraw[t] = out; }
+      // a ray that runs on far beyond most (through a contact into the next tooth) tells nothing about this tooth's edge
+      const vr = Array.from(rraw).filter((x) => x >= 0).sort((a, b) => a - b), med = vr.length ? vr[vr.length >> 1] : 0, far = 1.35 * med + mm(0.5);
+      for (let t = 0; t < NRAY; t++) { const out = rraw[t] > far ? -1 : rraw[t]; rraw[t] = out; for (let s = 0; s < Sn; s++) U[t * Sn + s] = out < 0 ? 0.15 * Math.max(0, s * 0.5 - med) : Math.min(Math.abs(s * 0.5 - out), cap); }
+      let t0 = 0; { const v = Array.from(rraw).filter((x) => x >= 0).sort((a, b) => a - b), want = v.length ? v[Math.floor(v.length * 0.3)] : 0; let bd = Infinity; for (let t = 0; t < NRAY; t++) if (rraw[t] >= 0 && Math.abs(rraw[t] - want) < bd) { bd = Math.abs(rraw[t] - want); t0 = t; } }   // start the chain at a ray that surely ends on the tooth's own edge
+      const path = closedChain(U, NRAY, Sn, 3, 0.6, t0); r = new Float32Array(NRAY); let good = 0; for (let t = 0; t < NRAY; t++) { r[t] = Math.max(0.5, path[t] * 0.5); if (rraw[t] >= 0 && Math.abs(r[t] - rraw[t]) <= 1.5) good++; } q = good / NRAY;
+      const st = outlineStats(r, ci, cj); if (P.debug) P.debug({ what: 'outline', k, pass, ci, cj, rraw: Array.from(rraw), r: Array.from(r), q, area: st.area * h * h, cx: st.cx, cy: st.cy });
+      if (Math.hypot(st.cx - ci, st.cy - cj) < 1 || pass === 2) return { r, q, area: st.area * h * h, ci, cj, cx: st.cx, cy: st.cy };
+      if (!S2[Math.round(st.cx) + n0 * Math.round(st.cy)]) return { r, q, area: st.area * h * h, ci, cj, cx: st.cx, cy: st.cy }; ci = st.cx; cj = st.cy;
+    }
+    return null;
+  };
+  // the slice to start in: within 4 mm of the point, the one where the crown is widest and its outline clear
+  let eq = null; const span = Math.round(4 / hz), ok = (o) => o && o.q >= 0.6 && o.area < 200 && o.area > 3;
+  const o0 = outline(seed[2], seed[0], seed[1]); if (!ok(o0)) return { error: 'No tooth crown was found where you tapped: tap the middle of the crown, in a slice where it stands clear of the bone.' };
+  const found = new Map([[seed[2], o0]]), softL = P.soft != null ? Math.min(P.soft, T - 50) : null;
+  for (const dir of [1, -1]) { let last = o0; for (let s = 1; s <= span; s++) { const k = seed[2] + dir * s; if (k < 0 || k >= n2) break; const o = outline(k, last.cx, last.cy); if (!ok(o) || Math.hypot(o.cx - seed[0], o.cy - seed[1]) > mm(4)) break; found.set(k, o); last = o; } }
+  // enamel: over those slices together the tooth's own values fall into two levels, the upper half as bright again as the lower
+  // (above soft tissue). Dentine brightens towards the enamel and from crown to root by a quarter, which is not a second level
+  const valsIn = (o, k, out) => { const base = k * sl, R = Math.ceil(Math.max(...o.r)) + 1; for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = Math.round(o.ci) + a, jj = Math.round(o.cj) + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - o.ci, dy = jj - o.cj, p = ii + n0 * jj; if (allow[base + p] === 1 && I[base + p] >= T && Math.hypot(dx, dy) <= radiusAt(o.r, dx, dy)) out.push(I[base + p]); } return out; };
+  const isTwo = (two) => !!two && two.share > 0.05 && two.share < 0.95 && (softL != null ? two.hi - softL >= 1.45 * (two.lo - softL) : two.hi - two.lo > 0.5 * (two.lo - T));
+  let pool = []; for (const [k, o] of found) { o.vals = valsIn(o, k, []); pool = pool.concat(o.vals); } if (pool.length > 40000) { const f = Math.ceil(pool.length / 40000); pool = pool.filter((_, i) => i % f === 0); }
+  const twoP = twoLevels(pool), Eth = isTwo(twoP) ? twoP.cut : Infinity; for (const o of found.values()) { let e = 0; for (const v of o.vals) if (v > Eth) e++; o.en = o.vals.length ? e / o.vals.length : 0; }
+  // the slice to start in: within 4 mm of the point, the one where the crown is widest and its outline clear. Cusps join into the
+  // whole crown within a slice or two, so its size may jump — where there is enamel; without it a jump is the bone joining in.
+  // And once it has narrowed (to the neck, or to the tips of the cusps), what widens again is the bone or the tooth it bites on
+  eq = { ...o0, k: seed[2] };
+  for (const dir of [1, -1]) { let lastA = o0.area, top = o0.area, low = o0.area; for (let s = 1; s <= span; s++) { const k = seed[2] + dir * s, o = found.get(k); if (!o) break;
+      if (o.area > 1.3 * lastA + 1 && !(o.en >= 0.15)) break; if (o.area > top) { top = o.area; low = o.area; } else if (o.area < low) low = o.area; if (low < 0.7 * top && o.area > 1.15 * low + 1) break; lastA = o.area; if (o.area * o.q > eq.area * eq.q) eq = { ...o, k }; } }
+  const mask = new Uint8Array(n), kEq = eq.k, start = new Uint8Array(sl);
+  { const base = kEq * sl, R = Math.ceil(Math.max(...eq.r)) + 1; for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = Math.round(eq.ci) + a, jj = Math.round(eq.cj) + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - eq.ci, dy = jj - eq.cj, p = ii + n0 * jj; if (Math.hypot(dx, dy) <= radiusAt(eq.r, dx, dy) && allow[base + p] === 1 && I[base + p] >= T) start[p] = 1; } }
+  { // only the piece the middle of the outline is on (the outline may take in a corner of the next tooth across the gap between them)
+    const keep = new Uint8Array(sl), st0 = []; let p0 = Math.round(eq.cx) + n0 * Math.round(eq.cy); if (!start[p0]) { let bd = Infinity; for (let p = 0; p < sl; p++) if (start[p]) { const d = (p % n0 - eq.cx) ** 2 + (((p / n0) | 0) - eq.cy) ** 2; if (d < bd) { bd = d; p0 = p; } } }
+    if (start[p0]) { keep[p0] = 1; st0.push(p0); while (st0.length) { const p = st0.pop(), i = p % n0, j = (p / n0) | 0; if (i > 0 && start[p - 1] && !keep[p - 1]) { keep[p - 1] = 1; st0.push(p - 1); } if (i < n0 - 1 && start[p + 1] && !keep[p + 1]) { keep[p + 1] = 1; st0.push(p + 1); } if (j > 0 && start[p - n0] && !keep[p - n0]) { keep[p - n0] = 1; st0.push(p - n0); } if (j < n1 - 1 && start[p + n0] && !keep[p + n0]) { keep[p + n0] = 1; st0.push(p + n0); } } start.set(keep); } }
+  // the levels: dentine and enamel from the crown's own values; soft tissue from just outside it
+  const vals = [], ring = []; { const base = kEq * sl, R = Math.ceil(Math.max(...eq.r)) + 8; for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = Math.round(eq.ci) + a, jj = Math.round(eq.cj) + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const p = ii + n0 * jj; if (start[p]) vals.push(I[base + p]); else { const dx = ii - eq.ci, dy = jj - eq.cj, d = Math.hypot(dx, dy) - radiusAt(eq.r, dx, dy); if (d > 3 && d <= 7 && allow[base + p] === 1) ring.push(I[base + p]); } } }
+  if (vals.length < 6) return { error: 'No tooth crown was found where you tapped: tap the middle of the crown.' };
+  const two = twoLevels(vals), srt = Float64Array.from(vals).sort(); let D0 = srt[srt.length >> 1], E0 = null;
+  ring.sort((a, b) => a - b); const S0 = ring.length ? ring[Math.floor(ring.length * 0.3)] : -Infinity, soft = softL;
+  if (isTwo(two) && two.share > 0.08 && two.share < 0.8) { D0 = two.lo; E0 = two.hi; }
+  else if (Eth < Infinity) { const low = vals.filter((v) => v <= Eth).sort((a, b) => a - b); if (low.length >= 6) D0 = low[low.length >> 1]; E0 = twoP.hi; }   // (no enamel to speak of in this slice: its level from the slices beside it)
+  const C = soft != null ? Math.max(D0 - soft, 1.2 * (D0 - T), 50) : Math.max(D0 - Math.max(S0, D0 - 2.5 * (D0 - T)), 1.2 * (D0 - T), 50), Dcap = E0 != null ? (D0 + E0) / 2 : D0 + 0.35 * C, dark = Math.round(T - C);
+  // ── following it: from a slice's mask to the next slice's ──
+  const W = Math.max(2, Math.round(mm(1.25))), Ro = Math.max(1, Math.round(mm(0.75))), lab = new Int32Array(sl), hull = new Int16Array(sl), cand = new Int8Array(sl), cur = new Uint8Array(sl), sol = new Uint8Array(sl), motOf = new Int16Array(sl), motPrev = new Int16Array(sl);
+  const isum = new Float64Array((n0 + 1) * (n1 + 1)), icnt = new Int32Array((n0 + 1) * (n1 + 1)), isum2 = new Float64Array((n0 + 1) * (n1 + 1)), icnt2 = new Int32Array((n0 + 1) * (n1 + 1)), prof = new Float32Array(512), OI = 4, NS = OI + 4, U = new Float32Array(NRAY * NS), st = [];   // (the edge is looked for from 2 voxels inside where it was to 1½ outside: further in, a fall in grey is the gap opening between two roots — or a canal — and what lies beyond it is still tooth)
+  const polys = [], force = new Uint8Array(sl), Tlow = soft != null ? (soft + T) / 2 : T - 0.4 * C, age = new Uint8Array(sl), freshMot = () => ({ unsup: 0, cx: 0, cy: 0, area: 0, fresh: true, hist: [], trail: [], uh: [], over: 0 });
+  const run = (startMask, kStart, dirs) => {
+    for (let p = 0; p < sl; p++) if (startMask[p]) mask[kStart * sl + p] = 1;
+    for (const dir of dirs) {
+      let prev = startMask.slice(), mots = [freshMot()], Aeq = 0; motPrev.fill(0); for (let p = 0; p < sl; p++) age[p] = startMask[p] ? 0 : 255;
+      for (let k = kStart + dir; k >= 0 && k < n2; k += dir) {
+        const base = k * sl, pbase = (k - dir) * sl, val = (i, j) => { if (i < 0 || j < 0 || i >= n0 || j >= n1) return NaN; const a = allow[base + i + n0 * j]; return a === 1 ? I[base + i + n0 * j] : a === 0 ? dark : NaN; };   // (cut away: dark; outside the region: not known)
+        const bil = (x, y) => { const i = Math.floor(x), j = Math.floor(y), tx = x - i, ty = y - j; return (val(i, j) * (1 - tx) + val(i + 1, j) * tx) * (1 - ty) + (val(i, j + 1) * (1 - tx) + val(i + 1, j + 1) * tx) * ty; };
+        // the tooth's own level round each place, from the slice before (its tissue below the enamel's level)
+        for (let j = 0; j < n1; j++) { let rs = 0, rc = 0, rs2 = 0, rc2 = 0; for (let i = 0; i < n0; i++) { const p = i + n0 * j; if (prev[p] && I[pbase + p] >= T) { const v = I[pbase + p]; if (v <= Dcap) { rs += v; rc++; } rs2 += Math.min(v, Dcap); rc2++; } const q = (i + 1) + (n0 + 1) * (j + 1); isum[q] = isum[q - (n0 + 1)] + rs; icnt[q] = icnt[q - (n0 + 1)] + rc; isum2[q] = isum2[q - (n0 + 1)] + rs2; icnt2[q] = icnt2[q - (n0 + 1)] + rc2; } }
+        const Dloc = (i, j) => { const a0 = Math.max(0, i - W), a1 = Math.min(n0, i + W + 1), b0 = Math.max(0, j - W), b1 = Math.min(n1, j + W + 1), w = n0 + 1, c = icnt[a1 + w * b1] - icnt[a0 + w * b1] - icnt[a1 + w * b0] + icnt[a0 + w * b0]; if (c >= 3) return (isum[a1 + w * b1] - isum[a0 + w * b1] - isum[a1 + w * b0] + isum[a0 + w * b0]) / c;
+          const c2 = icnt2[a1 + w * b1] - icnt2[a0 + w * b1] - icnt2[a1 + w * b0] + icnt2[a0 + w * b0]; return c2 > 0 ? (isum2[a1 + w * b1] - isum2[a0 + w * b1] - isum2[a1 + w * b0] + isum2[a0 + w * b0]) / c2 : NaN; };   // (all enamel there: its level, capped)
+        // may a voxel be tooth? not much darker than the tooth's own tissue beside it (a fifth of the way to soft tissue), or
+        // above the level half way to the darkest thing within ¾ mm (the blurred edge of the tooth against something dark)
+        cand.fill(-1);
+        const isCand = (i, j) => { if (i < 0 || j < 0 || i >= n0 || j >= n1) return 0; const p = i + n0 * j; if (cand[p] >= 0) return cand[p]; let c = 0; const v = I[base + p];
+          if (allow[base + p] === 1 && v >= T) { const D = Dloc(i, j); if (D === D) { let lim = D - 0.2 * C; if (v < lim) { let mn = v; for (let b = -Ro; b <= Ro; b++) for (let a = -Ro; a <= Ro; a++) { const u = val(i + a, j + b); if (u < mn) mn = u; } lim = Math.min(lim, (D + mn) / 2); } c = v >= Math.max(T, lim) ? 1 : 0; } }
+          cand[p] = c; return c; };
+        // the pieces of the mask in the slice before, and an outline round each in this slice
+        lab.fill(0); hull.fill(0); force.fill(0); const comps = [], outl = [null];
+        const inward = (p, i, j) => { const o = outl[hull[p]]; if (!o) return false; const dx = i - o.cx, dy = j - o.cy; return Math.hypot(dx, dy) < radiusAt(o.rp, dx, dy) - 1; };   // (within the piece's own reach from its middle: in a hollow of it, not on its outside)
+        for (let p0 = 0; p0 < sl; p0++) { if (!prev[p0] || lab[p0]) continue; const id = comps.length + 1, vox = []; lab[p0] = id; st.push(p0); while (st.length) { const p = st.pop(), i = p % n0, j = (p / n0) | 0; vox.push(p); if (i > 0 && prev[p - 1] && !lab[p - 1]) { lab[p - 1] = id; st.push(p - 1); } if (i < n0 - 1 && prev[p + 1] && !lab[p + 1]) { lab[p + 1] = id; st.push(p + 1); } if (j > 0 && prev[p - n0] && !lab[p - n0]) { lab[p - n0] = id; st.push(p - n0); } if (j < n1 - 1 && prev[p + n0] && !lab[p + n0]) { lab[p + n0] = id; st.push(p + n0); } } comps.push(vox); }
+        // a piece that cannot be seen whole from its own middle (two roots still joined by a neck of tooth between them: a
+        // dumb-bell) is followed as its parts: it is worn down evenly until it falls apart, and each voxel goes to the part nearest it
+        for (let c0 = 0, nC = comps.length; c0 < nC; c0++) { const vox = comps[c0], id = c0 + 1; if (vox.length < 40) continue; let sx = 0, sy = 0; for (const p of vox) { sx += p % n0; sy += (p / n0) | 0; } const cx = sx / vox.length, cy = sy / vox.length, Rr = new Float32Array(NRAY);
+          for (let t = 0; t < NRAY; t++) { let last = 0; for (let tt = 0; tt < 200; tt += 0.5) { const ii = Math.round(cx + tt * RCOS[t]), jj = Math.round(cy + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; if (lab[ii + n0 * jj] === id) last = tt; else if (tt > last + 12) break; } Rr[t] = last; }
+          let hidden = 0; for (const p of vox) { const dx = (p % n0) - cx, dy = ((p / n0) | 0) - cy; let a = Math.atan2(dy, dx) / (2 * Math.PI) * NRAY; if (a < 0) a += NRAY; const ta = Math.floor(a) % NRAY; if (Math.hypot(dx, dy) > Math.max(Rr[ta], Rr[(ta + 1) % NRAY]) + 1) hidden++; }
+          if (hidden <= Math.max(8, 0.06 * vox.length)) continue;
+          let E = new Set(vox), cores = null;
+          for (let r = 1; r <= 8 && E.size > 8 && !cores; r++) { const E2 = new Set(); for (const p of E) { const i = p % n0, j = (p / n0) | 0; if (i > 0 && j > 0 && i < n0 - 1 && j < n1 - 1 && E.has(p - 1) && E.has(p + 1) && E.has(p - n0) && E.has(p + n0)) E2.add(p); } E = E2;
+            const seenE = new Set(), parts = []; for (const p0 of E) { if (seenE.has(p0)) continue; const part = []; seenE.add(p0); st.push(p0); while (st.length) { const p = st.pop(); part.push(p); for (const q of [p - 1, p + 1, p - n0, p + n0]) if (E.has(q) && !seenE.has(q)) { seenE.add(q); st.push(q); } } parts.push(part); }
+            const big = parts.filter((x) => x.length >= 4); if (big.length >= 2) cores = big; }
+          if (!cores) continue;
+          const own = new Map(); let front = []; cores.forEach((part, m) => { for (const p of part) { own.set(p, m); front.push(p); } });
+          while (front.length) { const nxt = []; for (const p of front) { const m = own.get(p); for (const q of [p - 1, p + 1, p - n0, p + n0]) if (lab[q] === id && !own.has(q)) { own.set(q, m); nxt.push(q); } } front = nxt; }
+          const subs = cores.map(() => []); for (const p of vox) { const m = own.get(p); if (m != null) subs[m].push(p); else subs[0].push(p); }
+          comps[c0] = subs[0]; for (let m = 1; m < subs.length; m++) { const nid = comps.length + 1; for (const p of subs[m]) lab[p] = nid; comps.push(subs[m]); } }
+        const newMots = [null];
+        comps.forEach((vox, ci0) => {
+          const id = ci0 + 1; let sx = 0, sy = 0, i0 = n0, i1 = 0, j0 = n1, j1 = 0; const tally = new Map();
+          for (const p of vox) { const i = p % n0, j = (p / n0) | 0; sx += i; sy += j; if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; tally.set(motPrev[p], (tally.get(motPrev[p]) || 0) + 1); }
+          const cx = sx / vox.length, cy = sy / vox.length; let mi = 0, mc = -1; for (const [key, c] of tally) if (c > mc) { mc = c; mi = key; }
+          const m0 = mots[mi] || mots[0], split = !m0.fresh && m0.area > 0 && vox.length < 0.7 * m0.area, m = { unsup: m0.unsup, cx, cy, area: vox.length, fresh: false };
+          newMots.push(m); const mid = newMots.length - 1;
+          if (split && vox.length < Math.max(mm(1) * mm(1), 0.04 * m0.area)) return;   // a crumb breaking off a large piece (a bit of bone or of the next tooth that hung on it) is not a root
+          if (vox.length < 6) { for (const p of vox) if (!hull[p]) hull[p] = mid; return; }   // the last of a root's tip: it may only shrink
+          // rays from its middle: how far the piece reaches (rp: the outer face of its outermost voxel), how far it reached in the
+          // last three slices (rm: what it may win back), and the fall in grey near there
+          const rp = new Float32Array(NRAY), rm = new Float32Array(NRAY), qp = new Int16Array(NRAY), rh = new Float32Array(NRAY), rf = new Float32Array(NRAY), seen = new Uint8Array(NRAY), ext = Math.hypot(i1 - i0 + 1, j1 - j0 + 1) + 2; let sup = 0, strong = 0, blind = 0, brt = 0;
+          for (let t = 0; t < NRAY; t++) { let last = 0; for (let tt = 0; tt <= ext; tt += 0.5) { const ii = Math.round(cx + tt * RCOS[t]), jj = Math.round(cy + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; if (lab[ii + n0 * jj] === id) last = tt; }
+            rp[t] = Math.max(0.5, last); qp[t] = Math.max(2, Math.round(2 * rp[t])); let far = rp[t]; for (let tt = rp[t] + 0.5; tt <= rp[t] + 3; tt += 0.5) { const ii = Math.round(cx + tt * RCOS[t]), jj = Math.round(cy + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; const q = ii + n0 * jj; if (lab[q] === id) continue; if (lab[q] || age[q] > 2) break; far = tt; } rm[t] = far; }
+          // the piece's history: its size when smallest, and whether it may still widen. A piece that has split off (a root, a cusp),
+          // has narrowed by a tenth, or no longer stands free only ever narrows: what would widen it is bone it lies against, or the
+          // tooth it bites on
+          const Aprev = polyArea(rp), n4 = Math.max(1, Math.round(1 / hz)), n10 = Math.max(2, Math.round(2.5 / hz)); let par = 0, parArmed = false; for (const [key, c] of tally) if (key && mots[key] && c >= Math.max(6, 0.2 * vox.length)) { par++; if (mots[key].armed) parArmed = true; }
+          if (m0.fresh && !Aeq) Aeq = Aprev;
+          if (m0.fresh || split || par > 1) { m.a0 = m.amin = Aprev; m.armed = !m0.fresh && (split || parArmed); m.hist = []; m.over = 0; m.trail = [{ base: pbase, vox, A: Aprev }]; m.uh = []; }
+          else { m.a0 = Math.max(m0.a0, Aprev); m.amin = Math.min(m0.amin, Aprev); m.armed = m0.armed || m.amin < 0.9 * m.a0; m.hist = Aprev <= m0.amin ? [] : m0.hist.concat([{ base: pbase, vox }]); m.over = m0.over; m.trail = m0.trail.concat([{ base: pbase, vox, A: Aprev }]).slice(-(n10 + 1)); m.uh = m0.uh; }
+          outl[mid] = { cx, cy, rp };
+          const ev = (t, q, out) => {               // the fall in grey at half-voxel q along ray t → 0…1 (1: a fifth of the way to soft tissue, or more); out: [inside level, darkest beyond, where]
+            if (q < 2) return 0; let inn = -Infinity, mn = Infinity, mq = q + 1; for (let a = Math.max(0, q - 6); a < q; a++) if (prof[a] > inn) inn = prof[a]; for (let a = q + 1; a <= q + 6; a++) { const u = prof[a]; if (u !== u) return 0; if (u < mn) { mn = u; mq = a; } }
+            if (inn > capIn[t]) inn = capIn[t]; if (!(inn >= T) || !(prof[q - 1] >= prof[q + 1])) return 0; if (out) { out[0] = inn; out[1] = mn; out[2] = mq; } return N_clamp((inn - mn) / (0.2 * C), 0, 1); };
+          // (a fall in grey is measured from no higher than the tooth's own level there: from enamel down to dentine — its own or the next tooth's — is not an edge of the tooth)
+          // (the side a leaning root is moving towards — by what its two sides agreed on in the slice before — is looked for further out)
+          const lead = new Uint8Array(NRAY); if (!m0.fresh && !split) for (let t = 0; t < NRAY; t++) if ((m0.Dx || 0) * RCOS[t] + (m0.Dy || 0) * RSIN[t] > 0.15) lead[t] = 1;
+          const profs = new Float32Array(NRAY * 64), tmp = [0, 0, 0], capIn = new Float32Array(NRAY); for (let t = 0; t < NRAY; t++) { const rr = Math.max(0, rp[t] - 1.5), d = Dloc(Math.round(cx + rr * RCOS[t]), Math.round(cy + rr * RSIN[t])); capIn[t] = (d === d ? d : D0) + 0.1 * C; }
+          for (let t = 0; t < NRAY; t++) { const Q = Math.min(63, qp[t] + 14); for (let q = 0; q <= Q; q++) prof[q] = bil(cx + 0.5 * q * RCOS[t], cy + 0.5 * q * RSIN[t]); for (let q = Q + 1; q < 64; q++) prof[q] = NaN; profs.set(prof.subarray(0, 64), t * 64);
+            for (let s = 0; s < NS; s++) { const o = s - OI, q = qp[t] + o; U[t * NS + s] = q < 2 || q > 56 || (m.armed && o > (lead[t] ? 3 : 1)) ? 2 : -ev(t, q) + 0.06 * Math.abs(o); } }
+          let t0 = 0, bu = Infinity; for (let t = 0; t < NRAY; t++) for (let s2 = 0; s2 < NS; s2++) if (U[t * NS + s2] < bu) { bu = U[t * NS + s2]; t0 = t; }
+          const path = closedChain(U, NRAY, NS, 3, 0.05, t0);
+          for (let t = 0; t < NRAY; t++) { prof.set(profs.subarray(t * 64, t * 64 + 64)); const q = qp[t] + path[t] - OI, e = ev(t, q, tmp);
+            if (e >= 0.5) { sup++; seen[t] = 1; const inn = tmp[0], mn = tmp[1], mq = tmp[2]; if (inn - mn >= 0.6 * C) strong++; let aft = mn; for (let a = mq; a <= Math.min(63, mq + 6); a++) if (prof[a] > aft) aft = prof[a]; const rho = N_clamp((aft - mn) / Math.max(1, inn - mn), 0, 1), L = inn - (0.5 + 0.43 * rho) * (inn - mn); let qe = q; for (let a = Math.max(1, q - 4); a <= mq; a++) if (prof[a] <= L) { qe = a - (L - prof[a]) / Math.max(1e-6, prof[a - 1] - prof[a]); break; } rf[t] = Math.max(0.5, qe / 2); }
+            else { rf[t] = rp[t]; let kn = true; for (let a = qp[t] + 1; a <= Math.min(63, qp[t] + 6); a++) if (prof[a] !== prof[a]) { kn = false; break; } if (kn) blind++; }
+            { let sm = 0, c = 0; for (let a = qp[t] + 4; a <= Math.min(63, qp[t] + 8); a++) { if (prof[a] !== prof[a]) { c = 0; break; } sm += prof[a]; c++; } if (c && sm / c >= capIn[t] - 0.2 * C) brt++; } }   // (2 to 4 voxels beyond: as bright as the tooth itself)
+          m.mg = brt >= 0.1 * NRAY ? (m0.mg || 0) + 1 : Math.max(0, (m0.mg || 0) - 2);   // (slices running in which it lies against something as bright as itself along a tenth of its outline or more)
+          if (sup < 0.2 * NRAY && blind >= 0.5 * NRAY) { m.unsup += hz; m.uh = m.uh.concat([{ base: pbase, vox }]); } else { m.unsup = 0; m.uh = []; }
+          if (m.unsup > 3) { for (const g of m.uh) for (const p of g.vox) mask[g.base + p] = 0; return; }   // no edge to be seen for 3 mm: this piece ended where the edges did
+          // how far the piece has moved sideways since the slice before, as far as its two sides agree (one edge out, the opposite edge
+          // in by as much; or one edge in and nothing to be seen opposite: half of it). A root that leans is followed; an edge that
+          // moves out on one side alone (bone widening beside a root) is not
+          let Dx = 0, Dy = 0; { let sxx = 2, sxy = 0, syy = 2, bx = 0, by = 0; const H = NRAY >> 1, fl = (x) => Math.sign(x) * Math.max(0, Math.abs(x) - 0.15);
+            for (let t = 0; t < H; t++) { const u = t + H; if (!seen[t] && !seen[u]) continue; const a = rf[t] - rp[t], b = rf[u] - rp[u]; let tau = 0;
+              if (seen[t] && seen[u]) { if (a * b < 0) tau = Math.sign(a) * Math.max(0, Math.min(Math.abs(a), Math.abs(b)) - 0.15); } else if (seen[t]) { if (a < 0) tau = 0.5 * fl(a); } else if (b < 0) tau = -0.5 * fl(b);
+              sxx += RCOS[t] * RCOS[t]; sxy += RCOS[t] * RSIN[t]; syy += RSIN[t] * RSIN[t]; bx += RCOS[t] * tau; by += RSIN[t] * tau; }
+            const det = sxx * syy - sxy * sxy; Dx = (syy * bx - sxy * by) / det; Dy = (sxx * by - sxy * bx) / det; const dn = Math.hypot(Dx, Dy); if (dn > 0.8) { Dx *= 0.8 / dn; Dy *= 0.8 / dn; } } m.Dx = Dx; m.Dy = Dy;
+          if (!m.armed && strong < 0.5 * NRAY && sup + blind >= 0.7 * NRAY) m.armed = true;   // (soft tissue or air round less than half of it: it is in the bone)
+          // the outline: where an edge was seen, up to ¾ voxel beyond it (the voxels on the edge itself are judged by their grey). A
+          // piece that only narrows wins back at most ¾ voxel a slice towards an edge it sees, and where it sees none stays where
+          // it was, but for the shift its sides agree on
+          for (let t = 0; t < NRAY; t++) { rh[t] = rf[t] + (seen[t] && seen[(t + 1) % NRAY] && seen[(t + NRAY - 1) % NRAY] ? 0.75 : 0); if (m.armed) { const rr = Math.max(rp[t], rm[t]), sh = Math.max(0, Dx * RCOS[t] + Dy * RSIN[t]), lm = (seen[t] && rf[t] - rr <= (lead[t] ? 3 : 1.5) ? rr + (lead[t] ? 1.5 : 0.75) : seen[t] ? rr : rp[t]) + sh; if (!seen[t]) rh[t] = rp[t] + sh; if (rh[t] > lm) rh[t] = lm; } }   // (an edge far outside it is not its own: the outer face of bone it lies against. Where none is seen, it moves on by the shift its sides agree on)
+          if (P.debug) P.debug({ what: 'piece', k, dir, cx, cy, n: vox.length, Aprev, amin: m.amin, a0: m.a0, armed: m.armed, sup, strong, brt, mg: m.mg, Dx, Dy, unsup: m.unsup, split, par, Afree: polyArea(rf), Ah: polyArea(rh), rp, rf, rh, rm, seen, profs, path, qp });
+          if (m.armed) {
+            // a small piece (the tip of a cusp, of a root) that finds itself inside something wider, twice running, has run into the tooth it bites on (or into bone): it ended where it was smallest
+            if (m.amin < mm(2) * mm(2) && polyArea(rf) > 1.6 * m.amin + 8) { if (++m.over >= 2) { for (const g of m.hist) for (const p of g.vox) mask[g.base + p] = 0; return; } } else m.over = 0;
+            // and a piece that lies against something as bright as itself (a plate of bone) and has stopped
+            // narrowing — for a millimetre if it is small, for 2½ mm if it is a third of the crown's size or less — is no longer
+            // a root: a root narrows to its tip, the bone it lies against does not
+            if (m.mg) { const L = m.trail.length, back = Aprev < mm(2.25) * mm(2.25) && L > n4 && m.mg > n4 ? n4 : Aprev < 0.35 * Aeq && L > n10 && m.mg > n10 ? n10 : 0;
+              if (back && Aprev > 0.9 * m.trail[L - 1 - back].A) { for (const g of m.trail.slice(L - (back >> 1))) for (const p of g.vox) mask[g.base + p] = 0; return; } } }   // (the root itself narrowed inside what was followed, so its end is put midway)
+          const R = Math.ceil(Math.max(...rh)) + 2, ic = Math.round(cx), jc = Math.round(cy);
+          for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - cx, dy = jj - cy, p = ii + n0 * jj; if (!hull[p] && Math.hypot(dx, dy) <= radiusAt(rh, dx, dy)) hull[p] = mid; }
+          // an outline seen nearly all round, of a small piece: inside it, anything brighter than midway between soft tissue and the
+          // threshold is the tooth (the wall of a root near its tip, too thin to read as bright as dentine); and see below
+          if (m.armed && sup >= 0.8 * NRAY) { polys.push({ k, dir, cx, cy, r: rf.slice() });
+            if (Aprev < mm(2.5) * mm(2.5)) for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - cx, dy = jj - cy, p = ii + n0 * jj; if (allow[base + p] === 1 && I[base + p] >= Tlow && Math.hypot(dx, dy) <= radiusAt(rf, dx, dy) - 0.25) force[p] = 1; } }
+          // and what the piece already had stays unless an edge was seen inside it, on the rays to either side of it (a root that stands
+          // off to one side, beyond the gap between the roots, is not cut down to what the rays between happen to reach)
+          for (const p of vox) { if (hull[p]) continue; const dx = (p % n0) - cx, dy = ((p / n0) | 0) - cy, d = Math.hypot(dx, dy); let a = Math.atan2(dy, dx) / (2 * Math.PI) * NRAY; if (a < 0) a += NRAY; const ta = Math.floor(a) % NRAY, tb = (ta + 1) % NRAY;
+            if (!(seen[ta] && seen[tb] && d > Math.max(rh[ta], rh[tb]))) hull[p] = mid; }
+        });
+        // inside the outlines: what stays, what may be added (a ring at a time, twice, each new voxel with a fall in grey beyond it), holes of tooth tissue
+        let count = 0; cur.fill(0); for (let p = 0; p < sl; p++) if (prev[p] && hull[p] && isCand(p % n0, (p / n0) | 0)) { cur[p] = 1; count++; }
+        if (count) for (let ring2 = 0; ring2 < 2; ring2++) { const add = []; for (let p = 0; p < sl; p++) { if (cur[p] || !hull[p]) continue; const i = p % n0, j = (p / n0) | 0; let di = 0, dj = 0;
+            if (i > 0 && cur[p - 1]) di = 1; else if (i < n0 - 1 && cur[p + 1]) di = -1; else if (j > 0 && cur[p - n0]) dj = 1; else if (j < n1 - 1 && cur[p + n0]) dj = -1; else continue;
+            if (!isCand(i, j) || (I[base + p] > Dcap && inward(p, i, j))) continue; let supd = false; const dl = Dloc(i, j), lev = Math.min(I[base + p], (dl === dl ? dl : D0) + 0.1 * C) - 0.2 * C; for (let t = 1; t <= 3 && !supd; t++) { const u = val(i + t * di, j + t * dj); if (u <= lev) supd = true; }   // (a fall from the new voxel's own level: not a step from enamel to dentine, nor the region's edge)
+            if (!supd && ((i > 0 && cur[p - 1]) + (i < n0 - 1 && cur[p + 1]) + (j > 0 && cur[p - n0]) + (j < n1 - 1 && cur[p + n0])) >= 3) supd = true;   // (a notch in the outline may fill)
+            if (supd) add.push(p); } for (const p of add) { cur[p] = 1; count++; } }
+        // holes of tooth tissue (the roof and the floor of the pulp chamber, which may stand as an island in the pulp): bright and
+        // enclosed. Not an island as bright as enamel: that is a cusp of the opposing tooth biting into the hollow of this one
+        if (count) { solid2(cur, n0, n1, sol); lab.fill(0);
+          const fits = (p) => sol[p] && !cur[p] && hull[p] && isCand(p % n0, (p / n0) | 0);
+          for (let p0 = 0; p0 < sl; p0++) { if (lab[p0] || !fits(p0)) continue; const reg = []; let ne = 0; lab[p0] = 1; st.push(p0);
+            while (st.length) { const p = st.pop(), i = p % n0, j = (p / n0) | 0; reg.push(p); if (I[base + p] > Dcap) ne++; for (const [a, b] of N4) { const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const q = ii + n0 * jj; if (!cur[q] && !lab[q] && fits(q)) { lab[q] = 1; st.push(q); } } }
+            if (ne < 0.4 * reg.length) for (const p of reg) { cur[p] = 1; count++; } } }
+        for (let p = 0; p < sl; p++) if (force[p] && !cur[p]) { cur[p] = 1; count++; }
+        if (P.debug) P.debug({ what: 'slice', k, dir, cur: cur.slice(), hull: hull.slice(), prev: prev.slice(), cand: Int8Array.from({ length: sl }, (_, p) => isCand(p % n0, (p / n0) | 0)), I: I.subarray(base, base + sl), n0, n1, comps: comps.length });
+        if (!count) break;
+        for (let p = 0; p < sl; p++) { if (cur[p]) { mask[base + p] = 1; motPrev[p] = hull[p]; } else motPrev[p] = 0; }
+        for (let p = 0; p < sl; p++) age[p] = cur[p] ? 0 : age[p] < 255 ? age[p] + 1 : 255;
+        prev = cur.slice(); mots = newMots; mots[0] = freshMot();
+      }
+    }
+  };
+  run(start, kEq, [1, -1]);
+  // ── the biting surface: on the side that still has enamel some millimetres from the start, the crown narrows to the tips of
+  //    its cusps; where it stops narrowing it has run on into the tooth it bites against, and is cut there ──
+  let occ = 0; {
+    const Eth = soft != null ? soft + 1.5 * (D0 - soft) : D0 + 0.45 * C, areaOf = (k) => { if (k < 0 || k >= n2) return [0, 0]; let a = 0, e = 0; const base = k * sl; for (let p = 0; p < sl; p++) if (mask[base + p]) { a++; if (I[base + p] > Eth) e++; } return [a, e]; };
+    const sc = [1, -1].map((dir) => { let c = 0; for (let s = Math.round(0.5 / hz); s <= Math.round(5 / hz); s++) { const [a, e] = areaOf(kEq + dir * s); if (a && e >= 0.1 * a) c++; } return c; });
+    if (sc[0] >= 1 / hz && sc[0] >= 2 * sc[1]) occ = 1; else if (sc[1] >= 1 / hz && sc[1] >= 2 * sc[0]) occ = -1;
+    if (occ) { const A0 = areaOf(kEq)[0], n3 = Math.max(1, Math.round(0.75 / hz)); let cut = -1;
+      for (let k = kEq + occ; k >= 0 && k < n2; k += occ) { const a = areaOf(k)[0]; if (!a) break; if (a >= 0.7 * A0) continue;
+        if (a < Math.max(8, 0.04 * A0)) { cut = k; break; }   // (the last sliver of the highest cusp's tip — or of the tooth above, where they touch)
+        if (areaOf(k + occ * n3)[0] > 0.85 * a) { let best = a; cut = k; for (let q = 1; q <= n3; q++) { const b = areaOf(k + occ * q)[0]; if (b && b < best) { best = b; cut = k + occ * q; } } break; } }
+      if (P.debug) P.debug({ what: 'trim', occ, cut, kEq, A0, sc, areas: Array.from({ length: n2 }, (_, k) => areaOf(k)[0]) });
+      if (cut >= 0) for (let k = cut + occ; k >= 0 && k < n2; k += occ) mask.fill(0, k * sl, (k + 1) * sl); } }
+  // ── a root whose edge was seen nearly all round is solid inside that edge: its wall may be too thin near the tip to read as
+  //    bright as dentine, and its canal is part of it. (On the biting side the same would fill the hollow between the cusps.) ──
+  if (occ) for (const g of polys) { if (g.dir !== -occ || g.k === kEq) continue; const base = g.k * sl, R = Math.ceil(Math.max(...g.r)) + 1, ic = Math.round(g.cx), jc = Math.round(g.cy); let any = false;
+    for (let b = -R; b <= R && !any; b++) for (let a = -R; a <= R && !any; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - g.cx, dy = jj - g.cy; if (mask[base + ii + n0 * jj] && Math.hypot(dx, dy) <= radiusAt(g.r, dx, dy)) any = true; }
+    if (!any) continue;   // (the piece was given up after all: bone it ran on into)
+    for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - g.cx, dy = jj - g.cy, p = ii + n0 * jj; if (allow[base + p] === 1 && Math.hypot(dx, dy) <= radiusAt(g.r, dx, dy) - 0.25) mask[base + p] = 1; } }
+  // further points that are tooth (a root the outline lost): a small start round each, followed both ways and added
+  for (const q of P.more || []) {
+    if (q[2] < 0 || q[2] >= n2 || mask[q[0] + n0 * q[1] + sl * q[2]]) continue; const base = q[2] * sl, R = Math.ceil(mm(1.25)), s2 = new Uint8Array(sl), ref = I[base + q[0] + n0 * q[1]];
+    for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = q[0] + a, jj = q[1] + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1 || a * a + b * b > R * R) continue; const p = ii + n0 * jj; if (allow[base + p] === 1 && I[base + p] >= Math.max(T, Math.min(ref, D0) - 0.2 * C)) s2[p] = 1; }
+    if (s2[q[0] + n0 * q[1]]) run(s2, q[2], [1, -1]);
+  }
+  return { mask, kEq, cEq: [eq.cx, eq.cy], D0, E0, Dcap, C, dark, soft, occ };
+}
+const N_clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+
 /**
  * cavities(mask, inRegion, nx, ny, nz) → Uint8Array: the dark spaces shut inside the mask — not reachable from the edge of the box
  * (or from outside the region) without crossing it. Also those reached only through a passage one voxel narrow, such as a root
@@ -898,21 +1254,94 @@ function cavities(mask, inR, nx, ny, nz) {
 }
 /**
  * segmentTooth(vol, o) — one tooth, crown and roots, cut out from the bone and its neighbours.
- *   o.seeds  [[x,y,z]…] points on the tooth          o.not   [[x,y,z]…] points that are not the tooth
- *   o.erase  [{ p:[x,y,z], r }…] balls cut away      o.roi   { shape:'cyl'|'box', c:[x,y], r, z0, z1 } (mm)
- *   o.T      threshold (data units)                   o.fill  fill the pulp (default true)
+ *   o.seeds  [[x,y,z]…] points on the tooth: the first on its crown; any more are parts the outline lost (a root)
+ *   o.not    [[x,y,z]…] points that are not the tooth: what hangs on the tooth there is cut off at its narrowest, darkest neck
+ *   o.erase  [{ p:[x,y,z], r }…] balls cut away      o.roi   { shape:'cyl'|'box', c:[x,y], r, z0, z1 } (mm): the tooth lies inside
+ *   o.T      the level between soft tissue and tooth (data units)        o.fill  fill the pulp (default true)
+ *   o.method 'flood': the earlier way (floodTooth), which shares the bright material out between the tooth and the region's edge
+ * The outline is found in the widest slice of the crown and followed slice by slice (trackTooth). Holes left inside (the pulp)
+ * are filled. Slices are the scan's own: a tooth lying more than about 45° from the scan's long axis is not followed well.
+ * → { lab: Uint8Array over box (1 = tooth), box:{ i0, j0, k0, nx, ny, nz }, count, volume (mm³), lo, hi (mm), touch (voxels
+ *     of it against the edge of the region), T, dI, ref, seedOk, axis, centre, crown:+1|−1 (which way along axis the crown
+ *     is), length, ends, top (the middle of the crown's widest slice), levels:{ dentine, enamel, contrast } }  or { error }
+ */
+export function segmentTooth(vol, o) {
+  if (o.method === 'flood') return floodTooth(vol, o);
+  const [NX, NY, NZ] = vol.dims, [sx, sy, sz] = vol.spacing, org = vol.origin, d = vol.data, roi = o.roi, T = o.T;
+  const rr = roi.r, bi = (x, a) => Math.floor((x - org[a]) / vol.spacing[a]), pad = 1;
+  const i0 = Math.max(0, bi(roi.c[0] - rr - pad, 0)), i1 = Math.min(NX - 1, bi(roi.c[0] + rr + pad, 0) + 1), j0 = Math.max(0, bi(roi.c[1] - rr - pad, 1)), j1 = Math.min(NY - 1, bi(roi.c[1] + rr + pad, 1) + 1);
+  const k0 = Math.max(0, bi(Math.min(roi.z0, roi.z1) - pad, 2)), k1 = Math.min(NZ - 1, bi(Math.max(roi.z0, roi.z1) + pad, 2) + 1);
+  const nx = i1 - i0 + 1, ny = j1 - j0 + 1, nz = k1 - k0 + 1, n = nx * ny * nz;
+  if (nx < 3 || ny < 3 || nz < 3) return { error: 'The region is outside the scan.' };
+  // a scan with very fine voxels: the tooth is found on a copy of that part of the scan with voxels f times larger (averaged, up
+  // to about 0.25 mm), so it stays quick; the result (and the replica made from it) then refers to that copy, seg.vol
+  const maxV = o.maxVoxels ?? 5e6, fb = Math.min(Math.ceil(Math.cbrt(n / maxV)), Math.max(1, Math.floor(0.26 / Math.min(sx, sy, sz))));
+  if (n > maxV && fb > 1) { const sub = cropVolume(vol, [i0, j0, k0], [i1, j1, k1], fb); return segmentTooth(sub, { ...o, maxVoxels: Infinity }); }
+  const box = { i0, j0, k0, nx, ny, nz }, I = new Int16Array(n), allow = new Uint8Array(n), zl = Math.min(roi.z0, roi.z1), zh = Math.max(roi.z0, roi.z1);
+  for (let k = 0; k < nz; k++) { const z = org[2] + (k0 + k) * sz; for (let j = 0; j < ny; j++) { const y = org[1] + (j0 + j) * sy; for (let i = 0; i < nx; i++) {
+    const x = org[0] + (i0 + i) * sx, q = i + nx * (j + ny * k); I[q] = d[(i0 + i) + NX * ((j0 + j) + NY * (k0 + k))];
+    allow[q] = z >= zl && z <= zh && (roi.shape === 'box' ? Math.abs(x - roi.c[0]) <= rr && Math.abs(y - roi.c[1]) <= rr : (x - roi.c[0]) ** 2 + (y - roi.c[1]) ** 2 <= rr * rr) ? 1 : 2;
+  } } }
+  for (const e of o.erase || []) {                                // balls cut away
+    const r = e.r, a0 = Math.max(0, bi(e.p[0] - r, 0) - i0), a1 = Math.min(nx - 1, bi(e.p[0] + r, 0) + 1 - i0), b0 = Math.max(0, bi(e.p[1] - r, 1) - j0), b1 = Math.min(ny - 1, bi(e.p[1] + r, 1) + 1 - j0), c0 = Math.max(0, bi(e.p[2] - r, 2) - k0), c1 = Math.min(nz - 1, bi(e.p[2] + r, 2) + 1 - k0);
+    for (let k = c0; k <= c1; k++) for (let j = b0; j <= b1; j++) for (let i = a0; i <= a1; i++) { const x = org[0] + (i0 + i) * sx - e.p[0], y = org[1] + (j0 + j) * sy - e.p[1], z = org[2] + (k0 + k) * sz - e.p[2]; if (x * x + y * y + z * z <= r * r) allow[i + nx * (j + ny * k)] = 0; }
+  }
+  const vq = (p) => [Math.max(0, Math.min(nx - 1, Math.round((p[0] - org[0]) / sx) - i0)), Math.max(0, Math.min(ny - 1, Math.round((p[1] - org[1]) / sy) - j0)), Math.max(0, Math.min(nz - 1, Math.round((p[2] - org[2]) / sz) - k0))];
+  const seeds = (o.seeds || []).map(vq); if (!seeds.length) return { error: 'Tap the tooth.', box };
+  const tr = trackTooth({ I, n0: nx, n1: ny, n2: nz, h: (sx + sy) / 2, hz: sz, allow }, seeds[0], { T, more: seeds.slice(1), debug: o.debug, soft: o.soft ?? windowPresets(vol).soft.l }); if (tr.error) return { error: tr.error, box };
+  let lab = tr.mask;
+  if (o.not && o.not.length) { const f = floodTooth(vol, { ...o, pad, within: lab, noBorder: true, fill: false, maxVoxels: Infinity }); if (!f.error) lab = f.lab; }
+  // the piece the first point is on (or the largest, if the point fell in the pulp), then the pulp filled
+  { const id = new Int32Array(n), st = [], sizes = [0]; let want = 0;
+    for (let q0 = 0; q0 < n; q0++) { if (!lab[q0] || id[q0]) continue; const L = sizes.length; let c = 0; id[q0] = L; st.push(q0);
+      while (st.length) { const q = st.pop(), i = q % nx, j = ((q / nx) | 0) % ny, k = (q / (nx * ny)) | 0; c++; for (let cc = -1; cc <= 1; cc++) { const kk = k + cc; if (kk < 0 || kk >= nz) continue; for (let b = -1; b <= 1; b++) { const jj = j + b; if (jj < 0 || jj >= ny) continue; for (let a = -1; a <= 1; a++) { const ii = i + a; if (ii < 0 || ii >= nx) continue; const u = ii + nx * (jj + ny * kk); if (lab[u] && !id[u]) { id[u] = L; st.push(u); } } } } }
+      sizes.push(c); }
+    const sq = seeds[0][0] + nx * (seeds[0][1] + ny * seeds[0][2]); want = id[sq]; if (!want) for (let L = 1; L < sizes.length; L++) if (!want || sizes[L] > sizes[want]) want = L;
+    for (let q = 0; q < n; q++) if (lab[q] && id[q] !== want) lab[q] = 0; }
+  if (o.fill !== false) { const cav = cavities(lab, null, nx, ny, nz); for (let q = 0; q < n; q++) if (cav[q]) lab[q] = 1;
+    // … and what the tooth rings in a slice with tooth above it, towards the biting surface: a canal that is open at the root's
+    // end, where the outline stopped short of the tip, is pulp all the same (the dip between the cusps, open above, is not)
+    if (tr.occ) { const sl2 = nx * ny, A = new Uint8Array(sl2), B = new Uint8Array(sl2), topK = new Int32Array(sl2).fill(-1);
+      for (let k = 0; k < nz; k++) for (let r = 0; r < sl2; r++) if (lab[k * sl2 + r] && (topK[r] < 0 || tr.occ > 0)) topK[r] = k;   // (each column's own voxel of the tooth nearest the biting surface)
+      for (let k = 0; k < nz; k++) { let any = false; for (let r = 0; r < sl2; r++) { A[r] = lab[k * sl2 + r]; if (A[r]) any = true; } if (!any) continue; solid2(A, nx, ny, B);
+        for (let r = 0; r < sl2; r++) if (B[r] && !A[r] && allow[k * sl2 + r] === 1 && topK[r] >= 0 && (tr.occ > 0 ? topK[r] > k : topK[r] < k)) lab[k * sl2 + r] = 1; } } }
+  // size, extent, how much of it presses on the edge of the region, and its long axis
+  let count = 0, touch = 0, near = 0; const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], m1 = [0, 0, 0], m2 = [0, 0, 0, 0, 0, 0], nearD = Math.max(1, Math.round(1.5 / sx));
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const q = i + nx * (j + ny * k); if (!lab[q]) continue; count++;
+    const x = org[0] + (i0 + i) * sx, y = org[1] + (j0 + j) * sy, z = org[2] + (k0 + k) * sz; lo[0] = Math.min(lo[0], x); lo[1] = Math.min(lo[1], y); lo[2] = Math.min(lo[2], z); hi[0] = Math.max(hi[0], x); hi[1] = Math.max(hi[1], y); hi[2] = Math.max(hi[2], z);
+    m1[0] += x; m1[1] += y; m1[2] += z; m2[0] += x * x; m2[1] += y * y; m2[2] += z * z; m2[3] += x * y; m2[4] += x * z; m2[5] += y * z;
+    for (let t = 0; t < 6; t++) { const ii = i + (t === 0) - (t === 1), jj = j + (t === 2) - (t === 3), kk = k + (t === 4) - (t === 5); if (ii < 0 || jj < 0 || kk < 0 || ii >= nx || jj >= ny || kk >= nz || (allow[ii + nx * (jj + ny * kk)] === 2 && I[ii + nx * (jj + ny * kk)] >= T)) { touch++; break; } }
+    // (and how much of it comes within 1½ mm of the region's side: the outline cannot be followed where what lies beside it is out of the region)
+    for (let t = 0; t < 4; t++) { const ii = i + (t === 0 ? nearD : t === 1 ? -nearD : 0), jj = j + (t === 2 ? nearD : t === 3 ? -nearD : 0); if (ii < 0 || jj < 0 || ii >= nx || jj >= ny || allow[ii + nx * (jj + ny * k)] === 2) { near++; break; } }
+  }
+  if (!count) return { error: 'Nothing was found.', box };
+  const c = m1.map((v) => v / count), Cv = [[m2[0] / count - c[0] * c[0], m2[3] / count - c[0] * c[1], m2[4] / count - c[0] * c[2]], [0, m2[1] / count - c[1] * c[1], m2[5] / count - c[1] * c[2]], [0, 0, m2[2] / count - c[2] * c[2]]]; Cv[1][0] = Cv[0][1]; Cv[2][0] = Cv[0][2]; Cv[2][1] = Cv[1][2];
+  let ax = [0, 0, 1]; for (let it = 0; it < 60; it++) { const v = [0, 1, 2].map((r) => Cv[r][0] * ax[0] + Cv[r][1] * ax[1] + Cv[r][2] * ax[2]), l = Math.hypot(...v) || 1; ax = v.map((x) => x / l); }
+  if (ax[2] < 0) ax = ax.map((x) => -x);
+  // the crown is the end with the brighter material (enamel)
+  let tmin = Infinity, tmax = -Infinity; const tq = [];
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = i + nx * (j + ny * k); if (!lab[q]) continue; const t = (org[0] + (i0 + i) * sx - c[0]) * ax[0] + (org[1] + (j0 + j) * sy - c[1]) * ax[1] + (org[2] + (k0 + k) * sz - c[2]) * ax[2]; tq.push(t, I[q]); if (t < tmin) tmin = t; if (t > tmax) tmax = t; }
+  // a tooth that lies across the slices (an impacted tooth on its side: what was followed has its long axis more than 35° from
+  // the slices' own) cannot be followed from slice to slice: it is outlined by flooding from the taps instead, as bright
+  // tissue ringed by something darker — if that finds plainly more of it, and no more of it pressing on the region's edge
+  if (o.method !== 'track' && Math.abs(ax[2]) < 0.82 && tmax - tmin > 9 && tmax - tmin > 1.15 * (hi[2] - lo[2])) { const fl = floodTooth(vol, o); if (!fl.error && fl.volume > 1.2 * count * sx * sy * sz && fl.touch <= touch + 20) { fl.lying = true; return fl; } }
+  let up = 0, nu = 0, dn = 0, nd = 0; const qt = (tmax - tmin) / 4; for (let a = 0; a < tq.length; a += 2) { if (tq[a] > tmax - qt) { up += tq[a + 1]; nu++; } else if (tq[a] < tmin + qt) { dn += tq[a + 1]; nd++; } }
+  const crown = (nu ? up / nu : 0) >= (nd ? dn / nd : 0) ? 1 : -1, ref = tr.E0 != null ? (tr.D0 + tr.E0) / 2 : tr.D0, dI = Math.max(50, ref - T);
+  const top = [org[0] + (i0 + tr.cEq[0]) * sx, org[1] + (j0 + tr.cEq[1]) * sy, org[2] + (k0 + tr.kEq) * sz];
+  return { lab, box, count, volume: count * sx * sy * sz, lo, hi, touch, near, T, dI, ref, seedOk: true, axis: ax, centre: c, crown, length: tmax - tmin, ends: [tmin, tmax], top, vol, levels: { dentine: tr.D0, enamel: tr.E0, contrast: tr.C, soft: tr.soft } };
+}
+/**
+ * floodTooth(vol, o) — the earlier tooth finder (o as for segmentTooth), kept for cutting off what hangs on a tooth at a "not
+ * tooth" point (o.within: only these voxels of the box may be tooth; o.noBorder: the region's edge is not a marker; o.pad).
  * Every voxel inside the region, at or above the threshold and not cut away, may be tooth. They are shared out by flooding from
  * markers — the tooth seeds on one side; the edge of the region and the "not tooth" points on the other — taking first the
  * voxels that lie deepest inside the bright material (distance to the nearest dark voxel) and are brightest. The two floods
- * therefore meet where the bright material is thinnest and darkest: across the periodontal ligament space (voxels there are a
- * mix of tooth and dark ligament), and at the narrow neck where two teeth touch. Holes left inside (the pulp) are filled.
- * → { lab: Uint8Array over box (1 = tooth), box:{ i0, j0, k0, nx, ny, nz }, count, volume (mm³), lo, hi (mm), touch, T, dI, ref,
- *     seedOk, axis, centre, crown:+1|−1 (which way along axis the crown is), top (the thickest part of the tooth the first
- *     tap is on: a better middle for the region than a tap off to one side) }  or { error }
+ * therefore meet where the bright material is thinnest and darkest. Holes left inside (the pulp) are filled.
  */
-export function segmentTooth(vol, o) {
+function floodTooth(vol, o) {
   const [NX, NY, NZ] = vol.dims, [sx, sy, sz] = vol.spacing, org = vol.origin, d = vol.data, roi = o.roi, T = o.T;
-  const rr = roi.r, bi = (x, a) => Math.floor((x - org[a]) / vol.spacing[a]), pad = o.pad ?? 6;   // the box reaches well past the region (more than half a molar), so a neighbour cut by the region still has its own thick middle: depths near the region's edge are true, and what climbs from the edge stays on the neighbour
+  const rr = roi.r, bi = (x, a) => Math.floor((x - org[a]) / vol.spacing[a]), pad = o.pad ?? 6;   // the box reaches well past the region (more than half a molar), so a neighbour cut by the region still has its own thick middle
   const i0 = Math.max(0, bi(roi.c[0] - rr - pad, 0)), i1 = Math.min(NX - 1, bi(roi.c[0] + rr + pad, 0) + 1), j0 = Math.max(0, bi(roi.c[1] - rr - pad, 1)), j1 = Math.min(NY - 1, bi(roi.c[1] + rr + pad, 1) + 1);
   const k0 = Math.max(0, bi(Math.min(roi.z0, roi.z1) - pad, 2)), k1 = Math.min(NZ - 1, bi(Math.max(roi.z0, roi.z1) + pad, 2) + 1);
   const nx = i1 - i0 + 1, ny = j1 - j0 + 1, nz = k1 - k0 + 1, n = nx * ny * nz;
@@ -921,12 +1350,12 @@ export function segmentTooth(vol, o) {
   // (averaged, up to about 0.25 mm), so it stays quick; the result (and the replica made from it) then refers to that copy, seg.vol
   const maxV = o.maxVoxels ?? 5e6;
   const fb = Math.min(Math.ceil(Math.cbrt(n / maxV)), Math.max(1, Math.floor(0.26 / Math.min(sx, sy, sz))));   // (never coarser than about 0.25 mm: the ligament space must still show)
-  if (n > maxV && fb > 1) { const sub = cropVolume(vol, [i0, j0, k0], [i1, j1, k1], fb); return segmentTooth(sub, { ...o, maxVoxels: Infinity }); }
+  if (n > maxV && fb > 1) { const sub = cropVolume(vol, [i0, j0, k0], [i1, j1, k1], fb); return floodTooth(sub, { ...o, maxVoxels: Infinity }); }
   const box = { i0, j0, k0, nx, ny, nz }, I = new Int16Array(n), inR = new Uint8Array(n), M = new Uint8Array(n), B = new Uint8Array(n), zl = Math.min(roi.z0, roi.z1), zh = Math.max(roi.z0, roi.z1);   // B: bright (all the box) · M: bright and in the region (may be tooth)
   for (let k = 0; k < nz; k++) { const z = org[2] + (k0 + k) * sz; for (let j = 0; j < ny; j++) { const y = org[1] + (j0 + j) * sy; for (let i = 0; i < nx; i++) {
     const x = org[0] + (i0 + i) * sx, q = i + nx * (j + ny * k), v = d[(i0 + i) + NX * ((j0 + j) + NY * (k0 + k))]; I[q] = v;
     const inside = z >= zl && z <= zh && (roi.shape === 'box' ? Math.abs(x - roi.c[0]) <= rr && Math.abs(y - roi.c[1]) <= rr : (x - roi.c[0]) ** 2 + (y - roi.c[1]) ** 2 <= rr * rr);
-    inR[q] = inside ? 1 : 0; B[q] = v >= T ? 1 : 0; M[q] = inside && B[q] ? 1 : 0;
+    inR[q] = inside ? 1 : 0; B[q] = v >= T ? 1 : 0; M[q] = inside && B[q] && (!o.within || o.within[q]) ? 1 : 0;
   } } }
   for (const e of o.erase || []) {                                // balls cut away
     const r = e.r, a0 = Math.max(0, bi(e.p[0] - r, 0) - i0), a1 = Math.min(nx - 1, bi(e.p[0] + r, 0) + 1 - i0), b0 = Math.max(0, bi(e.p[1] - r, 1) - j0), b1 = Math.min(ny - 1, bi(e.p[1] + r, 1) + 1 - j0), c0 = Math.max(0, bi(e.p[2] - r, 2) - k0), c1 = Math.min(nz - 1, bi(e.p[2] + r, 2) + 1 - k0);
@@ -978,7 +1407,7 @@ export function segmentTooth(vol, o) {
   const border = new Uint8Array(n); for (let q = 0; q < n; q++) if (M[q] && edge(q)) border[q] = 1;
   let topQ = -1; for (const q of seeds) { const e = climb(q, 1); if (topQ < 0) topQ = e; }   // where the first tap's climb ended: the thickest part of the tooth it is on
   for (const p of o.not || []) { const q = snap(p); if (q >= 0) climb(q, 2); }
-  for (let q = 0; q < n; q++) if (border[q] && !lab[q]) climb(q, 2);
+  if (!o.noBorder) for (let q = 0; q < n; q++) if (border[q] && !lab[q]) climb(q, 2);
   for (let lv = Q - 1; lv >= 0; lv--) {
     const b = buckets[lv]; if (!b) continue;
     for (let h = 0; h < b.length; h++) {
@@ -1072,46 +1501,43 @@ export function replicaField(vol, seg, o = {}) {
   }
   return { F, n, origin: lo, h, handle: H ? { a: hA, b: hB, r: hr } : null };
 }
-/** separable Gaussian blur of a 3D grid in place (σ in cells) */
+/** separable Gaussian blur of a 3D grid in place (σ in cells: one number, or one per axis) */
 function gauss3(F, n, s) {
-  const r = Math.max(1, Math.ceil(3 * s)), w = new Float32Array(2 * r + 1); let ws = 0; for (let q = -r; q <= r; q++) { w[q + r] = Math.exp(-q * q / (2 * s * s)); ws += w[q + r]; } for (let q = 0; q < w.length; q++) w[q] /= ws;
-  const [nx, ny, nz] = n, line = new Float32Array(Math.max(nx, ny, nz)), res = new Float32Array(line.length);
-  const pass = (len, count, idx) => { for (let c = 0; c < count; c++) { for (let t = 0; t < len; t++) line[t] = F[idx(c, t)]; for (let t = 0; t < len; t++) { let acc = 0; for (let q = -r; q <= r; q++) { const u = t + q < 0 ? 0 : t + q >= len ? len - 1 : t + q; acc += w[q + r] * line[u]; } res[t] = acc; } for (let t = 0; t < len; t++) F[idx(c, t)] = res[t]; } };
-  pass(nx, ny * nz, (c, t) => c * nx + t);
-  pass(ny, nx * nz, (c, t) => (c % nx) + nx * (t + ny * ((c / nx) | 0)));
-  pass(nz, nx * ny, (c, t) => c + nx * ny * t);
+  const [nx, ny, nz] = n, line = new Float32Array(Math.max(nx, ny, nz)), res = new Float32Array(line.length), S = typeof s === 'number' ? [s, s, s] : s;
+  const pass = (sg, len, count, base, stride) => {
+    if (!(sg > 0.01)) return; const r = Math.max(1, Math.ceil(3 * sg)), w = new Float32Array(2 * r + 1); let ws = 0; for (let q = -r; q <= r; q++) { w[q + r] = Math.exp(-q * q / (2 * sg * sg)); ws += w[q + r]; } for (let q = 0; q < w.length; q++) w[q] /= ws;
+    for (let c = 0; c < count; c++) { const b0 = base(c); for (let t = 0; t < len; t++) line[t] = F[b0 + t * stride]; for (let t = 0; t < len; t++) { let acc = 0; for (let q = -r; q <= r; q++) { const u = t + q < 0 ? 0 : t + q >= len ? len - 1 : t + q; acc += w[q + r] * line[u]; } res[t] = acc; } for (let t = 0; t < len; t++) F[b0 + t * stride] = res[t]; }
+  };
+  pass(S[0], nx, ny * nz, (c) => c * nx, 1);
+  pass(S[1], ny, nx * nz, (c) => (c % nx) + nx * ny * ((c / nx) | 0), nx);
+  pass(S[2], nz, nx * ny, (c) => c, nx * ny);
 }
 // ── the root canals of a tooth that has been cut out ──
 /**
- * segmentCanal(vol, seg, { T, minPiece = 0.12, crownDepth = 3.5 }) — the pulp chamber and root canals inside a tooth found by
- * segmentTooth. The scan is sampled on a grid laid along the tooth's long axis (voxels of the scan's own smallest size, so a
- * fine scan is used in full even where the tooth itself was found on a coarser copy), a little wider and longer than the tooth.
+ * segmentCanal(vol, seg, o) — the pulp chamber and the root canals inside a picked tooth (seg from segmentTooth).
  *
- * In each slice across the tooth, every voxel gets the level at which it would flood from outside: the lowest "brightest
- * value on the way" from the slice's edge. A voxel well below its flood level lies in a hollow ringed by brighter walls — the
- * pulp inside its dentine — however bright or dark the hollow itself reads. That matters on a real CBCT, where the pulp in a
- * root deep in the jaw reads much brighter than the pulp in the crown and no one threshold fits both. Each hollow is then
- * cut at a level between its own darkest value and the dentine (half way, unless T says otherwise): the canal's edge.
- * Near the crown's tip (within crownDepth mm) a hollow that is open from above — the fissures and the dip between the cusps
- * — is not counted; deeper down, what the walls ring in a slice counts whatever lies above it, so the chamber and canals
- * under an access cavity are found, and a canal open at the root end (however wide: a tooth still forming) is followed to
- * that end. Specks smaller than minPiece mm³ go. The walls are taken in two ways:
- *   'tooth'  only the tooth's own hard tissue. Everything ringed by it belongs to this tooth and ends where the tooth ends.
- *            Used when the tooth as picked does ring its pulp.
- *   'walls'  anything bright, tooth or bone, when the tooth as picked does not ring its pulp (on a real scan the tooth
- *            finder may take only part of a crown, or lose a root in bone as bright as dentine). Of the hollows found, the
- *            one in this tooth's crown is its pulp chamber, and what joins it are its canals — followed as far as the grid
- *            reaches past the tooth's root end, so where a root ends in soft tissue the root end must be checked by eye.
- * T (data units) sets where between a hollow's own darkest value and the dentine its edge is cut, as the same fraction that
- * T lies between this tooth's pulp and dentine levels; left out, half way: where a wide canal's edge truly is. A higher T
- * also counts shallower hollows (a hollow must lie about a quarter of what is left of that range below its walls). A canal thinner
- * than a voxel is only a slight dimming: it shows wider than it is, or not at all.
- * → { mask (1 = canal, over the grid), thr (each canal voxel's own edge level), I, inT, grid:{ n:[n0,n1,n2], h, O, u, v, w }
- *     (voxel (a, b, c) at O + h·(a·u + b·v + c·w); w up the axis), by ('tooth' | 'walls'), T, auto, pulp, dentine, count,
- *     volume (mm³), pieces, lo, hi (patient box), length (along the axis, mm), apexGap (mm from the canals' root end to the
- *     picked tooth's; negative: beyond it), crownGap, canals (most side by side for a stretch of the root, below the crown),
- *     levels:[{ t (mm from the tooth's root end), count, root (below the crown) }], has(x, y, z) }
- *   or { error, T, auto, pulp, dentine }
+ * A canal narrower than the scan's own blur does not read as dark as pulp: it is a faint dip in the dentine's grey — a tenth of
+ * the way down to soft tissue for a canal a third of a millimetre across — and the noise of a single voxel is a fifth of that.
+ * So:
+ *   · the grey is resampled on a grid that stands along the tooth's own axis, as fine as the scan's voxels, and evened out
+ *     along the tooth (canals run along it; noise does not);
+ *   · at every voxel inside the tooth, how far the grey dips below the dentine round it: across the slice in four directions,
+ *     the brightest tissue of the tooth within 1 mm on either side; a voxel lies in a dip only if it is walled on both sides in
+ *     at least three of the four (so the darker rim of the tooth itself is no dip, and a ribbon-shaped canal still is). The
+ *     dip is expressed from the wall towards soft tissue, 0 … 1;
+ *   · a wide hollow — the pulp chamber, a wide canal — is as dark as pulp in its middle, and its edge lies where the grey is
+ *     midway between pulp and dentine (the threshold T);
+ *   · narrower canals are followed from slice to slice instead: the line through the tooth, moving at most one voxel sideways
+ *     per slice, along which the dip adds up to the most — above what noise alone adds up to — is a canal. It ends where the
+ *     dip ahead no longer outweighs the noise. Lines are taken one after another, each from the chamber or from a canal
+ *     already found, until none is left that stands out;
+ *   · each is drawn as a tube whose width follows from the depth of its dip and the scan's blur: a canal d across dips
+ *     by 1 − exp(−d² / 8σ²).
+ * → { mask (wide hollows and the voxels the canals pass through), wide, paths: [{ q, pts, r, f, score }], grid: { n, h, O, u, v, w },
+ *     I, inT, f, T, auto, pulp, dentine, count, volume, pieces, lo, hi, length, apexGap, crownGap, canals, levels, faint (mm of
+ *     canal drawn from its dip alone), noise: { level, spread, floor }, has(x, y, z) } or { error }
+ * o: T (the grey below which a wide hollow counts — default midway between pulp and dentine; set higher, fainter canals are
+ *    followed too), psf (the scan's blur σ in mm: default 1¼ voxels), maxVoxels, sidePad, endPad, minRun (mm), maxPaths
  */
 export function segmentCanal(vol, seg, o = {}) {
   if (!seg || seg.error || !seg.lab) return { error: 'Pick the tooth first.' };
@@ -1124,136 +1550,158 @@ export function segmentCanal(vol, seg, o = {}) {
     for (let a = 0; a < 3; a++) { if (e[a] < lo[a]) lo[a] = e[a]; if (e[a] > hi[a]) hi[a] = e[a]; }
   }
   if (!(lo[0] < Infinity)) return { error: 'Pick the tooth first.' };
-  const fromTop = seg.crown > 0; let h = Math.max(0.04, Math.min(...vol.spacing));
-  // the grid: 3 mm wider than the tooth all round (the tooth as picked may be only part of it) and 3 mm past its root end
-  const side = o.sidePad ?? 3, pl = [side, side, fromTop ? (o.endPad ?? 3) : 1], ph = [side, side, fromTop ? 1 : (o.endPad ?? 3)], size = (hh) => [0, 1, 2].map((a) => Math.max(3, Math.ceil((hi[a] - lo[a] + pl[a] + ph[a]) / hh) + 1));
+  const fromTop = seg.crown > 0, vox = Math.min(...vol.spacing); let h = Math.max(0.04, vox);
+  // the grid: 1½ mm wider than the tooth all round and 3 mm past its root end
+  const side = o.sidePad ?? 1.5, endPad = o.endPad ?? 3, pl = [side, side, fromTop ? endPad : 1], ph = [side, side, fromTop ? 1 : endPad], size = (hh) => [0, 1, 2].map((a) => Math.max(3, Math.ceil((hi[a] - lo[a] + pl[a] + ph[a]) / hh) + 1));
   while (size(h).reduce((p, x) => p * x, 1) > (o.maxVoxels ?? 6e6)) h *= 1.12;
   const [n0, n1, n2] = size(h), sl = n0 * n1, n = sl * n2, O = [0, 1, 2].map((a) => c[a] + (lo[0] - pl[0]) * u[a] + (lo[1] - pl[1]) * v[a] + (lo[2] - pl[2]) * w[a]);
-  const I = new Int16Array(n), inT = new Uint8Array(n); let vmin = 32767, vmax = -32768;
+  const I = new Int16Array(n), inT = new Uint8Array(n);
   for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) {
     const x = O[0] + h * (i * u[0] + j * v[0] + k * w[0]), y = O[1] + h * (i * u[1] + j * v[1] + k * w[1]), z = O[2] + h * (i * u[2] + j * v[2] + k * w[2]), q = i + n0 * j + sl * k;
-    const val = Math.round(sampleAt(vol, x, y, z)); I[q] = val; if (val < vmin) vmin = val; if (val > vmax) vmax = val;
+    I[q] = Math.round(sampleAt(vol, x, y, z));
     const a = Math.round((x - oW[0]) / sW[0]) - box.i0, b = Math.round((y - oW[1]) / sW[1]) - box.j0, cc = Math.round((z - oW[2]) / sW[2]) - box.k0;
     inT[q] = a >= 0 && b >= 0 && cc >= 0 && a < box.nx && b < box.ny && cc < box.nz && lab[a + box.nx * (b + box.ny * cc)] ? 1 : 0;
   }
   let t0 = n2, t1 = -1; for (let k = 0; k < n2; k++) { let any = 0; for (let r = 0; r < sl && !any; r++) any = inT[k * sl + r]; if (any) { if (k < t0) t0 = k; t1 = k; } }   // the tooth's ends along its axis
-  const free = (fromTop ? n2 - 1 - t1 : t0) + Math.round((o.crownDepth ?? 3.5) / h), rootEnd = fromTop ? t0 : t1, crownTip = fromTop ? t1 : t0;
-  const median = (a) => { if (!a.length) return null; a.sort((x, y) => x - y); return a[a.length >> 1]; };
-  // levels: the tooth's dentine (the median of its hard tissue) and what is dark round it
-  const hard = [], all = [], stepS = 1 + ((n / 60000) | 0); for (let q = 0; q < n; q += stepS) { all.push(I[q]); if (inT[q] && I[q] >= seg.T) hard.push(I[q]); }
-  all.sort((x, y) => x - y); const dentine = median(hard) ?? seg.ref ?? seg.T + 500, low = Math.max(all[Math.floor(all.length * 0.08)], dentine - 2500), T0 = Math.round(dentine - 0.35 * (dentine - low));
-  // the crown: the slices from its tip down to where the tooth's enamel (its brightest tissue) ends. The pulp chamber lies there;
-  // the hollows between the roots and between this tooth and the next (marrow, ligament) lie below it.
-  const e97 = hard.length ? hard[Math.min(hard.length - 1, Math.floor(hard.length * 0.97))] : dentine, E = dentine + 0.45 * (e97 - dentine), need = Math.max(4, Math.round(0.3 / (h * h))); let cej = -1;
-  if (e97 - dentine > 0.15 * (dentine - low)) for (let s = 0; s < n2; s++) { const k = fromTop ? n2 - 1 - s : s; let cnt = 0; for (let r = 0; r < sl; r++) if (inT[k * sl + r] && I[k * sl + r] >= E) cnt++; if (cnt >= need) cej = k; }
-  if (cej < 0) cej = Math.round(crownTip + 0.45 * (rootEnd - crownTip));
-  const inCrown = (k) => (fromTop ? k >= cej && k <= crownTip : k <= cej && k >= crownTip);
-  // ── the hollows: flood levels slice by slice from the crown end, then each hollow cut at its own level ──
-  const fill = new Int16Array(sl), prevOpen = new Uint8Array(sl), done = new Uint8Array(sl), buckets = Array.from({ length: vmax - vmin + 1 }, () => []), cand = new Uint8Array(sl), comp = [], st = [];
-  /**
-   * hollows(frac, depth, own, floor) → { mask, thr }: frac of the way from a hollow's darkest value to the dentine is its edge; a
-   * hollow counts when it lies depth below its flood level; own: only the tooth's own tissue is wall (anything else floods
-   * freely); floor: a hollow's darkest value is taken no lower than this (the pulp's level: where air has got into a hollow,
-   * the pulp beside it is still cut as pulp)
-   */
-  const hollows = (frac, depth, own, floor = -32768) => {
-    const mask = new Uint8Array(n), thr = new Int16Array(n);
-    for (let s = 0; s < n2; s++) {
-      const k = fromTop ? n2 - 1 - s : s, base = k * sl, val = own ? (r) => (inT[base + r] ? I[base + r] : vmin) : (r) => I[base + r]; let lowest = vmax + 1; done.fill(0);
-      const push = (r, lv) => { fill[r] = lv; done[r] = 1; buckets[lv - vmin].push(r); if (lv < lowest) lowest = lv; };
-      for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const r = i + n0 * j; if (s === 0 || i === 0 || j === 0 || i === n0 - 1 || j === n1 - 1 || (s <= free && prevOpen[r])) push(r, val(r)); }
-      for (let lv = lowest; lv <= vmax; lv++) { const b = buckets[lv - vmin]; for (let q = 0; q < b.length; q++) { const r = b[q], i = r % n0, j = (r / n0) | 0;
-          if (i > 0 && !done[r - 1]) push(r - 1, Math.max(val(r - 1), lv)); if (i < n0 - 1 && !done[r + 1]) push(r + 1, Math.max(val(r + 1), lv)); if (j > 0 && !done[r - n0]) push(r - n0, Math.max(val(r - n0), lv)); if (j < n1 - 1 && !done[r + n0]) push(r + n0, Math.max(val(r + n0), lv)); }
-        b.length = 0; }
-      for (let r = 0; r < sl; r++) { prevOpen[r] = fill[r] < T0 ? 1 : 0; cand[r] = Math.min(fill[r], dentine) - val(r) >= depth ? 1 : 0; }   // (below its flood level, and below the dentine: the dentine inside a crown's brighter enamel is not a hollow)
-      // each hollow of this slice (touching by a side or a corner), cut at its own level
-      for (let r0 = 0; r0 < sl; r0++) {
-        if (cand[r0] !== 1) continue; comp.length = 0; cand[r0] = 2; st.push(r0); let bmin = 32767;
-        while (st.length) { const r = st.pop(), i = r % n0, j = (r / n0) | 0; comp.push(r); if (I[base + r] < bmin) bmin = I[base + r]; for (let db = -1; db <= 1; db++) for (let da = -1; da <= 1; da++) { const ii = i + da, jj = j + db; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const rr = ii + n0 * jj; if (cand[rr] === 1) { cand[rr] = 2; st.push(rr); } } }
-        if (bmin < floor) bmin = floor; const cut = Math.min(bmin + frac * (dentine - bmin), dentine - depth);
-        for (const r of comp) { const t = Math.min(cut, fill[r] - 0.2 * (fill[r] - bmin)); if (I[base + r] < t) { mask[base + r] = 1; thr[base + r] = Math.round(t); } }
-      }
-    }
-    return { mask, thr };
-  };
-  // the pieces of a mask (touching by a face, an edge or a corner): { id, list:[{ size, inTooth, crown (voxels in the crown), near (… within 3.5 mm of the axis there) }] }
-  const ax0 = [dot([c[0] - O[0], c[1] - O[1], c[2] - O[2]], u) / h, dot([c[0] - O[0], c[1] - O[1], c[2] - O[2]], v) / h], nearR = 3.5 / h;
-  const piecesOf = (mask) => {
-    const id = new Int32Array(n), list = [null];
-    for (let q0 = 0; q0 < n; q0++) {
-      if (!mask[q0] || id[q0]) continue; const L = list.length, P = { size: 0, inTooth: 0, crown: 0, near: 0 }; id[q0] = L; st.push(q0);
-      while (st.length) { const q = st.pop(), i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; P.size++; if (inT[q]) P.inTooth++; if (inCrown(k)) { P.crown++; if (Math.hypot(i - ax0[0], j - ax0[1]) <= nearR) P.near++; }
-        for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; if (mask[r] && !id[r]) { id[r] = L; st.push(r); } } } } }
-      list.push(P);
-    }
-    return { id, list };
-  };
-  /** of the hollows found inside any bright wall, this tooth's pulp: the largest that lies in its crown, near its axis */
-  const chamberOf = (P) => { let best = 0; for (let L = 1; L < P.list.length; L++) if (P.list[L].near >= 3 && (!best || P.list[L].size > P.list[best].size)) best = L; return best; };
-  // the tooth's pulp level: the chamber found at a first, cautious setting (its darker third: the voxels at its edge are part dentine)
-  const d0 = Math.max(40, 0.15 * (dentine - low)), any0 = hollows(0.5, d0, false), P0 = piecesOf(any0.mask), ch0 = chamberOf(P0), dk = [];
-  if (ch0) { for (let q = 0; q < n; q++) if (P0.id[q] === ch0) dk.push(I[q]); } else { const own0 = hollows(0.5, d0, true).mask; for (let q = 0; q < n; q++) if (own0[q]) dk.push(I[q]); }
-  dk.sort((x, y) => x - y);
-  const pulp = dk.length >= 8 ? dk[Math.floor(dk.length * 0.35)] : Math.round(seg.T - 1.2 * (dentine - seg.T)), span = Math.max(1, dentine - pulp), auto = Math.round(pulp + 0.5 * span), T = Math.round(o.T ?? auto), base = { T, auto, pulp, dentine };
-  // the canals, both ways
-  const frac = Math.max(0.05, Math.min(0.97, (T - pulp) / span)), depth = Math.max(30, (o.minDepth ?? 0.24) * (1 - frac) * span), minVox = Math.max(3, Math.ceil((o.minPiece ?? 0.12) / (h * h * h)));
-  const own = hollows(frac, depth, true, pulp), Pown = piecesOf(own.mask), any = hollows(frac, depth, false, pulp), Pany = piecesOf(any.mask), ch = chamberOf(Pany);
-  // does the tooth as picked ring its pulp? — is the chamber found inside any bright wall also ringed by the tooth's own
-  let chN = 0, chOwn = 0; if (ch) for (let k = 0; k < n2; k++) { if (!inCrown(k)) continue; for (let r = 0; r < sl; r++) { const q = k * sl + r; if (Pany.id[q] === ch) { chN++; if (own.mask[q]) chOwn++; } } }
-  const by = o.by || (ch && chOwn < 0.5 * chN ? 'walls' : 'tooth'), mask = new Uint8Array(n), src = by === 'tooth' ? own : any; let pieces = 0;
-  if (by === 'tooth') { let big = 0; for (let L = 1; L < Pown.list.length; L++) if (!big || Pown.list[L].size > Pown.list[big].size) big = L; const keep = Pown.list.map((P, L) => L > 0 && (P.size >= minVox || (L === big && P.size >= 3))); for (let L = 1; L < keep.length; L++) if (keep[L]) pieces++; for (let q = 0; q < n; q++) if (keep[Pown.id[q]]) mask[q] = 1; }
-  else { const keep = Pany.list.map((P, L) => L > 0 && (L === ch || (P.size >= minVox && P.inTooth >= 0.6 * P.size))); for (let L = 1; L < keep.length; L++) if (keep[L]) pieces++; for (let q = 0; q < n; q++) if (keep[Pany.id[q]]) mask[q] = 1; }
-  const thr = src.thr; let count = 0; const plo = [Infinity, Infinity, Infinity], phi = [-Infinity, -Infinity, -Infinity]; let c0 = n2, c1 = -1;
-  for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) {
-    const q = i + n0 * j + sl * k; if (!mask[q]) { thr[q] = 0; continue; } count++; if (k < c0) c0 = k; if (k > c1) c1 = k;
-    for (let a = 0; a < 3; a++) { const x = O[a] + h * (i * u[a] + j * v[a] + k * w[a]); if (x < plo[a]) plo[a] = x; if (x > phi[a]) phi[a] = x; }
+  if (t1 < 0) return { error: 'Pick the tooth first.' };
+  const rootEnd = fromTop ? t0 : t1, crownTip = fromTop ? t1 : t0, ap = fromTop ? -1 : 1, cej = Math.round(crownTip + 0.42 * (rootEnd - crownTip)), inCrown = (k) => (fromTop ? k >= cej : k <= cej), grid = { n: [n0, n1, n2], h, O, u, v, w };
+  const disc = (r) => { const d = []; for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) if (a * a + b * b <= r * r + 0.5) d.push(a, b); return Int8Array.from(d); }, st = [];
+  // ── inside the tooth: its outline in each slice with gaps of up to ½ mm closed (no wider: the gap between two roots is not a
+  //    canal), and everything that outline rings (the pulp).
+  //    Under the tip of a root — a small piece with nothing of the tooth below it — 2 mm further (2): the tooth's outline may
+  //    stop short of a root's end, where the root lies in bone as bright as itself.
+  //    A hollow with none of the tooth above it (towards the crown's tip) is not pulp: the dip between the cusps is ringed by
+  //    them slice by slice, but it is open above ──
+  const ins = new Uint8Array(n), rC = Math.max(1, Math.round(0.25 / h)), dC = disc(rC), A = new Uint8Array(sl), B = new Uint8Array(sl);
+  for (let k = t0; k <= t1; k++) { const base = k * sl; A.fill(0);
+    for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) if (inT[base + i + n0 * j]) for (let m = 0; m < dC.length; m += 2) { const ii = i + dC[m], jj = j + dC[m + 1]; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1) A[ii + n0 * jj] = 1; }
+    solid2(A, n0, n1, B);
+    for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const r = i + n0 * j; if (inT[base + r]) { ins[base + r] = 1; continue; } if (!B[r]) continue; let ok = true; for (let m = 0; m < dC.length && ok; m += 2) { const ii = i + dC[m], jj = j + dC[m + 1]; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1 || !B[ii + n0 * jj]) ok = false; } if (ok) ins[base + r] = 1; } }
+  { const top = new Int32Array(sl).fill(-1); for (let k = t0; k <= t1; k++) for (let r = 0; r < sl; r++) if (inT[k * sl + r] && (top[r] < 0 || fromTop)) top[r] = k;   // (each column's own highest voxel of the tooth, crownwards)
+    for (let k = t0; k <= t1; k++) for (let r = 0; r < sl; r++) { const q = k * sl + r; if (ins[q] && !inT[q] && (top[r] < 0 || (fromTop ? k > top[r] : k < top[r]))) ins[q] = 0; } }
+  { const tipA = Math.round(4 / (h * h)), ext = Math.round(2 / h), seenS = new Uint8Array(sl);
+    for (let k = t0; k <= t1; k++) { const base = k * sl, kb = k + ap; seenS.fill(0);
+      for (let r0 = 0; r0 < sl; r0++) { if (ins[base + r0] !== 1 || seenS[r0]) continue; const comp = []; seenS[r0] = 1; st.push(r0);
+        while (st.length) { const r = st.pop(), i = r % n0, j = (r / n0) | 0; comp.push(r); if (i > 0 && ins[base + r - 1] === 1 && !seenS[r - 1]) { seenS[r - 1] = 1; st.push(r - 1); } if (i < n0 - 1 && ins[base + r + 1] === 1 && !seenS[r + 1]) { seenS[r + 1] = 1; st.push(r + 1); } if (j > 0 && ins[base + r - n0] === 1 && !seenS[r - n0]) { seenS[r - n0] = 1; st.push(r - n0); } if (j < n1 - 1 && ins[base + r + n0] === 1 && !seenS[r + n0]) { seenS[r + n0] = 1; st.push(r + n0); } }
+        if (comp.length > tipA) continue; let below = 0; if (kb >= 0 && kb < n2) for (const r of comp) if (ins[kb * sl + r] === 1) below++; if (below > 0.25 * comp.length) continue;
+        for (const r of comp) for (let s = 1; s <= ext; s++) { const kk = k + ap * s; if (kk < 0 || kk >= n2 || ins[kk * sl + r]) break; ins[kk * sl + r] = 2; } } } }
+  // ── levels ──
+  const lv = seg.levels || {}, dentine = lv.dentine != null ? lv.dentine : seg.ref ?? seg.T + 500, softL = lv.soft != null ? lv.soft : windowPresets(vol).soft.l, pulp = Math.round(Math.min(softL, dentine - 300)), span = Math.max(1, dentine - pulp);
+  const Dcap = lv.enamel != null ? (dentine + lv.enamel) / 2 : dentine + 0.35 * span, auto = Math.round(pulp + 0.5 * span), T = Math.round(o.T ?? auto), frac = Math.max(0.05, Math.min(0.97, (T - pulp) / span)), base0 = { T, auto, pulp, dentine };
+  // the grey, evened out along the tooth and capped at what dentine may be (enamel is not a wall round anything)
+  const Is = new Float32Array(n); for (let q = 0; q < n; q++) { if (!ins[q]) continue; const a = q >= sl ? I[q - sl] : I[q], b = q + sl < n ? I[q + sl] : I[q]; Is[q] = Math.min(Dcap, (a + 2 * I[q] + b) / 4); }
+  // each slice's own dentine level (the wall of a hollow too wide to see across)
+  const slLev = new Float32Array(n2).fill(NaN);
+  for (let k = 0; k < n2; k++) { const vals = []; for (let r = 0; r < sl; r++) if (ins[k * sl + r] === 1) vals.push(Is[k * sl + r]); if (vals.length >= 12) { vals.sort((a, b) => a - b); slLev[k] = Math.min(vals[Math.floor(vals.length * 0.7)], dentine + 0.15 * span); } }   // (no brighter than dentine: a crown's slice is mostly enamel)
+  { let last = dentine; for (let s = 0; s < n2; s++) { const k = fromTop ? n2 - 1 - s : s; if (slLev[k] === slLev[k]) last = slLev[k]; else slLev[k] = last; } }
+  // ── the dip at every voxel ──
+  const DIR = [[1, 0], [0, 1], [1, 1], [1, -1]], f = new Float32Array(n), wide = new Uint8Array(n), tW = 1 - frac, R1 = [0, 1].map((d) => Math.max(2, Math.round(1 / (h * (d ? Math.SQRT2 : 1))))), R2 = [0, 1].map((d) => Math.max(3, Math.round(6 / (h * (d ? Math.SQRT2 : 1))))), wd = [0, 0, 0, 0];
+  const sideMax = (q, i, j, a, b, R) => { let m = -Infinity; for (let s = 1; s <= R; s++) { const ii = i + s * a, jj = j + s * b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; const r = q + s * (a + n0 * b); if (!ins[r]) break; if (Is[r] > m) m = Is[r]; } return m; };
+  for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = i + n0 * j + sl * k; if (!ins[q]) continue;
+    for (let d = 0; d < 4; d++) { const a = DIR[d][0], b = DIR[d][1], R = R1[d < 2 ? 0 : 1]; wd[d] = Math.min(sideMax(q, i, j, a, b, R), sideMax(q, i, j, -a, -b, R)); }
+    let m1 = Infinity, m2 = Infinity; for (let d = 0; d < 4; d++) { if (wd[d] < m1) { m2 = m1; m1 = wd[d]; } else if (wd[d] < m2) m2 = wd[d]; }   // the second least: walled in three directions of the four
+    let fv = m2 > Is[q] && m2 > pulp + 1 ? (m2 - Is[q]) / (m2 - pulp) : 0;
+    // a wide hollow: dark against the slice's own dentine, and walled further off
+    const L = slLev[k], f2 = (L - Is[q]) / Math.max(1, L - pulp);
+    if (ins[q] === 1 && f2 >= Math.min(tW, 0.35) && f2 > fv) { const need = L - 0.3 * span; let ok = 0; for (let d = 0; d < 4; d++) { const a = DIR[d][0], b = DIR[d][1], R = R2[d < 2 ? 0 : 1]; if (sideMax(q, i, j, a, b, R) >= need && sideMax(q, i, j, -a, -b, R) >= need) ok++; } if (ok >= 3) fv = f2; }
+    f[q] = Math.min(1.2, fv); if (ins[q] === 1 && fv >= tW) wide[q] = 1; }
+  // ── wide hollows: the pulp (chamber and wide canal) is the largest; others count when a canal leads to them ──
+  const id = new Int32Array(n), list = [null];
+  for (let q0 = 0; q0 < n; q0++) { if (!wide[q0] || id[q0]) continue; const L = list.length, P = { size: 0, crown: 0, vox: [] }; id[q0] = L; st.push(q0);
+    while (st.length) { const q = st.pop(), i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; P.size++; P.vox.push(q); if (inCrown(k)) P.crown++;
+      for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; if (wide[r] && !id[r]) { id[r] = L; st.push(r); } } } } }
+    list.push(P); }
+  const minVox = Math.max(3, Math.ceil((o.minPiece ?? 0.1) / (h * h * h))); let ch = 0;
+  for (let L = 1; L < list.length; L++) if (list[L].size >= minVox && (!ch || list[L].size > list[ch].size)) ch = L;
+  const keep = new Uint8Array(n), anch = new Uint8Array(n), near = new Uint8Array(n), joined = new Uint8Array(list.length);
+  const mark = (arr, q, r, rz = 0) => { const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let cz = -rz; cz <= rz; cz++) { const kk = k + cz; if (kk < 0 || kk >= n2) continue; for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1 && a * a + b * b <= r * r + 0.5) arr[ii + n0 * jj + sl * kk] = 1; } } };
+  const join = (L) => { if (!L || joined[L]) return; joined[L] = 1; for (const q of list[L].vox) { keep[q] = 1; mark(anch, q, 2, 1); mark(near, q, 1); } };
+  join(ch);
+  // ── what noise alone looks like: the dips of plain dentine (most of the tooth). A line that picks the darkest of nine voxels
+  //    at every step gathers, from noise alone, about what the darkest twentieth of them shows: that is the floor a canal's
+  //    dip must stand above (with the threshold set higher, a little less) ──
+  const dv = []; { const stp = 1 + ((n / 120000) | 0); for (let q = 0; q < n; q += stp) if (ins[q] === 1 && !wide[q] && f[q] < 0.4) dv.push(f[q]); } dv.sort((a, b) => a - b);
+  const pos = dv.filter((x) => x > 0), mf = pos.length ? pos[pos.length >> 1] : 0.02, qd = Math.max(0.8, Math.min(0.995, o.quantile ?? 0.95 - 0.25 * (frac - 0.5))), sf = dv.length ? dv[Math.floor((dv.length - 1) * 0.9)] : 0.04, delta = Math.max(0.02, dv.length ? dv[Math.floor((dv.length - 1) * qd)] : 0.06);
+  // (only the middle of a dip counts — where it is deepest across the slice: the blurred flank of a canal is not a second canal beside it)
+  const crest = new Uint8Array(n); for (let k = 0; k < n2; k++) for (let j = 1; j < n1 - 1; j++) for (let i = 1; i < n0 - 1; i++) { const q = i + n0 * j + sl * k, x = f[q]; if (x > 0 && x >= f[q - 1] && x >= f[q + 1] && x >= f[q - n0] && x >= f[q + n0] && x >= f[q - n0 - 1] && x >= f[q - n0 + 1] && x >= f[q + n0 - 1] && x >= f[q + n0 + 1]) crest[q] = 1; }
+  // ── the canals: lines of dip from slice to slice (the best continuation worked out from the root end up), one after another ──
+  const s = new Float32Array(n), V = new Float32Array(n), ptr = new Int8Array(n), paths = [], kA = fromTop ? 0 : n2 - 1, sup = Math.max(1, Math.round(0.6 / h)), minScore = (o.minScore ?? 1.5) * (0.25 / h), maxPaths = o.maxPaths ?? 10, minRun = Math.max(2, Math.round((o.minRun ?? 1) / h));
+  for (let it = 0; it < maxPaths + 8 && paths.length < maxPaths; it++) {
+    for (let q = 0; q < n; q++) s[q] = !ins[q] ? -Infinity : near[q] ? (keep[q] ? 0 : -0.01) : crest[q] || wide[q] ? f[q] - delta : -0.5 * delta;   // (what is found already neither adds nor costs; a wide hollow not yet reached counts in full)
+    for (let t = 0; t < n2; t++) { const k = kA - ap * t, kb = k + ap, base = k * sl;
+      for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = base + i + n0 * j; if (!ins[q]) { V[q] = -Infinity; ptr[q] = -1; continue; } let best = 0, bp = -1;
+        if (kb >= 0 && kb < n2) for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const val = V[kb * sl + ii + n0 * jj] - (da || db ? 0.004 : 0); if (val > best) { best = val; bp = (da + 1) + 3 * (db + 1); } } }
+        V[q] = s[q] + best; ptr[q] = bp; } }
+    // the best line that starts at the chamber or at a canal already found (anywhere, while there is nothing to start from)
+    let q0 = -1, bv = minScore; const anchored = !!ch || paths.length > 0; for (let q = 0; q < n; q++) if (V[q] > bv && (!anchored || anch[q])) { bv = V[q]; q0 = q; }
+    if (q0 < 0) break;
+    const pts = []; let q = q0; for (;;) { pts.push(q); const bp = ptr[q]; if (bp < 0) break; const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; q = (i + (bp % 3) - 1) + n0 * (j + ((bp / 3) | 0) - 1) + sl * (k + ap); }
+    let first = 0; while (first < pts.length - 1 && near[pts[first + 1]]) first++;   // (its run through what is already found is not part of it, but for the voxel it leaves from)
+    const run = pts.slice(first); let gain = 0; for (const p of run) if (!near[p]) gain += crest[p] || wide[p] ? f[p] - delta : -0.5 * delta; for (const p of run) mark(near, p, sup);
+    if (run.length < minRun || gain < minScore) continue;
+    for (const p of run) { mark(anch, p, 2, 1); if (id[p]) join(id[p]); else { const i = p % n0, j = ((p / n0) | 0) % n1; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1) join(id[p + a + n0 * b]); } } }
+    paths.push({ q: run, score: gain });
   }
-  const grid = { n: [n0, n1, n2], h, O, u, v, w };
-  if (!count) return { ...base, by, grid, I, inT, error: 'No canal space shows inside this tooth: raise the canal threshold, or check the tooth was picked whole.' };
-  // along the axis: where the canals end against the tooth's ends, and how many canals lie side by side at each level
-  // (a canal is counted when it belongs to a piece of at least 1 mm³: a speck beside the canal is not a second canal)
-  const fromRoot = (k) => (fromTop ? k - rootEnd : rootEnd - k) * h, levels = [], seen = new Uint8Array(sl), Psrc = by === 'tooth' ? Pown : Pany, sig = Math.ceil(1 / (h * h * h));
-  for (let k = c0; k <= c1; k++) {
-    seen.fill(0); let cnt = 0;
-    for (let r0 = 0; r0 < sl; r0++) { if (!mask[k * sl + r0] || seen[r0]) continue; let sz = 0; seen[r0] = 1; st.push(r0);
-      while (st.length) { const r = st.pop(), i = r % n0, j = (r / n0) | 0; sz++; for (let db = -1; db <= 1; db++) for (let da = -1; da <= 1; da++) { const ii = i + da, jj = j + db; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const rr = ii + n0 * jj; if (mask[k * sl + rr] && !seen[rr]) { seen[rr] = 1; st.push(rr); } } }
-      if (sz >= 2 && Psrc.list[Psrc.id[k * sl + r0]].size >= sig) cnt++; }
-    levels.push({ t: fromRoot(k), count: cnt, root: !inCrown(k) });
-  }
-  // the most canals side by side that last for a stretch (¾ mm) of the root: below the crown, where the chamber's horns do not count
-  const run = Math.max(2, Math.round(0.75 / h)); let canals = 1;
-  for (let m = 2; m <= 6; m++) { let len = 0, ok = false; for (const L of levels) { len = L.root && L.count >= m ? len + 1 : 0; if (len >= run) { ok = true; break; } } if (ok) canals = m; else break; }
+  if (!ch && !paths.length) return { ...base0, grid, I, inT, f, error: 'No canal space shows inside this tooth: raise the canal threshold, or check the tooth was picked whole.' };
+  // ── each canal's width from the depth of its dip: a canal d across, blurred by the scan (σ), dips by 1 − exp(−d²/8σ²) ──
+  const sig = o.psf ?? 1.25 * vox, mask = Uint8Array.from(keep); let faint = 0, tubeVol = 0;
+  for (const P of paths) { const m = P.q.length, fr = new Float32Array(m), r = new Float32Array(m), ij = new Float32Array(2 * m), kk = new Int32Array(m); P.f = fr; P.r = r; P.ij = ij; P.k = kk;
+    // the line itself, evened out: from voxel to voxel it steps a whole voxel sideways or none; the canal does not
+    for (let a = 0; a < m; a++) { const q = P.q[a]; ij[2 * a] = q % n0; ij[2 * a + 1] = ((q / n0) | 0) % n1; kk[a] = (q / sl) | 0; }
+    for (let pass = 0; pass < 4; pass++) { const c = ij.slice(); for (let a = 1; a < m - 1; a++) { ij[2 * a] = (c[2 * a - 2] + 2 * c[2 * a] + c[2 * a + 2]) / 4; ij[2 * a + 1] = (c[2 * a - 1] + 2 * c[2 * a + 1] + c[2 * a + 3]) / 4; } }
+    P.pts = Array.from({ length: m }, (_, a) => [0, 1, 2].map((d) => O[d] + h * (ij[2 * a] * u[d] + ij[2 * a + 1] * v[d] + kk[a] * w[d])));
+    for (let a = 0; a < m; a++) { let sm = 0, cnt = 0; for (let b = Math.max(0, a - 2); b <= Math.min(m - 1, a + 2); b++) { sm += f[P.q[b]]; cnt++; } fr[a] = sm / cnt; const fe = Math.max(0, Math.min(0.6, fr[a] - mf)); r[a] = keep[P.q[a]] ? (o.minRadius ?? 0.1) : Math.max(o.minRadius ?? 0.1, Math.min(0.45, 0.5 * sig * Math.sqrt(-8 * Math.log(1 - fe)))); }   // (inside a wide hollow the hollow's own surface is drawn, not a tube)
+    { const c = r.slice(); for (let a = 1; a < m - 1; a++) r[a] = (c[a - 1] + 2 * c[a] + c[a + 1]) / 4; }
+    for (let a = 0; a < m; a++) { const q = P.q[a]; if (!keep[q]) { faint += h; tubeVol += Math.PI * r[a] * r[a] * h; } mask[q] = 1; if (r[a] > 0.75 * h) mark(mask, q, 1); } }
+  for (let q = 0; q < n; q++) if (mask[q] && !ins[q]) mask[q] = 0;
+  // ── what was found ──
+  let count = 0, wideN = 0, c0 = n2, c1 = -1; const plo = [Infinity, Infinity, Infinity], phi = [-Infinity, -Infinity, -Infinity];
+  for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = i + n0 * j + sl * k; if (!mask[q]) continue; count++; if (keep[q]) wideN++; if (k < c0) c0 = k; if (k > c1) c1 = k;
+    for (let a = 0; a < 3; a++) { const x = O[a] + h * (i * u[a] + j * v[a] + k * w[a]); if (x < plo[a]) plo[a] = x; if (x > phi[a]) phi[a] = x; } }
+  // its pieces (touching by a face, an edge or a corner)
+  let pieces = 0; { const seenP = new Uint8Array(n); for (let q0 = 0; q0 < n; q0++) { if (!mask[q0] || seenP[q0]) continue; pieces++; seenP[q0] = 1; st.push(q0);
+      while (st.length) { const q = st.pop(), i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; if (mask[r] && !seenP[r]) { seenP[r] = 1; st.push(r); } } } } } } }
+  // along the axis: how many canals lie side by side at each level, and the most that last for ¾ mm of the root
+  const fromRoot = (k) => (fromTop ? k - rootEnd : rootEnd - k) * h, levels = [], seenS = new Uint8Array(sl), fat = new Uint8Array(sl);
+  for (let k = c0; k <= c1; k++) { fat.fill(0); seenS.fill(0); let cnt = 0;
+    for (let r = 0; r < sl; r++) if (mask[k * sl + r]) { const i = r % n0, j = (r / n0) | 0; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1) fat[ii + n0 * jj] = 1; } }
+    for (let r0 = 0; r0 < sl; r0++) { if (!fat[r0] || seenS[r0]) continue; cnt++; seenS[r0] = 1; st.push(r0); while (st.length) { const r = st.pop(), i = r % n0, j = (r / n0) | 0; if (i > 0 && fat[r - 1] && !seenS[r - 1]) { seenS[r - 1] = 1; st.push(r - 1); } if (i < n0 - 1 && fat[r + 1] && !seenS[r + 1]) { seenS[r + 1] = 1; st.push(r + 1); } if (j > 0 && fat[r - n0] && !seenS[r - n0]) { seenS[r - n0] = 1; st.push(r - n0); } if (j < n1 - 1 && fat[r + n0] && !seenS[r + n0]) { seenS[r + n0] = 1; st.push(r + n0); } } }
+    levels.push({ t: fromRoot(k), count: cnt, root: !inCrown(k) }); }
+  const runL = Math.max(2, Math.round(0.75 / h)); let canals = 1;
+  for (let m = 2; m <= 6; m++) { let len = 0, ok = false; for (const L of levels) { len = L.root && L.count >= m ? len + 1 : 0; if (len >= runL) { ok = true; break; } } if (ok) canals = m; else break; }
   const apexEnd = fromTop ? c0 : c1, crownEnd = fromTop ? c1 : c0;
   const has = (x, y, z) => { const d = [x - O[0], y - O[1], z - O[2]], i = Math.round(dot(d, u) / h), j = Math.round(dot(d, v) / h), k = Math.round(dot(d, w) / h); return i >= 0 && j >= 0 && k >= 0 && i < n0 && j < n1 && k < n2 && mask[i + n0 * j + sl * k] === 1; };
-  return { ...base, by, mask, thr, I, inT, grid, count, volume: count * h * h * h, pieces, lo: plo, hi: phi, length: (c1 - c0 + 1) * h, apexGap: fromRoot(apexEnd), crownGap: Math.abs(crownTip - crownEnd) * h, canals, levels, has };
+  return { ...base0, by: 'tooth', mask, wide: keep, paths, f, I, inT, grid, tW, count, volume: wideN * h * h * h + tubeVol, pieces, lo: plo, hi: phi, length: (c1 - c0 + 1) * h, apexGap: Math.max(0, fromRoot(apexEnd)), crownGap: Math.abs(crownTip - crownEnd) * h, canals, levels, faint, noise: { level: mf, spread: sf, floor: delta }, has };
 }
 /**
- * canalField(cs, { smooth }) → { F, n, h } for core's isoMesh (origin [0, 0, 0]; then canalToPatient): the canals' surface on
- * the tooth's own grid at half its spacing, negative inside. The surface sits where the scan crosses the canal threshold,
- * between voxels, so a canal two voxels wide still comes out round. smooth: Gaussian σ in mm (default a third of a voxel).
+ * canalField(cs, o) → { F, n, h }: the canals as a field for N.isoMesh, on a grid three times as fine as the canal grid (twice
+ * for a large tooth) and only as large as the canals: below 0 inside. A wide hollow's surface lies where its dip is at the
+ * threshold; a narrow canal is a tube of its own width round its line. (Coordinates: canalToPatient.)
  */
 export function canalField(cs, o = {}) {
-  const { mask, thr, I, grid, pulp, dentine } = cs, [n0, n1, n2] = grid.n, sl = n0 * n1, n = mask.length, dI = Math.max(40, 0.5 * (dentine - pulp)), Fc = new Float32Array(n);
-  // every canal voxel has its own edge level; its neighbours (two voxels out) take the level of the canal beside them
-  let lev = Int16Array.from(thr), has = Uint8Array.from(mask);
-  for (let pass = 0; pass < 2; pass++) { const nl = lev.slice(), nh = has.slice();
-    for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = i + n0 * j + sl * k; if (has[q]) continue; let sum = 0, cnt = 0;
-      for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; if (has[r]) { sum += lev[r]; cnt++; } } } }
-      if (cnt) { nl[q] = Math.round(sum / cnt); nh[q] = 1; } }
-    lev = nl; has = nh; }
-  for (let q = 0; q < n; q++) { if (!has[q]) { Fc[q] = 0.5; continue; } const f = (I[q] - lev[q]) / dI; Fc[q] = Math.max(-2, Math.min(2, mask[q] ? Math.min(f, -0.02) : I[q] >= lev[q] ? Math.max(f, 0.02) : 0.5)); }
-  const m = [2 * n0 - 1, 2 * n1 - 1, 2 * n2 - 1], F = new Float32Array(m[0] * m[1] * m[2]);
-  for (let c = 0; c < m[2]; c++) { const k = Math.min(n2 - 2, c >> 1), tz = c / 2 - k; for (let b = 0; b < m[1]; b++) { const j = Math.min(n1 - 2, b >> 1), ty = b / 2 - j; for (let a = 0; a < m[0]; a++) {
-    const i = Math.min(n0 - 2, a >> 1), tx = a / 2 - i, q = i + n0 * j + sl * k;
-    F[a + m[0] * (b + m[1] * c)] = ((Fc[q] * (1 - tx) + Fc[q + 1] * tx) * (1 - ty) + (Fc[q + n0] * (1 - tx) + Fc[q + n0 + 1] * tx) * ty) * (1 - tz) + ((Fc[q + sl] * (1 - tx) + Fc[q + sl + 1] * tx) * (1 - ty) + (Fc[q + sl + n0] * (1 - tx) + Fc[q + sl + n0 + 1] * tx) * ty) * tz;
-  } } }
-  const sig = o.smooth ?? grid.h / 3; if (sig > 0) gauss3(F, m, sig / (grid.h / 2));
-  return { F, n: m, h: grid.h / 2 };
+  const { grid, f, wide, mask, paths, tW } = cs, [n0, n1, n2] = grid.n, h = grid.h, sl = n0 * n1, n = mask.length;
+  let b0 = [n0, n1, n2], b1 = [-1, -1, -1]; for (let q = 0; q < n; q++) if (mask[q]) { const p = [q % n0, ((q / n0) | 0) % n1, (q / sl) | 0]; for (let a = 0; a < 3; a++) { if (p[a] < b0[a]) b0[a] = p[a]; if (p[a] > b1[a]) b1[a] = p[a]; } }
+  for (let a = 0; a < 3; a++) { b0[a] = Math.max(0, b0[a] - 2); b1[a] = Math.min(grid.n[a] - 1, b1[a] + 2); }
+  const cells = (b1[0] - b0[0]) * (b1[1] - b0[1]) * (b1[2] - b0[2]), sub = o.sub ?? (cells * 27 <= 12e6 ? 3 : cells * 8 <= 16e6 ? 2 : 1), hf = h / sub, m = [0, 1, 2].map((a) => (b1[a] - b0[a]) * sub + 1), F = new Float32Array(m[0] * m[1] * m[2]);
+  // the wide hollows: the dip, where it belongs to one of them or lies next to one (elsewhere none). The surface is drawn a
+  // little outside where the dip is at the threshold: a voxel only counts as hollow once the hollow covers most of it
+  const lev = tW - 0.06, fk = new Float32Array(n); for (let q = 0; q < n; q++) { if (!wide[q]) continue; const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; fk[r] = wide[r] ? Math.max(f[r], tW + 0.02) : Math.min(f[r], lev - 0.02); } } } }
+  for (let c = 0; c < m[2]; c++) { const zc = b0[2] + c / sub, k = Math.min(n2 - 2, Math.floor(zc)), tz = zc - k; for (let b = 0; b < m[1]; b++) { const yc = b0[1] + b / sub, j = Math.min(n1 - 2, Math.floor(yc)), ty = yc - j; for (let a = 0; a < m[0]; a++) {
+    const xc = b0[0] + a / sub, i = Math.min(n0 - 2, Math.floor(xc)), tx = xc - i, q = i + n0 * j + sl * k;
+    const fv = ((fk[q] * (1 - tx) + fk[q + 1] * tx) * (1 - ty) + (fk[q + n0] * (1 - tx) + fk[q + n0 + 1] * tx) * ty) * (1 - tz) + ((fk[q + sl] * (1 - tx) + fk[q + sl + 1] * tx) * (1 - ty) + (fk[q + sl + n0] * (1 - tx) + fk[q + sl + n0 + 1] * tx) * ty) * tz;
+    F[a + m[0] * (b + m[1] * c)] = 0.75 * (lev - fv); } } }   // (¾ mm: about the width over which a blurred edge falls)
+  // the narrow canals: tubes round their lines
+  for (const P of paths) for (let s = 0; s < P.q.length; s++) { const e = Math.min(P.q.length - 1, s + 1), ra = P.r[s], rb = P.r[e];
+    const pa = [(P.ij[2 * s] - b0[0]) * h, (P.ij[2 * s + 1] - b0[1]) * h, (P.k[s] - b0[2]) * h], pb = [(P.ij[2 * e] - b0[0]) * h, (P.ij[2 * e + 1] - b0[1]) * h, (P.k[e] - b0[2]) * h], ab = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2], rr = Math.max(ra, rb) + 2 * hf;
+    const lo3 = [0, 1, 2].map((a) => Math.max(0, Math.floor((Math.min(pa[a], pb[a]) - rr) / hf))), hi3 = [0, 1, 2].map((a) => Math.min(m[a] - 1, Math.ceil((Math.max(pa[a], pb[a]) + rr) / hf)));
+    for (let c = lo3[2]; c <= hi3[2]; c++) for (let b = lo3[1]; b <= hi3[1]; b++) for (let a = lo3[0]; a <= hi3[0]; a++) { const x = a * hf - pa[0], y = b * hf - pa[1], z = c * hf - pa[2], t = L2 > 0 ? Math.max(0, Math.min(1, (x * ab[0] + y * ab[1] + z * ab[2]) / L2)) : 0, d = Math.hypot(x - t * ab[0], y - t * ab[1], z - t * ab[2]) - (ra + t * (rb - ra)), g = a + m[0] * (b + m[1] * c); if (d < F[g]) F[g] = d; } }
+  grid.off = [b0[0] * h, b0[1] * h, b0[2] * h];
+  return { F, n: m, h: hf };
 }
-/** a mesh made on the canals' grid (isoMesh with origin [0, 0, 0]) → patient coordinates, in place */
+/** a canal mesh from N.isoMesh(canalField(cs)…) (millimetres in the canal grid's own frame) → the patient's coordinates */
 export function canalToPatient(mesh, cs) {
-  const { O, u, v, w } = cs.grid, P = mesh.positions;
-  for (let q = 0; q < P.length; q += 3) { const a = P[q], b = P[q + 1], c = P[q + 2]; P[q] = O[0] + a * u[0] + b * v[0] + c * w[0]; P[q + 1] = O[1] + a * u[1] + b * v[1] + c * w[1]; P[q + 2] = O[2] + a * u[2] + b * v[2] + c * w[2]; }
+  const { O, u, v, w } = cs.grid, off = cs.grid.off || [0, 0, 0], P = mesh.positions;
+  for (let q = 0; q < P.length; q += 3) { const a = P[q] + off[0], b = P[q + 1] + off[1], c = P[q + 2] + off[2]; P[q] = O[0] + a * u[0] + b * v[0] + c * w[0]; P[q + 1] = O[1] + a * u[1] + b * v[1] + c * w[1]; P[q + 2] = O[2] + a * u[2] + b * v[2] + c * w[2]; }
   return mesh;
 }
 /** vertex normals of a closed mesh (area-weighted, outwards for an outward-facing mesh) */
