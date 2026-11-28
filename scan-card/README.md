@@ -183,6 +183,34 @@ fillings (bright) are not canals. Needs voxels of about 0.4 mm or
 smaller; 0.2 mm or finer shows far more. The case keeps the CBCT work, the turned planes and
 the replica (`cbct-replica`), never the CBCT itself.
 
+**Intraoral scans on the CBCT.** The CBCT tab's "Intraoral scans" step brings a surface scan of the upper or the lower
+teeth (STL, PLY or OBJ: a file opened there, or the Scans tab's own scan, lent through `SCANHUB.scan(jaw)` — the surface
+only) into the CBCT's coordinates, as implant-planning programs do before anything is planned, and then shows it with the
+CBCT: an outline in each of the three slices (turned ones too) and in the cross-sections (`dicom.js: meshCut`), the scan
+itself in 3D, and one switch per scan in the bar above the slices that takes it away and brings it back on every step.
+
+Lining up, in `dicom.js: alignScan` against `scanReference` (the CBCT's own tooth surface, where its grey is half way
+between soft tissue and enamel, with a coarse map of distances to enamel):
+- *By itself.* The scan is stood up as an arch (`autoOrient`) and its arch line laid on the CBCT's (`proposeArch`). Round
+  that place some 30,000 others are scored on the distance map — 18 mm up and down, because the arches may be apart in
+  the CBCT, a few millimetres sideways, turned and nodded up to 12° — the best few are settled on the map in all six ways,
+  and from the best three the scan's crowns (what lies within 7 mm of its biting plane) are drawn onto the CBCT's surface
+  by trimmed closest points: each round only the nearest 60 % count, so the gum (which a CBCT's surface does not have),
+  scatter from a restoration and a tooth that has moved do not pull the rest. A scan opened under the wrong arch is tried
+  as the other and moved there when it fits.
+- *By matching points.* The same spot tapped on the scan (which stands alone in the 3D view meanwhile) and in a slice,
+  three or more times; the fine fit follows.
+- *Fine fit.* The closest-point stage alone, from where the scan is.
+
+The fit is reported as measured — the distance within which half of the crown points lie from the CBCT's surface, and the
+share within 0.5 mm — and marked "check the fit" when that median is over 0.35 mm or fewer than 55 % are within 0.5 mm.
+The CBCT's surface is itself only good to about a voxel, so the numbers say that the scan sits on the teeth, not how well
+to a tenth; the outline in the slices is the check. Small fields of view, part arches and heavy metal scatter are where
+"by itself" gives up and matching points are needed. The lined-up scan downloads as an STL in the CBCT's coordinates. A
+scan's file name is never shown, stored or logged (it usually carries the patient's name); the case keeps a fingerprint
+of the mesh and its motion, not the scan, and puts the same scan back where it was when it is opened again on the same
+CBCT — the Scans tab's by itself.
+
 **Models with a base are stood on their base.** When a scan has a large flat base (a printed or plaster model, solid or
 hollow), orientation stands it on that base. If the base is tilted from the biting surfaces by more than about 9°
 the cusp tips decide instead, and beyond 25° it warns. Raw scans are oriented exactly as before.
@@ -207,7 +235,8 @@ scan-card/
     core.js          shared engine: shell, 3D viewer, mesh tools, scan loading, orientation, trim, case file, hub hand-off
     solid.js         scan to watertight solid, booleans, hollowing, lettering (Manifold, WebAssembly)
     dicom.js         CBCT/DICOM reading (technical tags only), volume tools, the synthetic test phantom, and everything
-                     round the trained tooth model (the cube given to it, the teeth made from its answer)
+                     round the trained tooth model (the cube given to it, the teeth made from its answer); lining a
+                     surface scan up with the CBCT
     toothseg-worker.js   the worker that runs the tooth model (bundled with ONNX Runtime Web into cbct/toothseg/worker.js)
   cbct/toothseg/   the tooth model's pack: engine .wasm, weights in parts, manifest.json, NOTICE.txt (tools/toothseg/README.md)
   index.html  model/  analysis/  splint/  compare/  prep/  manifest.webmanifest     built for the site: do not edit

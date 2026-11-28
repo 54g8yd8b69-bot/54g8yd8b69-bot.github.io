@@ -20,6 +20,10 @@ button{touch-action:manipulation}
 #cbBar .sp{flex:1}
 #cbBar .rd{color:#9fb6cf;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
 #cbBar .btn.on{background:var(--teal2);color:#fff;border-color:var(--teal2)}
+#cbScans[hidden]{display:none}
+#cbScans button i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+#cbScans button:not(.on){color:#9fb6cf}
+#cbScans button:not(.on) i{opacity:.35}
 #cbImg{flex-basis:100%;display:flex;gap:6px 18px;align-items:center;flex-wrap:wrap;padding:3px 0 1px}
 #cbImg[hidden]{display:none}
 #cbImg label{display:flex;align-items:center;gap:7px;color:#dbe7f3;font-size:11.5px;min-width:0}
@@ -80,6 +84,9 @@ html.embed #cbBar{padding-left:8px}
 //  • Root canals: the pulp chamber and canals inside the picked tooth (the dark space shut inside its hard tissue, or open
 //    only at the root end), red in the slices and a bright solid inside a glass tooth in 3D; the slices can be turned to run
 //    along the tooth; as STL.
+//  • Intraoral scans: a surface scan of the upper or the lower teeth (STL, PLY or OBJ) is lined up with the CBCT — by itself,
+//    by matching points, and with a fine fit — and then shows as an outline in every slice and as a surface in 3D; each scan
+//    can be switched on and off from the bar above the slices. A scan's file name is never shown or kept.
 // Positions are the scan's own patient coordinates (LPS, mm), and so are the exported STL files.
 import * as N from './core.js';
 import * as D from './dicom.js';
@@ -89,7 +96,7 @@ const SL = ['ax', 'co', 'sa'], SLICE = new Set(SL);
 // slice moves on scrolling. Straight, they are the scan's own axes; turned, they stay square to each other (see turnIn).
 const FR0 = { ax: { u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] }, co: { u: [1, 0, 0], v: [0, 0, -1], n: [0, 1, 0] }, sa: { u: [0, 1, 0], v: [0, 0, -1], n: [1, 0, 0] } };
 const frames0 = () => JSON.parse(JSON.stringify(FR0));
-const COL = { ax: '#f59e0b', co: '#22d3ee', sa: '#e879f9', pan: '#a3e635', xs: '#a3e635', tooth: '#2dd4bf', not: '#f87171', meas: '#fde047', roi: '#38bdf8' };
+const COL = { ax: '#f59e0b', co: '#22d3ee', sa: '#e879f9', pan: '#a3e635', xs: '#a3e635', tooth: '#2dd4bf', not: '#f87171', meas: '#fde047', roi: '#38bdf8', upper: '#ff9f6b', lower: '#4ade80' };
 const TITLE = { ax: 'Axial', co: 'Coronal', sa: 'Sagittal', pan: 'Panoramic', xs: 'Cross-section', r3: '3D' };
 const EMPTY = '<div><b>Open a CBCT scan</b>Drop the DICOM folder, files or a .zip here, or use “Open the scan”. It stays on this device.</div>';
 
@@ -106,6 +113,7 @@ const S = {
   tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false },
   rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
   canal: { T: null, faint: 3, seg: null, mesh: null, meshP: null, show: 'glass', pres: 'show', ver: 0 },
+  io: { jaw: 'upper', upper: null, lower: null, ref: null, refLoads: -1, pick: null, saved: null },   // the intraoral scans: each { mesh, key, src, matrix (scan → CBCT), how, ok, fit, show, obj, ver, error }
   pending: null, demo: null, busy: false, loads: 0,
 };
 
@@ -154,6 +162,20 @@ const shell = N.createShell({
       <div class="row"><label>Width</label><input type="range" id="pWidth" min="15" max="50" step="1" value="30"><span class="val"></span></div>
       <div id="pInfo"></div>
       <p class="tip">Tap the panoramic to put the cross-sections there; scroll over a cross-section to step along the arch. In each cross-section the cheek or lip side (B) is on the left and the tongue side (L) on the right; ticks every millimetre, numbers every 5 mm from the arch curve and the scan’s height.</p>` },
+    { id: 'scans', title: 'Intraoral scans', optional: true, html: `
+      <p class="lead" id="sLead"></p>
+      <div class="row"><label>Arch</label><div class="seg" id="sJaw"><button data-v="upper" type="button" title="The scan of the upper teeth">Upper</button><button data-v="lower" type="button" title="The scan of the lower teeth">Lower</button></div></div>
+      <div class="btns"><button class="btn pri" id="sOpen" type="button" title="Choose this arch’s scan: an STL, PLY or OBJ file from an intraoral scanner, or of a scanned model">Open the scan…</button><button class="btn" id="sHub" type="button" title="Use this arch’s scan from the Scans tab" hidden>Use the Scans tab’s scan</button><button class="btn" id="sDemo" type="button" title="A made-up scan of the demo CBCT’s lower teeth, to try this step" hidden>Try the demo scan</button></div>
+      <input type="file" id="sFile" accept=".stl,.ply,.obj" multiple hidden>
+      <div class="row"><label>In the views</label><div class="seg" id="sShow"><button data-v="show" type="button" title="Its outline in the slices and the scan itself in 3D">Shown</button><button data-v="hide" type="button" title="Out of sight; it stays where it was lined up">Hidden</button></div></div>
+      <div class="h4">Line it up with the CBCT</div>
+      <div class="btns"><button class="btn" id="sAuto" type="button" title="Find where the scan’s teeth fit the CBCT’s, without help">By itself</button><button class="btn" id="sPts" type="button" title="Mark the same three or more spots on the scan and in the CBCT">By matching points</button><button class="btn" id="sFine" type="button" title="Settle the scan onto the CBCT’s teeth from where it is now">Fine fit</button></div>
+      <div id="sPairs" hidden></div>
+      <div class="btns"><button class="btn" id="sStl" type="button" title="Download this scan as an STL file in the CBCT’s coordinates">Download STL, lined up</button><button class="btn" id="sRemove" type="button" title="Take this scan out again">Remove the scan</button></div>
+      <div id="sOut"></div>
+      <p class="tip">By itself: the scan is stood up as an arch, its arch is laid on the arch of the CBCT’s teeth, and its crowns are then drawn onto the surface of the CBCT’s teeth. Only the crowns count — a CBCT does not show the gum — and the worst-fitting two fifths of the points are left out each round, so a tooth that glares or one that has moved since the CBCT does not drag the rest. Where that fails (few teeth, heavy scatter from metal, a part arch), use matching points: mark the same spot — a cusp tip, the corner of an incisor — on the scan in the 3D view and in a slice of the CBCT, three or more times, well spread round the arch; the fine fit follows by itself.</p>
+      <p class="tip">Checking: the scan’s outline (upper orange, lower green) should lie on the edge of the crowns in all three slices, all round the arch — look at a molar on each side and at the incisors. The numbers say how far the scan’s crowns lie from the surface of the CBCT’s teeth; that surface is itself only good to about a voxel, so half the points within 0.2 mm or so is as close as it gets. Each scan can be switched off and on from the bar above the slices on every step.</p>
+      <p class="tip">The scan’s file is read on this device and is not kept; its name is not shown or saved. A saved case keeps only where each scan was put: open the same file again on the same CBCT and it goes back there. The downloaded STL is the scan in the CBCT’s own patient coordinates (millimetres; +x the patient’s left, +y back, +z up). This is a way of looking at the scans together, not certified medical-device software: before planning anything on it, check the outline tooth by tooth.</p>` },
     { id: 'tooth', title: 'Pick a tooth', optional: true, html: `
       <p class="lead" id="dLead">Tap the donor tooth in a slice, near the middle of its crown.</p>
       <div class="row"><label>Outline by</label><div class="seg" id="dBy"><button data-v="rules" type="button" title="The outline is followed from the scan’s grey values by rules">Rules</button><button data-v="model" type="button" title="The outline is drawn by a trained network (ToothSeg) that runs on this device: a download of about 76 MB the first time">Model</button></div></div>
@@ -196,7 +218,7 @@ shell.setEmpty(true);
 
 // ───────────── the views ─────────────
 const grid = N.el('div', { id: 'cb', hidden: '' }, `
-  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><button class="btn" id="cbStraight" type="button" title="Turn the cross-hair back square to the scan" hidden>Straighten</button><button class="btn" id="cbImage" type="button" title="Brightness, contrast and sharpness of the slices" aria-expanded="false">Image</button><span class="sp"></span><span class="rd" id="cbRead"></span>
+  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><button class="btn" id="cbStraight" type="button" title="Turn the cross-hair back square to the scan" hidden>Straighten</button><button class="btn" id="cbImage" type="button" title="Brightness, contrast and sharpness of the slices" aria-expanded="false">Image</button><div class="seg" id="cbScans" hidden></div><span class="sp"></span><span class="rd" id="cbRead"></span>
     <div id="cbImg" hidden><label>Brightness<input type="range" id="iB" min="-100" max="100" step="1" value="0"><span class="val"></span></label><label>Contrast<input type="range" id="iC" min="0" max="100" step="1" value="50"><span class="val"></span></label><label>Sharpness<input type="range" id="iS" min="-100" max="100" step="5" value="0"><span class="val"></span></label><button class="btn" id="iReset" type="button" title="Back to the bone window with no sharpening">Reset</button></div></div>
   <div id="cbGrid" class="mpr">
     ${['ax', 'co', 'sa'].map((v) => `<div class="vp" data-v="${v}" data-a="${v}" style="grid-area:${v}"></div>`).join('')}
@@ -465,6 +487,8 @@ function overlays(v, g) {
     ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = '600 11px system-ui,sans-serif'; ctx.fillText('R', 6, H / 2); ctx.textAlign = 'right'; ctx.fillText('L', W - 6, H / 2); ctx.restore();
   }
   if (v.kind === 'xs') xsRulers(v, g);
+  // the intraoral scans' outlines, and the matching points
+  if (SLICE.has(v.kind) || v.kind === 'xs') ioOutline(v, g);
   // the donor tooth: taps, eraser marks and the region
   if (['ax', 'co', 'sa'].includes(v.kind) && (shell.current === stepIx('tooth') || shell.current === stepIx('replica'))) toothOverlay(v);
   // measurements on this view
@@ -673,6 +697,7 @@ function hookView(v) {
     else if (d0.mode === 'arch') { if (v.kind === 'ax') archUp(d0.arch, a, b, d0.moved); else if (!d0.moved) setCursorFrom(v, a, b); }
     else if ((d0.mode === 'tooth' || d0.mode === 'not' || d0.mode === 'add') && !d0.moved) toothTap(v, a, b, d0.mode);
     else if (d0.mode === 'erase') eraseDone();
+    else if (d0.mode === 'match') { if (!d0.moved && SLICE.has(v.kind)) ioSliceTap(v, a, b); }
     else if (d0.mode === 'pan' && !d0.moved && (v.kind === 'pan')) setCursorFrom(v, a, b);
   };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -701,9 +726,9 @@ function setCursorFrom(v, a, b) {
 
 // ───────────── the tool bar ─────────────
 const TOOLS = { browse: ['Point', 'Tap to move the cross-hair; drag a round handle on its lines to turn them'], pan: ['Move', 'Drag to pan the view'], window: ['Window', 'Drag across for width, up and down for level'], dist: ['Distance', 'Tap two points'], angle: ['Angle', 'Tap three points: the angle is at the middle one'],
-  arch: ['Arch', 'Tap along the arch on the axial slice; drag a point to move it'], tooth: ['Pick tooth', 'Tap the tooth'], add: ['Tooth', 'Tap a part that should be tooth'], not: ['Not tooth', 'Tap where the tooth leaked into bone or a neighbour'], erase: ['Eraser', 'Drag over a bridge to cut it'] };
+  arch: ['Arch', 'Tap along the arch on the axial slice; drag a point to move it'], tooth: ['Pick tooth', 'Tap the tooth'], add: ['Tooth', 'Tap a part that should be tooth'], not: ['Not tooth', 'Tap where the tooth leaked into bone or a neighbour'], erase: ['Eraser', 'Drag over a bridge to cut it'], match: ['Match point', 'Scroll to the spot that matches the point marked on the scan, and tap it'] };
 function setTools() {
-  const id = stepId(), extra = id === 'pano' ? ['arch'] : id === 'tooth' ? (S.tooth.seg && !S.tooth.seg.error ? ['add', 'not', 'erase', 'tooth'] : ['tooth']) : [];
+  const id = stepId(), extra = id === 'scans' && S.io.pick ? ['match'] : id === 'pano' ? ['arch'] : id === 'tooth' ? (S.tooth.seg && !S.tooth.seg.error ? ['add', 'not', 'erase', 'tooth'] : ['tooth']) : [];
   const list = ['browse', 'pan', 'window', 'dist', 'angle', ...extra]; if (!list.includes(S.tool)) S.tool = 'browse';
   $('cbTool').innerHTML = list.map((t) => `<button type="button" data-v="${t}" title="${TOOLS[t][1]}"${t === S.tool ? ' class="on"' : ''}>${TOOLS[t][0]}</button>`).join('');
   for (const v of Object.values(views)) v.cv.style.cursor = S.tool === 'pan' ? 'grab' : S.tool === 'window' ? 'ns-resize' : 'crosshair';
@@ -729,8 +754,11 @@ shell.view.addEventListener('drop', (e) => {                    // dropped files
   })();
 });
 function progress(f) { const p = $('lProg'); p.hidden = f == null; if (f != null) p.firstElementChild.style.width = `${Math.round(100 * N.clamp(f, 0, 1))}%`; }
+const isScanFile = (f) => /\.(stl|ply|obj)$/i.test((f && f.name) || '');
 async function openFiles(files) {
-  if (S.busy) return; S.busy = true;
+  if (S.busy) return;
+  if (files.length && files.every(isScanFile)) { if (!S.vol) return shell.status('Open the CBCT first: the scans are lined up with it', true); if (stepId() !== 'scans') shell.goto('scans'); return ioOpenFiles(files); }
+  S.busy = true;
   try {
     await shell.busy('Reading the files…', async () => {
       const list = [];
@@ -771,6 +799,7 @@ function setVolume(v) {
   S.arch = { ...S.arch, points: [], curve: null, ver: S.arch.ver + 1, s: 0 }; S.pano = null; S.xs = [];
   S.surf.mesh = null; S.surf.info = null; modelStop(); S.tooth = { ...S.tooth, seeds: [], not: [], erase: [], roi: null, T: null, seg: null, rules: null, model: null, hist: [], fitted: false }; S.rep.mesh = null; S.rep.info = null;
   for (const id of Object.keys(bufs)) delete bufs[id];
+  ioReset();
   const span = v.max - v.min;
   for (const [k, rb] of [['level', RB.level], ['width', RB.width]]) { const inp = $(k === 'level' ? 'vLevel' : 'vWidth'); inp.min = k === 'level' ? v.min : 1; inp.max = k === 'level' ? v.max : Math.max(2, span * 1.5); }
   $('tIso').min = v.min; $('tIso').max = v.max; $('dT').min = v.min; $('dT').max = v.max;
@@ -842,7 +871,7 @@ function planes3D() {
   const V = S.vol, [nx, ny, nz] = V.dims, w = (i, j, k) => new THREE.Vector3(...D.worldOf(V, i, j, k)), c = S.cur.map(Math.round);
   const sets = [[COL.ax, [w(0, 0, c[2]), w(nx - 1, 0, c[2]), w(nx - 1, ny - 1, c[2]), w(0, ny - 1, c[2])]], [COL.co, [w(0, c[1], 0), w(nx - 1, c[1], 0), w(nx - 1, c[1], nz - 1), w(0, c[1], nz - 1)]], [COL.sa, [w(c[0], 0, 0), w(c[0], ny - 1, 0), w(c[0], ny - 1, nz - 1), w(c[0], 0, nz - 1)]]];
   SL.forEach((k, i) => { const o = obl(views[k]); if (o) { const pts = planeInBox(obPt(o, o.Wu / 2, o.Wv / 2), o.f.u, o.f.v, V.origin, D.worldOf(V, nx - 1, ny - 1, nz - 1)); sets[i][1] = pts.length >= 3 ? pts.map((p) => new THREE.Vector3(...p)) : null; } });
-  if (stepId() !== 'tooth' && stepId() !== 'replica' && stepId() !== 'canal') for (const [col, pts] of sets) if (pts) r3objs.planes.push(viewer.line(pts, { color: new THREE.Color(col).getHex(), width: 1.5, closed: true }));
+  if (stepId() !== 'tooth' && stepId() !== 'replica' && stepId() !== 'canal' && !S.io.pick) for (const [col, pts] of sets) if (pts) r3objs.planes.push(viewer.line(pts, { color: new THREE.Color(col).getHex(), width: 1.5, closed: true }));
   viewer.invalidate();
 }
 function meshObj(mesh, colour, opacity = 1) { const g = N.toGeometry(mesh); return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colour, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide, transparent: opacity < 1, opacity })); }
@@ -864,6 +893,9 @@ function show3D() {
   if (r3objs.canal) r3objs.canal.visible = id === 'canal'; if (r3objs.canalP) r3objs.canalP.visible = id === 'canal' && S.canal.pres !== 'hide'; r3cell.classList.toggle('pulp', id === 'canal' && !!S.canal.mesh);
   if (r3objs.rep) r3objs.rep.visible = id === 'replica';
   if (r3objs.roi) r3objs.roi.visible = id === 'tooth';
+  // the intraoral scans: where they were lined up; while matching points are marked, that scan alone
+  const pk = S.io.pick; for (const jaw of JAWS) { const sc = S.io[jaw]; if (!sc) continue; const on = pk ? pk.jaw === jaw : !!sc.matrix && sc.show && !['tooth', 'replica', 'canal'].includes(id); sc.obj.visible = on; if (on) { sc.obj.matrix.copy(pk ? pk.M : sc.matrix); sc.obj.updateMatrixWorld(true); } }
+  if (pk) { box3.visible = false; if (r3objs.surf) r3objs.surf.visible = false; }
   planes3D(); viewer.invalidate();
 }
 const isoPreset = (k) => { const P = S.P; return k === 'bone' ? Math.round(P.bone.l - P.bone.w * 0.1) : Math.round(P.teeth.l - P.teeth.w * 0.05); };
@@ -1136,6 +1168,147 @@ async function makeReplica() {
   if (r3objs.rep) viewer.remove(r3objs.rep); r3objs.rep = meshObj(mesh, 0xf1e7d0); viewer.add(r3objs.rep); fit3D(r3objs.rep);
   show3D(); syncUI(); shell.status(`Replica made: ${R.info.volume.toFixed(0)} mm³, ${R.info.closed ? 'closed' : 'not closed'}`);
 }
+// ───────────── intraoral scans on the CBCT ─────────────
+// A surface scan of the teeth (from an intraoral scanner, or of a model) is brought into the CBCT's coordinates: by itself
+// where that works (dicom.js: alignScan), from three or more matching points otherwise, and settled by a fine fit. Its outline
+// is then drawn in every slice and cross-section and the scan itself in 3D; each scan can be put out of sight from the bar.
+// A scan's file name is never shown or kept (it usually carries the patient's name): it is "the upper scan" or "the lower scan".
+const JAWS = ['upper', 'lower'], JN = { upper: 'Upper', lower: 'Lower' }, COL3 = { upper: 0xffb38a, lower: 0x8fe8ae }, otherJaw = (j) => (j === 'upper' ? 'lower' : 'upper');
+const ioKey = (m) => { const P = m.positions, k = Math.max(1, Math.floor(P.length / 3000)), q = new Float32Array(Math.ceil(P.length / k)); for (let i = 0, n = 0; i < P.length; i += k) q[n++] = P[i]; return `${P.length / 3}|${m.indices.length / 3}|${N.crc32(new Uint8Array(q.buffer))}`; };
+function ioRef() { const io = S.io; if (!io.ref || io.refLoads !== S.loads) { io.ref = D.scanReference(S.vol, N); io.refLoads = S.loads; } return io.ref; }
+/** a new CBCT: the scans stay loaded, but where they were put belonged to the scan before */
+function ioReset() { const io = S.io; if (io.pick) ioPickEnd(true); io.ref = null; io.saved = null; for (const jaw of JAWS) { const sc = io[jaw]; if (sc) Object.assign(sc, { matrix: null, how: null, ok: false, fit: null, error: null, ver: sc.ver + 1 }); } ioBar(); }
+function ioDrop(jaw) { const io = S.io, sc = io[jaw]; if (!sc) return; if (io.pick && io.pick.jaw === jaw) ioPickEnd(true); viewer.remove(sc.obj); sc.obj.material.dispose(); io[jaw] = null; ioBar(); show3D(); invalidate(); syncUI(); }
+function ioPut(jaw, mesh, src) {
+  ioDrop(jaw); const m = { positions: mesh.positions, indices: mesh.indices };   // (without its name)
+  const obj = meshObj(m, COL3[jaw]); obj.matrixAutoUpdate = false; obj.visible = false; obj.userData.noFit = true; viewer.add(obj);
+  return (S.io[jaw] = { mesh: m, key: ioKey(m), src, matrix: null, how: null, ok: false, fit: null, show: true, obj, ver: 0, error: null });
+}
+/** the work itself, behind the "busy" veil → alignScan's answer (or { error }) */
+async function ioSolve(sc, jaw, o = {}) {
+  let r = null;
+  try { await shell.busy(o.pairs ? 'Lining the scan up on the points…' : o.start ? (o.refine === false ? 'Putting the scan back…' : 'Settling the scan onto the teeth…') : 'Lining the scan up with the CBCT…', async () => { await N.sleep(30); const ref = ioRef(); r = ref.error ? { error: ref.error } : D.alignScan(ref, sc.mesh, N, { jaw, ...o }); }); }
+  catch (e) { r = { error: 'The scan could not be lined up.' }; }
+  return r;
+}
+function ioTake(sc, r) { if (r.error) { sc.error = r.error; return false; } Object.assign(sc, { matrix: r.matrix, how: r.how === 'fine' && sc.how && sc.how.split('+')[0] !== 'fine' ? sc.how.split('+')[0] + '+fine' : r.how, ok: r.ok, fit: r.fit, error: null, ver: sc.ver + 1 }); return true; }
+const ioSay = (jaw, sc) => (sc.error ? shell.status(sc.error, true) : sc.ok ? shell.status(`${JN[jaw]} scan lined up: half of its crown points lie within ${mm(sc.fit.median, 2)} of the CBCT’s teeth. Check its outline in the slices.`) : shell.status(`${JN[jaw]} scan placed, but not closely (half of its crown points are more than ${mm(sc.fit.median, 1)} off): check its outline, and use matching points if it is out.`, true));
+function ioAfter() { ioBar(); SEG.sjaw(S.io.jaw); show3D(); invalidate(); syncUI(); }
+/** the cross-hair to the middle of a scan that has just come in: the axial slice then cuts its crowns, the coronal one both sides of the arch and the sagittal one the front teeth, so its outline shows in all three at once */
+function ioGoTo(sc) { if (!sc || !sc.matrix) return; const P = sc.mesh.positions, e = sc.matrix.elements, st = Math.max(1, Math.floor(P.length / 3 / 4000)) * 3, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (let v = 0; v < P.length; v += st) for (let a = 0; a < 3; a++) { const w = e[a] * P[v] + e[4 + a] * P[v + 1] + e[8 + a] * P[v + 2] + e[12 + a]; if (w < lo[a]) lo[a] = w; if (w > hi[a]) hi[a] = w; } S.cur = w2v([0, 1, 2].map((a) => (lo[a] + hi[a]) / 2)).map(Math.round); crossChanged(); }
+/** line a loaded scan up: by itself, on matching points (o.pairs) or from where it is (o.start) */
+async function ioAlign(jaw, o = {}) {
+  const sc = S.io[jaw]; if (!sc || !S.vol || S.busy) return null; S.busy = true;
+  try { const r = await ioSolve(sc, jaw, o); if (S.io[jaw] !== sc) return null; ioTake(sc, r); ioSay(jaw, sc); ioAfter(); return r; } finally { S.busy = false; }
+}
+/** a scan comes in (a file, the Scans tab's, the demo's): it is put back where the case had it, or lined up by itself — and
+ *  if it will not fit as this arch but fits as the other, whose place is free, it is that arch's scan */
+async function ioLoad(jaw, mesh, src) {
+  if (!S.vol) { shell.status('Open the CBCT first: the scans are lined up with it', true); return null; }
+  if (S.busy) return null; S.busy = true;
+  try {
+    let sc = ioPut(jaw, mesh, src); S.io.jaw = jaw; const sv = S.io.saved && [S.io.saved[jaw], S.io.saved[otherJaw(jaw)]].find((x) => x && x.key === sc.key && Array.isArray(x.matrix) && x.matrix.length === 16 && x.matrix.every(Number.isFinite));
+    if (sv && sv === S.io.saved[otherJaw(jaw)] && !S.io[otherJaw(jaw)]) { S.io[jaw] = null; jaw = otherJaw(jaw); S.io[jaw] = sc; S.io.jaw = jaw; sc.obj.material.color.setHex(COL3[jaw]); }
+    if (sv && sv === S.io.saved[jaw]) { const r = await ioSolve(sc, jaw, { start: new THREE.Matrix4().fromArray(sv.matrix), refine: false }); if (ioTake(sc, r)) { sc.how = typeof sv.how === 'string' ? sv.how : 'points'; sc.show = sv.show !== false; shell.status(`${JN[jaw]} scan put back where it was lined up`); ioGoTo(sc); ioAfter(); return sc; } }
+    let r = await ioSolve(sc, jaw, {});
+    if ((r.error || !r.ok) && !S.io[otherJaw(jaw)]) { const k = otherJaw(jaw), r2 = await ioSolve(sc, k, {}); if (!r2.error && r2.ok) { S.io[jaw] = null; S.io[k] = sc; S.io.jaw = k; sc.obj.material.color.setHex(COL3[k]); ioTake(sc, r2); shell.status(`This is a scan of the ${k} teeth: it was put under ${JN[k]} and lined up (half of its crown points within ${mm(sc.fit.median, 2)})`); ioGoTo(sc); ioAfter(); return sc; } }
+    ioTake(sc, r); ioSay(jaw, sc); ioGoTo(sc); ioAfter(); return sc;
+  } finally { S.busy = false; }
+}
+async function ioOpenFiles(files) {
+  const list = files.filter(isScanFile).slice(0, 2); if (!list.length) return shell.status('Choose an STL, PLY or OBJ file', true);
+  for (let i = 0; i < list.length; i++) {
+    // (read under a plain name: the file's own never reaches a message or the console)
+    const m = await shell.busy('Reading the scan…', async () => { await N.sleep(20); try { return N.parseMesh(await list[i].arrayBuffer(), (list[i].name || '').split('.').pop(), 'the scan'); } catch (_) { return null; } });
+    if (!m) { shell.status('That file could not be read as a scan: it should be an STL, PLY or OBJ file with triangles', true); continue; }
+    const jaw = i === 0 ? S.io.jaw : (JAWS.find((j) => !S.io[j]) || otherJaw(S.io.jaw)); await ioLoad(jaw, m, 'file');
+  }
+}
+/** the demo's scan: the made-up lower teeth and gum, as a scanner would hand them over — in coordinates of its own */
+async function ioDemo() {
+  if (!S.vol || !S.demo || S.busy) return;
+  const m = await shell.busy('Making the demo scan…', async () => { await N.sleep(30); const f = D.phantomScanField({}), g = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, {}); return N.transformMesh({ positions: g.positions, indices: g.indices }, new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0.9, -0.5, 2.1)).setPosition(18, -31, 44)); });
+  return ioLoad('lower', m, 'demo');
+}
+const hubScan = (jaw) => { try { const h = N.EMBED && N.HUB.scan ? N.HUB.scan(jaw) : null; return h && h.positions && h.indices && h.indices.length ? h : null; } catch (_) { return null; } };
+const hubBtn = () => { const sc = S.io[S.io.jaw]; $('sHub').hidden = !(S.vol && hubScan(S.io.jaw)) || !!(sc && sc.src === 'hub'); };
+async function ioFromHub(jaw) { const h = hubScan(jaw); if (!h) return shell.status(`There is no ${jaw} scan on the Scans tab`, true); return ioLoad(jaw, { positions: new Float32Array(h.positions), indices: new Uint32Array(h.indices) }, 'hub'); }
+/** one switch per lined-up scan in the bar above the slices, on every step */
+function ioBar() {
+  const el = $('cbScans'), list = JAWS.filter((j) => S.io[j] && S.io[j].matrix); el.hidden = !list.length;
+  el.innerHTML = list.map((j) => `<button type="button" data-j="${j}" class="${S.io[j].show ? 'on' : ''}" aria-pressed="${S.io[j].show}" title="${S.io[j].show ? 'Hide' : 'Show'} the ${j} scan"><i style="background:${COL[j]}"></i>${JN[j]} scan</button>`).join('');
+}
+function ioShow(jaw, on) { const sc = S.io[jaw]; if (!sc) return; sc.show = !!on; ioBar(); if (S.io.jaw === jaw) SEG.sshow(sc.show ? 'show' : 'hide'); show3D(); invalidate(); }
+/** a scan's outline in a slice or a cross-section: where the view's plane cuts it (kept until the slice or the scan moves) */
+function ioOutline(v, g) {
+  const io = S.io, pk = io.pick, ctx = v.ctx; if (!io.upper && !io.lower) return;
+  let P0, du, dv, lim = null;
+  if (v.kind === 'xs') { const X = S.xs[v.m], V = S.vol; if (!X) return; const h = X.width / 2; P0 = [X.p[0] + (h - g.su / 2) * X.n[0], X.p[1] + (h - g.su / 2) * X.n[1], V.origin[2] + (V.dims[2] - 0.5) * V.spacing[2] - g.sv / 2]; du = [-X.n[0] * g.su, -X.n[1] * g.su, 0]; dv = [0, 0, -g.sv]; lim = g; }
+  else { const F = pixelFrame(v, g); P0 = F.P0; du = F.du; dv = F.dv; }
+  const n = cross3(du, dv), nl = Math.hypot(...n) || 1, nn = n.map((x) => x / nl), lu = dot3(du, du), lv = dot3(dv, dv);
+  const at = (x, y, z) => { const d = [x - P0[0], y - P0[1], z - P0[2]]; return toScreen(v, (dot3(d, du) / lu + 0.5) * g.su, (dot3(d, dv) / lv + 0.5) * g.sv); };
+  if (!v.cut) v.cut = {};
+  for (const jaw of JAWS) {
+    const sc = io[jaw]; if (!sc || !sc.matrix || !sc.show || (pk && pk.jaw === jaw)) continue;
+    const key = `${g.key}|${sc.ver}`; let c = v.cut[jaw]; if (!c || c.key !== key) c = v.cut[jaw] = { key, seg: D.meshCut(sc.mesh, sc.matrix.elements, P0, nn) };
+    const sg = c.seg; if (!sg.length) continue;
+    ctx.save(); if (lim) { const [x0, y0] = toScreen(v, 0, 0), [x1, y1] = toScreen(v, lim.cols * lim.su, lim.rows * lim.sv); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip(); }
+    ctx.strokeStyle = COL[jaw]; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.beginPath();
+    for (let q = 0; q < sg.length; q += 6) { const A = at(sg[q], sg[q + 1], sg[q + 2]), B = at(sg[q + 3], sg[q + 4], sg[q + 5]); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); }
+    ctx.stroke(); ctx.restore();
+  }
+  // the matching points marked in the CBCT: solid in the slice they lie in, a ring elsewhere
+  if (pk && SLICE.has(v.kind)) pk.pairs.forEach((pr, i) => { if (!pr.b) return; const [a, b] = fromVox(v, ...w2v(pr.b)), p = toScreen(v, a, b), near = planeDist(v, pr.b) <= 1; ctx.save(); ctx.globalAlpha = near ? 1 : 0.55; if (near) dot(ctx, p, COL[pk.jaw], 5); else { ctx.strokeStyle = COL[pk.jaw]; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], 5, 0, 7); ctx.stroke(); } tag(ctx, String(i + 1), [p[0] + 13, p[1] - 11]); ctx.restore(); });
+}
+// matching points: the same spot marked on the scan (in 3D, where the scan stands alone meanwhile) and in a slice of the CBCT
+const ioPark = (sc, jaw) => { const c = v2w(S.vol.dims.map((n) => (n - 1) / 2)); let O = null; try { O = N.autoOrient(sc.mesh, jaw).matrix; } catch (_) { O = new THREE.Matrix4(); } return new THREE.Matrix4().makeTranslation(c[0], c[1], c[2]).multiply(O); };
+function ioPickStart(jaw) {
+  const io = S.io, sc = io[jaw]; if (!sc || !S.vol || S.busy) return; if (io.pick) ioPickEnd(true);
+  const M = sc.matrix ? sc.matrix.clone() : ioPark(sc, jaw); io.pick = { jaw, M, Mi: M.clone().invert(), pairs: [], marks: [], prevTool: viewer.tool };
+  viewer.setTool({ cursor: 'crosshair', onClick: (i) => { const hit = i.pick([sc.obj]); if (!hit) return; ioPairSet('a', hit.point.clone().applyMatrix4(io.pick.Mi).toArray()); } });
+  S.tool = 'match'; setTools(); show3D(); viewer.fit(new THREE.Box3().setFromObject(sc.obj, true), { dir: jaw === 'upper' ? [0, -0.45, -1] : [0, -0.45, 1] });   // seen from the biting side (its box taken point by point: the scan lies any way round in its file), and a little nearer than the whole box
+  viewer.camera.position.sub(viewer.controls.target).multiplyScalar(0.8).add(viewer.controls.target); viewer.controls.update(); ioMarks(); invalidate(); syncUI();
+  shell.hint('Tap a spot on the scan in the 3D view, then the same spot in a slice');
+}
+function ioPairSet(side, p) { const pk = S.io.pick; if (!pk) return; let pr = pk.pairs[pk.pairs.length - 1]; if (!pr || (pr.a && pr.b)) { pr = { a: null, b: null }; pk.pairs.push(pr); } pr[side] = p; ioMarks(); invalidate(); syncUI(); }
+function ioSliceTap(v, a, b) { const q = toVox(v, a, b); if (!q || !S.io.pick) return; if (!obl(v)) q[axisOf(v.kind)] = Math.round(q[axisOf(v.kind)]); S.cur = q.slice(); crossChanged(); ioPairSet('b', v2w(q)); }   // (the point lies in the slice shown)
+function ioMarks() {
+  const pk = S.io.pick; if (!pk) return; for (const m of pk.marks) { viewer.scene.remove(m.m); m.l.remove(); } pk.marks = [];
+  pk.pairs.forEach((pr, i) => { if (!pr.a) return; const p = new THREE.Vector3(...pr.a).applyMatrix4(pk.M); pk.marks.push({ m: viewer.marker(p, { color: new THREE.Color(COL[pk.jaw]).getHex(), px: 13 }), l: viewer.label(String(i + 1), p, { dy: -15 }) }); });
+  viewer.invalidate();
+}
+function ioPickEnd(quiet) {
+  const pk = S.io.pick; if (!pk) return; for (const m of pk.marks) { viewer.scene.remove(m.m); m.l.remove(); } viewer.setTool(pk.prevTool || null); S.io.pick = null;
+  if (S.tool === 'match') S.tool = 'browse'; shell.hint('');
+  if (!quiet) { setTools(); show3D(); fit3D(); invalidate(); syncUI(); }
+}
+async function ioPickGo() {
+  const pk = S.io.pick; if (!pk) return; const pairs = pk.pairs.filter((pr) => pr.a && pr.b); if (pairs.length < 3) return shell.status('Mark three or more matching points first', true);
+  const r = await ioAlign(pk.jaw, { pairs }); if (r && !r.error) ioPickEnd();
+}
+function ioPairsHtml() {
+  const pk = S.io.pick; if (!pk) return ''; const full = pk.pairs.filter((pr) => pr.a && pr.b).length, last = pk.pairs[pk.pairs.length - 1], open = last && !(last.a && last.b) ? last : null;
+  const next = !open ? 'Tap a spot on the scan in the 3D view — a cusp tip, the corner of an incisor — or the spot in a slice first.' : open.a ? 'Now tap the same spot in a slice of the CBCT (“Match point” in the bar above the slices): scroll until the slice passes through it.' : 'Now tap the same spot on the scan in the 3D view.';
+  return `<p class="note">${full < 3 ? `Point ${Math.min(pk.pairs.length + (open ? 0 : 1), 99)}: ` : ''}${next}${full >= 3 ? ' Three are enough; more, well spread round the arch, steady it.' : ''}</p>
+    <div class="sum"><h5>Matching points<span class="okb${full >= 3 ? '' : ' warn'}">${full} of 3 or more</span></h5>${pk.pairs.map((pr, i) => `<div><span>Point ${i + 1}</span><b>${pr.a ? 'scan ✓' : 'scan –'} · ${pr.b ? 'CBCT ✓' : 'CBCT –'}</b></div>`).join('')}</div>
+    <div class="btns"><button class="btn pri" data-p="go" type="button" title="Line the scan up on these points, then settle it with the fine fit"${full >= 3 ? '' : ' disabled'}>Line up on these</button><button class="btn" data-p="undo" type="button" title="Take back the last point"${pk.pairs.length ? '' : ' disabled'}>Undo point</button><button class="btn" data-p="cancel" type="button" title="Leave the scan as it was">Cancel</button></div>`;
+}
+const HOW = { auto: 'by itself', points: 'on matching points', fine: 'fine fit', 'auto+fine': 'by itself, then fine fit', 'points+fine': 'on matching points, then fine fit' };
+function ioSync() {
+  const io = S.io, has = !!S.vol, jaw = io.jaw, sc = io[jaw], pk = io.pick;
+  for (const x of $('sJaw').querySelectorAll('button')) x.disabled = !has || !!pk; for (const x of $('sShow').querySelectorAll('button')) x.disabled = !sc || !sc.matrix || !!pk;
+  $('sOpen').disabled = !has || !!pk; $('sOpen').textContent = sc ? `Open another ${jaw} scan…` : `Open the ${jaw} scan…`;
+  hubBtn(); $('sHub').disabled = !!pk; $('sDemo').hidden = !(has && S.demo) || !!io.lower; $('sDemo').disabled = !!pk;
+  $('sAuto').disabled = !sc || !!pk; $('sPts').disabled = !sc || !!pk; $('sFine').disabled = !sc || !sc.matrix || !!pk; $('sStl').disabled = !sc || !sc.matrix || !!pk; $('sRemove').disabled = !sc || !!pk;
+  SEG.sshow(sc && !sc.show ? 'hide' : 'show'); $('sPairs').hidden = !pk; $('sPairs').innerHTML = ioPairsHtml();
+  $('sLead').textContent = !has ? 'Open the CBCT first: a scan of the teeth is lined up with it here.' : !io.upper && !io.lower ? 'Open the scan of the upper or the lower teeth — from an intraoral scanner, or of a model: an STL, PLY or OBJ file. It is lined up with the teeth in the CBCT by itself, and its outline then shows in every slice.' : 'Check each scan’s outline against the teeth in the slices (upper orange, lower green): it should lie on the edge of the crowns all round the arch. Switch a scan off and on from the bar above the slices.';
+  let out = '';
+  for (const j of JAWS) { const x = io[j]; if (!x) continue; const f = x.fit;
+    out += `<div class="sum"><h5><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${COL[j]}"></i>${JN[j]} scan<span class="okb${!x.matrix ? ' bad' : x.ok ? '' : ' warn'}">${!x.matrix ? 'not lined up' : x.ok ? 'lined up' : 'check the fit'}</span></h5><div><span>Triangles</span><b>${(x.mesh.indices.length / 3).toLocaleString('en-GB')}</b></div>${x.matrix ? `<div><span>Lined up</span><b>${HOW[x.how] || x.how}</b></div><div><span>Half of the crown points within</span><b>${mm(f.median, 2)}</b></div><div><span>Within 0.5 mm of the CBCT’s teeth</span><b>${Math.round(100 * f.within05)} %</b></div><div><span>In the views</span><b>${x.show ? 'shown' : 'hidden'}</b></div>` : ''}</div>`;
+    if (x.error) out += `<p class="note warn">${N.esc(x.error)}</p>`;
+    else if (x.matrix && !x.ok) out += '<p class="note warn">The fit is not close. Look at the outline in the slices: if it is off the teeth, line the scan up by matching points; if it sits well and only a few teeth differ (scatter from metal, a tooth lost or moved since), it may be as good as this pair allows.</p>'; }
+  $('sOut').innerHTML = out; shell.markDone('scans', JAWS.some((j) => io[j] && io[j].matrix));
+}
 async function download(name, mesh, header) { const r = await N.saveFile(name, N.stlBinary(mesh, null, header)); shell.status(r.message, !r.ok && r.code !== 'declined'); }
 
 // ───────────── controls ─────────────
@@ -1169,6 +1342,20 @@ const SEG = {
   pmode: N.segBind($('pMode'), (v) => { S.arch.mode = v; schedulePano(); }, 'mean'),
   pcount: N.segBind($('pCount'), (v) => { S.arch.count = +v; makeXs(); }, '3'),
 };
+SEG.sjaw = N.segBind($('sJaw'), (v) => { S.io.jaw = v; syncUI(); }, 'upper');
+SEG.sshow = N.segBind($('sShow'), (v) => ioShow(S.io.jaw, v === 'show'), 'show');
+$('sOpen').addEventListener('click', () => $('sFile').click());
+$('sFile').addEventListener('change', (e) => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) ioOpenFiles(fs).catch(() => {}); });
+$('sHub').addEventListener('click', () => ioFromHub(S.io.jaw).catch(() => {}));
+$('sDemo').addEventListener('click', () => ioDemo().catch(() => {}));
+$('sAuto').addEventListener('click', () => ioAlign(S.io.jaw, {}).catch(() => {}));
+$('sFine').addEventListener('click', () => { const sc = S.io[S.io.jaw]; if (sc && sc.matrix) ioAlign(S.io.jaw, { start: sc.matrix }).catch(() => {}); });
+$('sPts').addEventListener('click', () => ioPickStart(S.io.jaw));
+$('sPairs').addEventListener('click', (e) => { const b = e.target.closest('[data-p]'), pk = S.io.pick; if (!b || !pk) return; if (b.dataset.p === 'go') ioPickGo().catch(() => {}); else if (b.dataset.p === 'cancel') ioPickEnd(); else { const last = pk.pairs[pk.pairs.length - 1]; if (last) { if (last.a && last.b) last.b = null; else pk.pairs.pop(); ioMarks(); invalidate(); syncUI(); } } });
+$('sRemove').addEventListener('click', () => { ioDrop(S.io.jaw); shell.status(`${JN[S.io.jaw]} scan removed`); });
+$('sStl').addEventListener('click', async () => { const jaw = S.io.jaw, sc = S.io[jaw]; if (!sc || !sc.matrix) return shell.status('Line the scan up first', true); const r = await N.saveFile(`${jaw}-scan-on-cbct.stl`, N.stlBinary(sc.mesh, sc.matrix, `Notile ${jaw} scan lined up with the CBCT, LPS mm`)); shell.status(r.message, !r.ok && r.code !== 'declined'); });
+if (N.EMBED) setInterval(() => { if (stepId() === 'scans') hubBtn(); }, 800);   // (the Scans tab may have a scan to lend by now: its frames stay laid out while another tab is in front, so nothing else tells this one)
+$('cbScans').addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b && S.io[b.dataset.j]) { ioShow(b.dataset.j, !S.io[b.dataset.j].show); syncUI(); } });
 SEG.cshow = N.segBind($('cShow'), (v) => { S.canal.show = v; show3D(); }, 'glass');
 SEG.cpres = N.segBind($('cPres'), (v) => { S.canal.pres = v; S.canal.ver++; show3D(); invalidate(); viewer.invalidate(); syncUI(); }, 'show');
 try { const v = parseFloat(localStorage.getItem('notile.cbct.sharp')); if (Number.isFinite(v) && v) setSharp(v); } catch (_) { /* no storage here */ }
@@ -1245,11 +1432,12 @@ function syncUI() {
     if (cs.pieces > 1) co += '<p class="note">In more than one piece: a wide stretch of canal with nothing to be followed between it and the rest.</p>';
   }
   $('cOut').innerHTML = co; shell.markDone('canal', !!S.canal.mesh);
+  ioSync();
 }
 shell.onStepChange(() => {
-  const id = stepId(); S.draft = null;
+  const id = stepId(); S.draft = null; if (S.io.pick && id !== 'scans') ioPickEnd(true);
   S.layout = id === 'pano' ? 'pano' : id === 'd3' ? 'big3d' : 'mpr'; S.max = null;
-  if (id === 'pano') { S.tool = 'arch'; } else if (id === 'tooth') { S.tool = T().seg && !T().seg.error ? 'browse' : 'tooth'; } else if (S.tool === 'arch' || ['tooth', 'add', 'not', 'erase'].includes(S.tool)) S.tool = 'browse';
+  if (id === 'pano') { S.tool = 'arch'; } else if (id === 'tooth') { S.tool = T().seg && !T().seg.error ? 'browse' : 'tooth'; } else if (S.tool === 'arch' || ['tooth', 'add', 'not', 'erase', 'match'].includes(S.tool)) S.tool = 'browse';
   setTools(); applyLayout(); show3D(); syncUI();
   shell.hint(S.vol ? TOOLS[S.tool][1] : '');
   if (id === 'pano' && S.vol && !S.pano && S.arch.curve) makePano();
@@ -1268,8 +1456,19 @@ function extendCase(c) {
   const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
   const t = T();
   c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, sharp: S.sharp, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
-    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto, presumed: S.canal.pres, faint: S.canal.faint } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto, presumed: S.canal.pres, faint: S.canal.faint } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null,
+    scans: ioCase() };
   if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
+}
+/** where each lined-up scan was put (not the scan, and not its name): a fingerprint of its mesh and the motion that puts it on the CBCT */
+function ioCase() { const out = {}; for (const j of JAWS) { const sc = S.io[j]; if (sc && sc.matrix) out[j] = { key: sc.key, matrix: sc.matrix.toArray(), how: sc.how, show: sc.show }; else if (S.io.saved && S.io.saved[j] && !sc) out[j] = S.io.saved[j]; } return Object.keys(out).length ? out : undefined; }
+/** the case's scans come back: one that is loaded here already, or the Scans tab's, goes where it was put */
+async function ioRestore() {
+  for (let i = 0; i < 200 && S.busy; i++) await N.sleep(50);     // (the CBCT may still be opening)
+  const sv = S.io.saved; if (!sv || !S.vol) return;
+  for (const j of JAWS) { const x = sv[j]; if (!x || !x.key) continue; const sc = S.io[j];
+    if (sc && !sc.matrix && sc.key === x.key) { const m = sc.mesh, src = sc.src; await ioLoad(j, m, src); }
+    else if (!sc) { const h = hubScan(j); if (h && ioKey(h) === x.key) await ioFromHub(j); } }
 }
 function readCase(c) {
   const d = c.data && c.data.cbct; if (!d) return;
@@ -1286,6 +1485,7 @@ function applyPending() {
   if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
   if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; if (d.canal && (d.canal.presumed === 'hide' || d.canal.presumed === 'show')) { S.canal.pres = d.canal.presumed; SEG.cpres(S.canal.pres); } if (d.canal && d.canal.faint >= 1 && d.canal.faint <= 5) { S.canal.faint = Math.round(d.canal.faint); RB.cFaint.set(S.canal.faint); } segment({ fit: false, keepCanalT: true }); }
   if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
+  if (d.scans && typeof d.scans === 'object') { S.io.saved = d.scans; ioRestore().catch(() => {}); }
   invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
 }
 if (N.EMBED) setTimeout(() => {
@@ -1301,7 +1501,7 @@ if (N.EMBED) setTimeout(() => {
 }, 0);
 
 setTools(); syncUI(); shell.goto(0);
-window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, setSharp, sharpen, crossScreen, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, MODEL, modelLoad, modelRun, modelStop, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
+window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, setSharp, sharpen, crossScreen, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, MODEL, modelLoad, modelRun, modelStop, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, ioLoad, ioAlign, ioDemo, ioDrop, ioShow, ioRef, ioPickStart, ioPickEnd, ioPickGo, ioPairSet, ioOpenFiles, ioFromHub, ioOutline, JAWS, get box3() { return box3; }, r3objs, LUT: () => LUT };
 </script>
 </body>
 </html>

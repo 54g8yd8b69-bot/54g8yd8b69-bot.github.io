@@ -81,6 +81,9 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     const cb = await child(() => window.__SUITE_APP === 'scan-cbct' && !!window.APP && !!APP.MODEL);
     const r = cb ? await cb.evaluate(async () => { await APP.loadDemo(); APP.shell.goto('tooth'); await new Promise((ok) => setTimeout(ok, 400)); return { state: APP.MODEL.state, by: APP.MODEL.by, off: document.querySelector('#dBy [data-v=model]').disabled, worker: !!APP.MODEL.worker, note: document.getElementById('dModel').textContent }; }) : null;
     ok(!!r && r.state === 'none' && r.by === 'rules' && r.off && !r.worker && /cannot be loaded in this copy/.test(r.note), 'scan-card: CBCT’s tooth model says it cannot be loaded in the single file (' + (r ? r.state : 'no CBCT page') + ') and the rules stay in use');
+    // its "Intraoral scans" step inside the single file: the demo scan is lined up by itself, and the Scans tab's scan is on offer
+    const sc = cb ? await cb.evaluate(async () => { APP.shell.goto('scans'); await APP.ioDemo(); const s = APP.S.io.lower; document.querySelector('#sJaw [data-v=upper]').click(); await new Promise((ok) => setTimeout(ok, 1200)); return { ok: !!(s && s.ok), how: s && s.how, bar: !document.getElementById('cbScans').hidden, hub: !document.getElementById('sHub').hidden }; }) : null;
+    ok(!!sc && sc.ok && sc.how === 'auto' && sc.bar && sc.hub, 'scan-card: CBCT’s “Intraoral scans” step lines the demo scan up by itself in the single file and offers the Scans tab’s scan (' + JSON.stringify(sc) + ')');
   }
   await hub.click('#tabs [data-tab=scans]'); await settle();
   ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Survey,Shells,Articulator,Obturator,Trays,Wax-up', 'scan-card: all eleven tools that use the scans are working on the one pair of scans (CBCT opens its own files)');

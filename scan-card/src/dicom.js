@@ -2060,6 +2060,181 @@ export function taubin(mesh, iters = 6, lambda = 0.5, mu = -0.53) {
 /** move every vertex out along its normal by dist mm (a uniform enlargement for small dist on a smooth closed mesh) */
 export function offsetMesh(mesh, dist) { if (!dist) return mesh; const N = vertexNormalsOf(mesh), P = mesh.positions; for (let v = 0; v < P.length; v++) P[v] += N[v] * dist; return mesh; }
 
+// ───────────────────────────── a surface scan lined up with the CBCT ─────────────────────────────
+// An intraoral scan (or a scan of a model) shows the crowns and the gum; the CBCT shows the crowns too, as the edge between
+// enamel and what is round it. So the scan is moved until its crowns lie on that edge. These functions hold no mesh code of
+// their own: the suite's core.js (isoMesh, autoOrient, rigidFit, MeshBVH, THREE) is handed in as N, so that this file still
+// loads with nothing beside it.
+/**
+ * scanReference(vol, N, o) → { mesh, bvh, T, h, lo, hi, arch, dist } | { error }: the CBCT's own surface round the teeth — where its
+ * grey is half way between soft tissue and the brightest 4 cm³ of the scan (enamel) — as a mesh of h mm (0.4, or the scan's
+ * voxel if larger; coarser for a very large field), with a tree for closest-point queries. It reaches 10 mm past the arch
+ * (proposeArch) sideways and 24 mm above and below the level where the teeth are brightest. arch: { apex [x, y] (the front
+ * of the arch line), x (the middle between its two ends), z (that level), points } or null where no arch shows.
+ * dist: { D, n, h, o } — how far each point of a grid twice as coarse lies from the scan's enamel, for alignScan's search.
+ */
+export function scanReference(vol, N, o = {}) {
+  const H = histogram(vol), P = windowPresets(vol, H), A = proposeArch(vol, H), [nx, ny, nz] = vol.dims, sp = vol.spacing, og = vol.origin, top = [og[0] + (nx - 1) * sp[0], og[1] + (ny - 1) * sp[1], og[2] + (nz - 1) * sp[2]];
+  const T = Math.round(o.T ?? (A ? (P.soft.l + A.T) / 2 : (P.soft.l + P.teeth.l) / 2)); let lo = og.slice(), hi = top.slice(), arch = null;
+  if (A) { const xs = A.points.map((p) => p[0]), ys = A.points.map((p) => p[1]), pad = o.pad ?? 10, zr = o.reach ?? 24; lo = [Math.max(og[0], Math.min(...xs) - pad), Math.max(og[1], Math.min(...ys) - pad), Math.max(og[2], A.z - zr)]; hi = [Math.min(top[0], Math.max(...xs) + pad), Math.min(top[1], Math.max(...ys) + pad), Math.min(top[2], A.z + zr)];
+    const apex = A.points.reduce((a, b) => (b[1] < a[1] ? b : a)); arch = { apex, x: (A.points[0][0] + A.points[A.points.length - 1][0]) / 2, z: A.z, points: A.points }; }
+  let h = o.h ?? Math.max(0.4, Math.min(...sp)); while ((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]) / (h * h * h) > (o.maxCells ?? 7e6)) h *= 1.15;
+  const f = surfaceField(vol, T, h, lo, hi), mesh = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: o.minVolume ?? 20 });
+  if (!mesh.indices.length) return { error: 'No tooth surface shows in this scan at its tooth level.' };
+  const g = new N.THREE.BufferGeometry(); g.setAttribute('position', new N.THREE.BufferAttribute(mesh.positions, 3)); g.setIndex(new N.THREE.BufferAttribute(Uint32Array.from(mesh.indices), 1));
+  // how far every point of a coarse grid (2h) lies from enamel — the brightest of the scan, as proposeArch found it — to
+  // within a cell: for trying thousands of places quickly. (Enamel, not the surface above: that one has the jaw bone in it,
+  // and a scan's gum set on the bone beneath it would look as good a fit as its crowns set on the crowns.)
+  const hd = 2 * h, dn = [0, 1, 2].map((a) => Math.ceil((hi[a] - lo[a]) / hd) + 3), ds = dn[0] * dn[1], Dm = new Float32Array(ds * dn[2]).fill(1e3), V = mesh.positions;
+  if (A) { const d = vol.data, i0 = lo.map((v, a) => Math.max(0, Math.floor((v - og[a]) / sp[a]))), i1 = hi.map((v, a) => Math.min(vol.dims[a] - 1, Math.ceil((v - og[a]) / sp[a])));
+    for (let k = i0[2]; k <= i1[2]; k++) { const ck = Math.round((og[2] + k * sp[2] - lo[2]) / hd) + 1; for (let j = i0[1]; j <= i1[1]; j++) { const cj = Math.round((og[1] + j * sp[1] - lo[1]) / hd) + 1, row = nx * (j + ny * k); for (let i = i0[0]; i <= i1[0]; i++) if (d[row + i] >= A.T) Dm[Math.round((og[0] + i * sp[0] - lo[0]) / hd) + 1 + dn[0] * cj + ds * ck] = 0; } } }
+  else for (let v = 0; v < V.length; v += 3) Dm[Math.round((V[v] - lo[0]) / hd) + 1 + dn[0] * (Math.round((V[v + 1] - lo[1]) / hd) + 1) + ds * (Math.round((V[v + 2] - lo[2]) / hd) + 1)] = 0;
+  const nb = []; for (let c = -1; c <= 1; c++) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const off = a + dn[0] * b + ds * c; if (off < 0) nb.push([a, b, c, off, hd * Math.hypot(a, b, c)]); }
+  for (const dir of [1, -1]) for (let kk = 0; kk < dn[2]; kk++) { const k = dir > 0 ? kk : dn[2] - 1 - kk; for (let jj = 0; jj < dn[1]; jj++) { const j = dir > 0 ? jj : dn[1] - 1 - jj; for (let ii = 0; ii < dn[0]; ii++) { const i = dir > 0 ? ii : dn[0] - 1 - ii, q = i + dn[0] * j + ds * k; let m = Dm[q]; if (m === 0) continue;
+        for (const [a, b, c, off, w] of nb) { const i2 = i + dir * a, j2 = j + dir * b, k2 = k + dir * c; if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= dn[0] || j2 >= dn[1] || k2 >= dn[2]) continue; const v = Dm[q + dir * off] + w; if (v < m) m = v; } Dm[q] = m; } } }
+  return { mesh, bvh: new N.MeshBVH(g), T, h, lo, hi, arch, dist: { D: Dm, n: dn, h: hd, o: [lo[0] - hd, lo[1] - hd, lo[2] - hd] } };
+}
+/**
+ * The line along a row of teeth seen from the biting side, from points scattered over their crowns (xy: flat [x, y, …], the
+ * front of the arch towards −y): the points are counted on a ½ mm map, and along rays from a point well back in the arch
+ * the middle of what each ray meets is taken — as proposeArch does with the CBCT's bright band, so that the two lines can
+ * be laid on each other. → a dense line [[x, y], …] (½ mm steps), or null
+ */
+function archOfPoints(xy) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (let i = 0; i < xy.length; i += 2) { if (xy[i] < x0) x0 = xy[i]; if (xy[i] > x1) x1 = xy[i]; if (xy[i + 1] < y0) y0 = xy[i + 1]; if (xy[i + 1] > y1) y1 = xy[i + 1]; }
+  if (!(x1 > x0) || !(y1 > y0)) return null; const c = 0.5, nx = Math.ceil((x1 - x0) / c) + 5, ny = Math.ceil((y1 - y0) / c) + 5, ox = x0 - 2 * c, oy = y0 - 2 * c, D = new Float32Array(nx * ny);
+  for (let i = 0; i < xy.length; i += 2) D[Math.round((xy[i] - ox) / c) + nx * Math.round((xy[i + 1] - oy) / c)]++;
+  blur2(D, nx, ny, 3); blur2(D, nx, ny, 3);
+  let W = 0, X = 0; const rowW = new Float64Array(ny); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = D[i + nx * j]; W += v; X += v * i; rowW[j] += v; } if (W <= 0) return null;
+  const ci = X / W; let cj = 0, cum = 0; for (let j = 0; j < ny; j++) { cum += rowW[j]; if (cum >= 0.85 * W) { cj = j; break; } }
+  const cx = ox + ci * c, cy = oy + cj * c, Rmax = Math.hypot(nx * c, ny * c), rays = [];
+  const Dat = (x, y) => { const fx = (x - ox) / c, fy = (y - oy) / c; if (!(fx >= 0 && fy >= 0 && fx <= nx - 1 && fy <= ny - 1)) return 0; const i = Math.min(nx - 2, Math.floor(fx)), j = Math.min(ny - 2, Math.floor(fy)), tx = fx - i, ty = fy - j, q = i + nx * j; return (D[q] * (1 - tx) + D[q + 1] * tx) * (1 - ty) + (D[q + nx] * (1 - tx) + D[q + nx + 1] * tx) * ty; };
+  for (let th = -115; th <= 115; th += 2.5) { const a = th * Math.PI / 180, dx = Math.sin(a), dy = -Math.cos(a); let sw = 0, sr = 0; for (let r = 0; r < Rmax; r += 0.25) { const v = Dat(cx + r * dx, cy + r * dy); sw += v; sr += v * r; } rays.push({ dx, dy, w: sw, r: sw > 0 ? sr / sw : 0 }); }
+  const ws = rays.filter((r) => r.w > 0).map((r) => r.w).sort((a, b) => a - b); if (!ws.length) return null; const med = ws[ws.length >> 1], keep = rays.filter((r) => r.w >= 0.2 * med); if (keep.length < 5) return null;
+  const line = keep.map((r, i) => { let sm = 0, n = 0; for (let q = Math.max(0, i - 1); q <= Math.min(keep.length - 1, i + 1); q++) { sm += keep[q].r; n++; } return [cx + (sm / n) * r.dx, cy + (sm / n) * r.dy]; });
+  const cv = archCurve(line, 0.5); return cv && cv.pts.length > 20 ? cv.pts : null;
+}
+/** the turn about the vertical and the shift that lay line A on line B (both [[x, y], …]): closest points, the nearest 80 % each round → { yaw (rad), tx, ty } */
+function layLine(A, B) {
+  const mean = (L) => { let x = 0, y = 0; for (const p of L) { x += p[0]; y += p[1]; } return [x / L.length, y / L.length]; }, ma = mean(A), mb = mean(B); let yaw = 0, tx = mb[0] - ma[0], ty = mb[1] - ma[1];
+  for (let it = 0; it < 30; it++) { const c = Math.cos(yaw), s = Math.sin(yaw), pr = [];
+    for (const p of A) { const x = c * p[0] - s * p[1] + tx, y = s * p[0] + c * p[1] + ty; let bd = Infinity, bj = 0; for (let j = 0; j < B.length; j++) { const d = (B[j][0] - x) ** 2 + (B[j][1] - y) ** 2; if (d < bd) { bd = d; bj = j; } } pr.push([p, B[bj], bd]); }
+    pr.sort((u, v) => u[2] - v[2]); const use = pr.slice(0, Math.max(5, Math.floor(pr.length * 0.8))); let ax = 0, ay = 0, bx = 0, by = 0; for (const [a, b] of use) { ax += a[0]; ay += a[1]; bx += b[0]; by += b[1]; } ax /= use.length; ay /= use.length; bx /= use.length; by /= use.length;
+    let sxx = 0, sxy = 0; for (const [a, b] of use) { const ux = a[0] - ax, uy = a[1] - ay, vx = b[0] - bx, vy = b[1] - by; sxx += ux * vx + uy * vy; sxy += ux * vy - uy * vx; }
+    const ny2 = Math.atan2(sxy, sxx), nc = Math.cos(ny2), ns = Math.sin(ny2), ntx = bx - (nc * ax - ns * ay), nty = by - (ns * ax + nc * ay), moved = Math.abs(ny2 - yaw) * 30 + Math.abs(ntx - tx) + Math.abs(nty - ty); yaw = ny2; tx = ntx; ty = nty; if (moved < 1e-3) break; }
+  return { yaw, tx, ty };
+}
+/**
+ * alignScan(ref, mesh, N, o) — the rigid motion that puts a surface scan (mesh, in the coordinates of its own file) on the
+ * CBCT (ref: scanReference).   o.jaw 'upper' | 'lower'.
+ *   by itself (no o.start, no o.pairs): the scan is stood as the suite stands an arch (core's autoOrient: biting plane level,
+ *     front forwards), its own arch line is laid on the CBCT's (so it sits right seen from above, and is turned right), and
+ *     every place within reach of there is tried on a coarse map of distances to the CBCT's enamel — some 30,000 places:
+ *     18 mm up and down of the level where the teeth are brightest (the two arches may be apart, with the mouth open),
+ *     6 to 8 mm sideways, turned and nodded up to 12°. The best few are settled on that map in all six ways, and from
+ *     the best three the scan's crowns (what lies within 7 mm of the biting plane) are drawn to the CBCT's surface by
+ *     trimmed closest points: each round only the nearest 60 % of the points count (fewer if much of that band is gum),
+ *     so the gum, which the CBCT's surface does not show, and a restoration that glares do not pull. The one whose
+ *     crowns end closest is the answer.
+ *   o.pairs [{ a: [x, y, z] on the scan, b: [x, y, z] in the CBCT }, …] (3 or more): the motion that puts each a on its b,
+ *     and from there the same fine fit (o.refine === false: the points alone).
+ *   o.start (Matrix4): the fine fit from there (after a nudge by hand).
+ * → { matrix (THREE.Matrix4: scan → CBCT), how ('auto' | 'points' | 'fine'), ok (the fit is close: half the crown points
+ *     within 0.35 mm and 55 % within ½ mm), fit: { median, p90, within03, within05 (shares), rms (of the points kept), n },
+ *     oriented (the scan could be stood up by itself), starts (how many were tried) } | { error }
+ */
+export function alignScan(ref, mesh, N, o = {}) {
+  const T3 = N.THREE, jaw = o.jaw === 'upper' ? 'upper' : 'lower', P = mesh.positions, nV = P.length / 3; if (nV < 50) return { error: 'This scan has too few points to line up.' };
+  let O = null; try { O = o.orient === false ? null : N.autoOrient(mesh, jaw); } catch (_) { O = null; } const oriented = !!(O && O.ok);
+  // the crowns: what lies within 7 mm of the biting plane, in the scan's own coordinates (all of the scan if it could not be stood up)
+  const sel = [], top = [], tips = []; let ymin = Infinity;
+  if (oriented) { const e = O.matrix.elements, band = o.band ?? 7; for (let v = 0; v < P.length; v += 3) { const x = P[v], y = P[v + 1], z = P[v + 2], zc = e[2] * x + e[6] * y + e[10] * z + e[14]; if (jaw === 'upper' ? zc < band : zc > -band) { sel.push(x, y, z); const yc = e[1] * x + e[5] * y + e[9] * z + e[13]; if (yc < ymin) ymin = yc; if (Math.abs(zc) < 5) top.push(e[0] * x + e[4] * y + e[8] * z + e[12], yc); if (Math.abs(zc) < (o.tipBand ?? 4.5)) tips.push(x, y, z); } } }
+  if (sel.length < 600) { sel.length = 0; for (let v = 0; v < P.length; v++) sel.push(P[v]); }
+  const nS = sel.length / 3, take = (n) => { const st = Math.max(1, Math.floor(nS / n)), out = []; for (let v = 0; v < nS; v += st) out.push(sel[3 * v], sel[3 * v + 1], sel[3 * v + 2]); return out; };
+  const q = new T3.Vector3(), hit = {}, keepShare = o.keep ?? (oriented ? 0.6 : 0.45);
+  const run = (M0, pts, iters, kp) => { let M = M0.clone(), rms = Infinity, it = 0; const n = pts.length / 3, dst = new Float64Array(n * 3), d = new Float64Array(n);
+    for (; it < iters; it++) { const E = M.elements;
+      for (let i = 0; i < n; i++) { const x = pts[3 * i], y = pts[3 * i + 1], z = pts[3 * i + 2]; q.set(E[0] * x + E[4] * y + E[8] * z + E[12], E[1] * x + E[5] * y + E[9] * z + E[13], E[2] * x + E[6] * y + E[10] * z + E[14]); ref.bvh.closestPointToPoint(q, hit); dst[3 * i] = hit.point.x; dst[3 * i + 1] = hit.point.y; dst[3 * i + 2] = hit.point.z; d[i] = hit.distance; }
+      const lim = Float64Array.from(d).sort()[Math.min(n - 1, Math.floor(n * kp))], s2 = [], d2 = []; let ss = 0, m = 0;
+      for (let i = 0; i < n; i++) if (d[i] <= lim) { s2.push(pts[3 * i], pts[3 * i + 1], pts[3 * i + 2]); d2.push(dst[3 * i], dst[3 * i + 1], dst[3 * i + 2]); ss += d[i] * d[i]; m++; }
+      if (m < 6) break; const nr = Math.sqrt(ss / m), Mn = N.rigidFit(s2, d2), mv = Math.abs(Mn.elements[12] - M.elements[12]) + Math.abs(Mn.elements[13] - M.elements[13]) + Math.abs(Mn.elements[14] - M.elements[14]);
+      M = Mn; if (Math.abs(rms - nr) < 2e-4 && mv < 2e-3) { rms = nr; break; } rms = nr; }
+    return { M, rms, it }; };
+  const measure = (M, from) => { const pts = from || take(4000), n = pts.length / 3, d = new Float64Array(n), E = M.elements; for (let i = 0; i < n; i++) { q.set(E[0] * pts[3 * i] + E[4] * pts[3 * i + 1] + E[8] * pts[3 * i + 2] + E[12], E[1] * pts[3 * i] + E[5] * pts[3 * i + 1] + E[9] * pts[3 * i + 2] + E[13], E[2] * pts[3 * i] + E[6] * pts[3 * i + 1] + E[10] * pts[3 * i + 2] + E[14]); ref.bvh.closestPointToPoint(q, hit); d[i] = hit.distance; }
+    const s = Float64Array.from(d).sort(); let a = 0, b = 0; for (let i = 0; i < n; i++) { if (d[i] <= 0.3) a++; if (d[i] <= 0.5) b++; } return { median: s[n >> 1], p90: s[Math.floor(n * 0.9)], within03: a / n, within05: b / n, n }; };
+  let best = null, how = 'auto', starts = 0;
+  if (o.start || (o.pairs && o.pairs.length >= 3)) {
+    let M0 = o.start ? o.start.clone() : null; how = o.start ? 'fine' : 'points';
+    if (!M0) { const a = [], b = []; for (const pr of o.pairs) { a.push(...pr.a); b.push(...pr.b); } M0 = N.rigidFit(a, b); }
+    best = o.refine === false ? { M: M0, rms: NaN } : run(run(M0, take(1500), 40, Math.max(0.3, keepShare - 0.15)).M, take(8000), 40, keepShare); starts = 1;
+  } else {
+    if (!oriented) return { error: 'This scan could not be stood up by itself (a part arch, or a scan with little of the teeth): line it up with matching points.', oriented };
+    if (!ref.arch) return { error: 'No arch shows in the CBCT to set the scan on: line it up with matching points.', oriented };
+    // the scan's own arch line laid on the CBCT's: about where the scan sits seen from above, and how it is turned
+    const lineS = top.length > 400 ? archOfPoints(top) : null, cvB = archCurve(ref.arch.points, 0.5), lay = lineS && cvB ? layLine(lineS, cvB.pts) : { yaw: 0, tx: ref.arch.x, ty: ref.arch.apex[1] - (ymin + 3) };
+    const base = new T3.Matrix4().makeTranslation(lay.tx, lay.ty, ref.arch.z).multiply(new T3.Matrix4().makeRotationZ(lay.yaw)).multiply(O.matrix), eb = base.elements;
+    // From there every place within reach is tried on the coarse distance map: 6 mm either way sideways, 8 mm forwards and
+    // back, 18 mm up and down (the arches may be apart), turned up to 12° and nodded up to 12° (the head is seldom held with
+    // the biting plane level) — some 30,000 places, each scored by how many of 500 points on the tops of the crowns (within
+    // 4½ mm of the biting plane) lie at the CBCT's enamel (a point a couple of mm off counts as lost, however far off).
+    // The best few places are each settled in all six ways on the same map (a step either way in each, halving the steps
+    // when none helps), and from there the crowns are drawn to the CBCT's surface by closest points.
+    const cp = (() => { const n = tips.length / 3, st = Math.max(1, Math.floor(n / 500)), out = []; for (let v = 0; v < n; v += st) out.push(tips[3 * v], tips[3 * v + 1], tips[3 * v + 2]); return out.length >= 300 ? out : take(400); })(), nC = cp.length / 3, ux = new Float32Array(nC), uy = new Float32Array(nC), uz = new Float32Array(nC);
+    const cx = lay.tx, cy = lay.ty, cz = ref.arch.z; for (let i = 0; i < nC; i++) { const x = cp[3 * i], y = cp[3 * i + 1], z = cp[3 * i + 2]; ux[i] = eb[0] * x + eb[4] * y + eb[8] * z + eb[12] - cx; uy[i] = eb[1] * x + eb[5] * y + eb[9] * z + eb[13] - cy; uz[i] = eb[2] * x + eb[6] * y + eb[10] * z + eb[14] - cz; }
+    const { D: Dm, n: dn, h: hd, o: d0 } = ref.dist, ds = dn[0] * dn[1], sig2 = (o.sigma ?? 1) ** 2, rad = Math.PI / 180;
+    // turned about the vertical (yaw), then nodded (pitch, about the side-to-side axis), then rolled (about front-to-back): Rz·Rx·Ry
+    const rot = (yw, pt, rl) => { const a = Math.cos(yw * rad), b = Math.sin(yw * rad), c = Math.cos(pt * rad), d = Math.sin(pt * rad), e = Math.cos(rl * rad), f = Math.sin(rl * rad); return [a * e - b * d * f, -b * c, a * f + b * d * e, b * e + a * d * f, a * c, b * f - a * d * e, -c * f, d, c * e]; };
+    const pose = (v) => { const R = rot(v[3], v[4], v[5]); return new T3.Matrix4().set(R[0], R[1], R[2], cx + v[0], R[3], R[4], R[5], cy + v[1], R[6], R[7], R[8], cz + v[2], 0, 0, 0, 1).multiply(new T3.Matrix4().makeTranslation(-cx, -cy, -cz)).multiply(base); };
+    const score = (v, smooth) => { const R = rot(v[3], v[4], v[5]), X0 = cx + v[0] - d0[0], Y0 = cy + v[1] - d0[1], Z0 = cz + v[2] - d0[2]; let sum = 0;
+      for (let i = 0; i < nC; i++) { const fx = (X0 + R[0] * ux[i] + R[1] * uy[i] + R[2] * uz[i]) / hd, fy = (Y0 + R[3] * ux[i] + R[4] * uy[i] + R[5] * uz[i]) / hd, fz = (Z0 + R[6] * ux[i] + R[7] * uy[i] + R[8] * uz[i]) / hd; let d = 6;
+        if (smooth) { if (fx >= 0 && fy >= 0 && fz >= 0 && fx < dn[0] - 1 && fy < dn[1] - 1 && fz < dn[2] - 1) { const a = Math.floor(fx), b = Math.floor(fy), k = Math.floor(fz), tx = fx - a, ty = fy - b, tz = fz - k, q0 = a + dn[0] * b + ds * k, q1 = q0 + ds, r0 = q0 + dn[0], r1 = q1 + dn[0];
+            d = ((Dm[q0] * (1 - tx) + Dm[q0 + 1] * tx) * (1 - ty) + (Dm[r0] * (1 - tx) + Dm[r0 + 1] * tx) * ty) * (1 - tz) + ((Dm[q1] * (1 - tx) + Dm[q1 + 1] * tx) * (1 - ty) + (Dm[r1] * (1 - tx) + Dm[r1 + 1] * tx) * ty) * tz; if (d > 6) d = 6; } }
+        else { const a = Math.round(fx), b = Math.round(fy), k = Math.round(fz); if (a >= 0 && b >= 0 && k >= 0 && a < dn[0] && b < dn[1] && k < dn[2]) { d = Dm[a + dn[0] * b + ds * k]; if (d > 6) d = 6; } }
+        sum += d * d / (d * d + sig2); } return sum / nC; };
+    const poses = []; for (let pt = -12; pt <= 12; pt += 6) for (let yw = -12; yw <= 12; yw += 6) for (let tz = -18; tz <= 18; tz += 2) for (let ty = -8; ty <= 8; ty += 2) for (let tx = -6; tx <= 6; tx += 2) { const v = [tx, ty, tz, yw, pt, 0]; poses.push([score(v, false), v]); starts++; }
+    poses.sort((u, v) => u[0] - v[0]); const cand = []; for (const ps of poses) { if (cand.length >= (o.candidates ?? 6)) break; const v = ps[1]; if (cand.every((c) => Math.abs(c[1][0] - v[0]) + Math.abs(c[1][1] - v[1]) + Math.abs(c[1][2] - v[2]) > 3 || Math.abs(c[1][3] - v[3]) + Math.abs(c[1][4] - v[4]) > 6)) cand.push(ps); }
+    const settled = cand.map((c0) => { const v = c0[1].slice(); let sc = score(v, true), st = [1, 1, 1, 3, 3, 3];
+      for (let round = 0; round < 60 && st[0] >= 0.1; round++) { let better = false; for (let k = 0; k < 6; k++) for (const sg of [1, -1]) { const w = v.slice(); w[k] += sg * st[k]; const s2 = score(w, true); if (s2 < sc - 1e-6) { sc = s2; v[k] = w[k]; better = true; break; } } if (!better) st = st.map((x) => x / 2); }
+      return { v, sc }; }).sort((a, b) => a.sc - b.sc);
+    // the gum has no surface in the CBCT: if much of what was taken for crowns is gum (short crowns), fewer of the points count
+    const mid = take(1500), share = (M) => { const E = M.elements; let n = 0; for (let i = 0; i < mid.length; i += 3) { q.set(E[0] * mid[i] + E[4] * mid[i + 1] + E[8] * mid[i + 2] + E[12], E[1] * mid[i] + E[5] * mid[i + 1] + E[9] * mid[i + 2] + E[13], E[2] * mid[i] + E[6] * mid[i + 1] + E[10] * mid[i + 2] + E[14]); if (ref.bvh.closestPointToPoint(q, hit).distance <= 1) n++; } return n / (mid.length / 3); };
+    const apart = settled.filter((c, i) => settled.slice(0, i).every((b) => Math.abs(b.v[0] - c.v[0]) + Math.abs(b.v[1] - c.v[1]) + Math.abs(b.v[2] - c.v[2]) > 1 || Math.abs(b.v[3] - c.v[3]) + Math.abs(b.v[4] - c.v[4]) + Math.abs(b.v[5] - c.v[5]) > 3));
+    for (const c of apart.slice(0, o.finalists ?? 3)) { const M0 = pose(c.v), kp = Math.max(0.3, Math.min(keepShare, 0.9 * share(M0))), r = run(M0, mid, 30, kp); r.kp = kp; r.med = measure(r.M, mid).median; if (o.trace) o.trace({ place: c.v, score: c.sc, keep: kp, rms: r.rms, median: r.med }); if (!best || r.med < best.med) best = r; }
+    if (!best) return { error: 'The scan could not be lined up by itself: use matching points.', oriented };
+    best = run(best.M, take(8000), 40, best.kp);
+  }
+  const fit = { ...measure(best.M), rms: best.rms }, ok = fit.median <= 0.35 && fit.within05 >= 0.55;
+  return { matrix: best.M, how, ok, fit, oriented, starts };
+}
+/**
+ * meshCut(mesh, e, p0, nn) → Float32Array [x0, y0, z0, x1, y1, z1, …]: the line segments where the plane through p0 with unit
+ * normal nn cuts the mesh after it has been moved by the matrix with elements e (column-major, as THREE's) — a scan's
+ * outline in a slice. Points are in the plane's (the CBCT's) coordinates.
+ */
+export function meshCut(mesh, e, p0, nn) {
+  const P = mesh.positions, I = mesh.indices, nV = P.length / 3, W = mesh._w && mesh._w.length === P.length ? mesh._w : (mesh._w = new Float32Array(P.length)), d = mesh._d && mesh._d.length === nV ? mesh._d : (mesh._d = new Float32Array(nV)), out = [];
+  for (let v = 0, q = 0; v < nV; v++, q += 3) { const x = P[q], y = P[q + 1], z = P[q + 2], X = e[0] * x + e[4] * y + e[8] * z + e[12], Y = e[1] * x + e[5] * y + e[9] * z + e[13], Z = e[2] * x + e[6] * y + e[10] * z + e[14]; W[q] = X; W[q + 1] = Y; W[q + 2] = Z; d[v] = (X - p0[0]) * nn[0] + (Y - p0[1]) * nn[1] + (Z - p0[2]) * nn[2]; }
+  const edge = (u, v) => { const s = d[u] / (d[u] - d[v]), a = 3 * u, b = 3 * v; out.push(W[a] + s * (W[b] - W[a]), W[a + 1] + s * (W[b + 1] - W[a + 1]), W[a + 2] + s * (W[b + 2] - W[a + 2])); };
+  for (let t = 0; t < I.length; t += 3) { const a = I[t], b = I[t + 1], c = I[t + 2], sa = d[a] > 0, sb = d[b] > 0, sc = d[c] > 0; if (sa === sb && sb === sc) continue;
+    if (sa !== sb) edge(a, b); if (sb !== sc) edge(b, c); if (sc !== sa) edge(c, a); }
+  return Float32Array.from(out);
+}
+/**
+ * phantomScanField(o) → { F, n, origin, h }: the phantom's lower arch as an intraoral scan would show it — the crowns and the
+ * gum, down to 5 mm below the bone crest — as a field for core's isoMesh (negative inside), in the phantom's own coordinates.
+ * The demo's surface scan, and the tests' (which move it into "scanner" coordinates first). o.clinical: the clinical shapes;
+ * o.h: the grid (0.3 mm).
+ */
+export function phantomScanField(o = {}) {
+  const clin = !!o.clinical, V = clin ? CLINICAL : PHANTOM, h = o.h || 0.3, L = archLine(), teeth = phantomTeeth({ clinical: clin }), lo = [-36, -40, o.bottom ?? -5], hi = [36, 21, 12.6];
+  const n = [0, 1, 2].map((a) => Math.round((hi[a] - lo[a]) / h) + 1), F = new Float32Array(n[0] * n[1] * n[2]), sl = n[0] * n[1], P = L.pts, zc = (V.crest + V.boneBottom) / 2, zh = (V.crest - V.boneBottom) / 2;
+  const softD = (d, z) => { const qx = d - (V.boneHalf + 1.2), qy = Math.abs(z - (zc - 0.2)) - (zh - 1.2), px = qx > 0 ? qx : 0, py = qy > 0 ? qy : 0; return Math.sqrt(px * px + py * py) + Math.min(Math.max(qx, qy), 0) - 3.2; };   // (as makePhantom's soft tissue)
+  for (let j = 0; j < n[1]; j++) for (let i = 0; i < n[0]; i++) { const x = lo[0] + i * h, y = lo[1] + j * h; let best = Infinity; for (let q = 0; q < P.length; q += 2) { const dd = (P[q][0] - x) ** 2 + (P[q][1] - y) ** 2; if (dd < best) best = dd; } const d = Math.sqrt(best); for (let k = 0; k < n[2]; k++) F[i + n[0] * j + sl * k] = softD(d, lo[2] + k * h); }
+  for (const t of teeth) { const f = phantomToothField(t), R = Math.max(t.md, t.bl) / 2 + 2.5, a0 = [t.base[0] - R, t.base[1] - R, lo[2]], a1 = [t.base[0] + R, t.base[1] + R, t.base[2] + t.crown + 2], i0 = a0.map((v, a) => Math.max(0, Math.floor((v - lo[a]) / h))), i1 = a1.map((v, a) => Math.min(n[a] - 1, Math.ceil((v - lo[a]) / h)));
+    for (let k = i0[2]; k <= i1[2]; k++) for (let j = i0[1]; j <= i1[1]; j++) for (let i = i0[0]; i <= i1[0]; i++) { const q = i + n[0] * j + sl * k, v = f(lo[0] + i * h, lo[1] + j * h, lo[2] + k * h); if (v < F[q]) F[q] = v; } }
+  return { F, n, origin: lo, h };
+}
+
 // ───────────────────────────── the trained tooth model ─────────────────────────────
 // The CBCT tab can outline the tapped tooth with a neural network in place of the rules of trackTooth: the "instance" network
 // of ToothSeg (Isensee, van Nistelrooij, Krämer, Vinayahalingam and others, 2025; weights CC BY 4.0), trained on the ToothFairy2
