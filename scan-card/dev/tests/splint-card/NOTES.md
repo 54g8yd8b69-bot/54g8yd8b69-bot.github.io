@@ -18,6 +18,19 @@ Not done / half-done (nothing of this is wired to a dead control):
   changes about 2 s. Never timed on a 350k-triangle scan with the final pipeline.
 - Nothing was tried on a real patient scan (demo arches are synthetic; `scanner-*.stl` are the same arches moved).
 
+## Marked teeth (added 28 Nov 2026)
+Margin step: "Mark teeth" / "Find the teeth" / "Clear". `P.teeth` = null (not decided: found by `N.findTeeth` the first time the Margin
+step opens), [] (whole-arch margin, as before; what an older case gets) or [{ p, c, a, b | r, fdi }] in the scan's own coordinates,
+for `P.teethJaw`. Kernel: `K.toothArch` (tips, a line through the teeth in the form of `K.analyseArch`, which then replaces `D.arch`;
+`D.arch0` keeps the whole-arch one), `K.toothMargin` (flood per tooth on the mesh above the depth below the tips, inside its own box
+or 7 mm; undercut gate; grid kinds tooth / bridge / near / far; gum raise `gz`), `K.tmBorder` / `K.tmKind`, `mp.tm` in `K.borderAt`
+(the cavity's cover and limit take the deeper of whole-arch and teeth, `tmWiden`), `p.tm` in `K.build` (cavity cache key includes
+`tm.key`; a bridged cell counts as crown for the flat table). Tests: `t20-teeth.mjs` (Node), `f7-teeth.cjs` (browser).
+Known: with teeth marked the old f1/f2 numbers move a little (the line along the teeth is not the whole-arch line, so dragged dots land
+at other stations); a margin pushed far below the gum (f2's tongue side 12 mm, f1's local −6 mm) leaves a thin edge at the gum line
+that Check reports as a thin wall (0.14 / 1.63 mm; the whole-arch margin gave 0.35 / 1.88 there). Bridges over a gap step down to the
+ridge in a guard; a flat table fills them.
+
 ## Frames
 Case frame LPS (+X patient's left, +Y back, +Z up) → ARCH frame A (teeth +Z; upper turned 180° about Y) → WORK
 frame W = tilt · A (path of insertion = +Z). Margin and table are defined in the arch frame, so tilting the path does

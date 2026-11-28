@@ -102,14 +102,17 @@ const archTop = (arch, s) => { const f = N.clamp(s / arch.step, 0, arch.n - 1), 
 const ctrlAt = (a, u) => { if (!a || !a.length) return 0; if (a.length === 1) return a[0]; const f = N.clamp(u, 0, 1) * (a.length - 1), i = Math.min(a.length - 2, Math.floor(f)), t = f - i, p0 = a[Math.max(0, i - 1)], p1 = a[i], p2 = a[i + 1], p3 = a[Math.min(a.length - 1, i + 2)]; return 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t); };
 /**
  * Height of the margin (arch frame) at (x, y): the appliance ends where the tooth or gum surface drops below it.
- *   mp = { buccal, lingual (mm below the cusp tips), adjB[], adjL[] (local adjustments at evenly spaced control points, + = shorter) }
+ *   mp = { buccal, lingual (mm below the cusp tips), adjB[], adjL[] (local adjustments at evenly spaced control points, + = shorter),
+ *          tm (marked teeth, K.toothMargin: optional), tmWiden }
  * → out.z (border height; +Infinity where nothing may be covered), out.s, out.d
  */
 K.borderAt = (arch, mp, x, y, out) => {
-  K.archCoords(arch, x, y, out);
-  if (out.over > (mp.distal ?? 4) || out.d > (mp.reach ?? 11) || -out.d > (mp.reachL ?? Math.max(mp.reach ?? 11, 7 + mp.lingual))) { out.z = Infinity; return out; }
-  const u = out.s / arch.L, top = archTop(arch, out.s), zb = top - mp.buccal + ctrlAt(mp.adjB, u), zl = top - mp.lingual + ctrlAt(mp.adjL, u);
-  out.z = zl + (zb - zl) * sstep(-1.5, 1.5, out.d);
+  K.archCoords(arch, x, y, out); let z;
+  if (out.over > (mp.distal ?? 4) || out.d > (mp.reach ?? 11) || -out.d > (mp.reachL ?? Math.max(mp.reach ?? 11, 7 + mp.lingual))) z = Infinity;
+  else { const u = out.s / arch.L, top = archTop(arch, out.s), zb = top - mp.buccal + ctrlAt(mp.adjB, u), zl = top - mp.lingual + ctrlAt(mp.adjL, u); z = zl + (zb - zl) * sstep(-1.5, 1.5, out.d); }
+  // marked teeth (mp.tm, K.toothMargin): the margin is theirs alone; mp.tmWiden: a surface that must reach past the margin (the cavity's), so the deeper of the two
+  if (mp.tm) { const zt = K.tmBorder(mp.tm, arch, mp, x, y, out); z = mp.tmWiden != null ? Math.min(z, zt - mp.tmWiden) : zt; }
+  out.z = z;
   return out;
 };
 
@@ -134,6 +137,152 @@ K.marginLines = (hfA, arch, mp) => {
   for (const k of link.keys()) if (!seen.has(k) && link.get(k).length === 1) out.push(walk(k));                    // open lines first, from an end
   for (const k of link.keys()) if (!seen.has(k)) { const l = walk(k); l.push(l[0]); out.push(l); }
   return out.filter((l) => l.length > 4).map((l) => { let P = l.map((k) => pts.get(k).slice()); for (let pass = 0; pass < 2; pass++) { const Q = P.map((q) => q.slice()); for (let i = 1; i < P.length - 1; i++) for (let k = 0; k < 3; k++) Q[i][k] = (P[i - 1][k] + 2 * P[i][k] + P[i + 1][k]) / 4; P = Q; } return P; });
+};
+
+// ───────────── marked teeth: the appliance covers the teeth the user marks and nothing else (the method of Tray Card's tooth-supported trays) ─────────────
+K.TM = { tipR: 3.5, r: 7, gap: 0.3, ramp: 0.8, bridge: 1.0, bridgeW: 3.5, bridgeMin: 3, bridgeMax: 30, near: 6, gate: true };
+/** how much of the bridge's depth applies d mm off the line along the teeth: all of it within 1.5 mm, none from 3.5 mm (so the bar's sides are smooth) */
+const tmBridgeW = (d) => 1 - sstep(1.5, 3.5, Math.abs(d));
+const tmTop = (prof, s) => { const S = prof.s, Z = prof.z, n = S.length; if (!n) return -Infinity; if (s <= S[0]) return Z[0]; if (s >= S[n - 1]) return Z[n - 1]; let i = 0; while (i < n - 2 && S[i + 1] < s) i++; const t = (s - S[i]) / (S[i + 1] - S[i] || 1); return Z[i] + (Z[i + 1] - Z[i]) * t; };
+/** margin height (arch frame) with marked teeth: `buccal` / `lingual` mm below the tip of the marked tooth at s (tips joined by straight lines along the arch), local changes added */
+K.tmLevel = (prof, arch, mp, s, d) => { const u = s / arch.L, top = tmTop(prof, s), zb = top - mp.buccal + ctrlAt(mp.adjB, u), zl = top - mp.lingual + ctrlAt(mp.adjL, u); return zl + (zb - zl) * sstep(-1.5, 1.5, d); };
+const tmAdjCache = new WeakMap();
+/** vertex neighbours of a mesh (compressed rows), cached per mesh */
+K.vertexAdjacency = (mesh) => {
+  if (tmAdjCache.has(mesh)) return tmAdjCache.get(mesh);
+  const n = mesh.positions.length / 3, ix = mesh.indices, off = new Uint32Array(n + 1);
+  for (let t = 0; t < ix.length; t++) off[ix[t] + 1] += 2; for (let i = 0; i < n; i++) off[i + 1] += off[i];
+  const nb = new Uint32Array(off[n]), f = off.slice(0, n);
+  for (let t = 0; t < ix.length; t += 3) { const a = ix[t], b = ix[t + 1], c = ix[t + 2]; nb[f[a]++] = b; nb[f[a]++] = c; nb[f[b]++] = a; nb[f[b]++] = c; nb[f[c]++] = a; nb[f[c]++] = b; }
+  const A = { off, nb }; tmAdjCache.set(mesh, A); return A;
+};
+/**
+ * A line along the marked teeth, in the form K.analyseArch gives (so everything that follows the arch follows the marked teeth), and each
+ * tooth's tip.  teeth: [{ p:[x,y,z] a tap on the tooth (arch frame), c:[x,y,z] its middle (optional, else the tap), r: how far from the middle
+ * the tooth may reach (mm, default 7), or a, b: its half-length along the arch and half-width across it (a rounded box round the middle) }]. The tip is the highest point within 3.5 mm of the tap (sideways). The teeth are put in order round
+ * the arch (by their angle about a point behind it, as in K.analyseArch), a smooth line is run through their middles and 6 mm past the end ones,
+ * and `top` along it joins the tips with straight lines. → arch (+ prof { s[], z[] }, teeth [{ v0, tip, c, r, s, ok, why }]) or null
+ */
+K.toothArch = (meshA, arch0, teeth, opt = {}) => {
+  const T = { ...K.TM, ...opt }, P = meshA.positions, nV = P.length / 3, o = {};
+  const info = teeth.map((t) => {
+    const [px, py, pz] = t.p, r2 = T.tipR * T.tipR; let v0 = -1, best = Infinity, tip = -Infinity;
+    for (let v = 0; v < nV; v++) { const dx = P[3 * v] - px, dy = P[3 * v + 1] - py, dz = P[3 * v + 2] - pz, h2 = dx * dx + dy * dy, d2 = h2 + dz * dz; if (d2 < best) { best = d2; v0 = v; } if (h2 < r2 && P[3 * v + 2] > tip) tip = P[3 * v + 2]; }
+    const ok = best <= 2.5 * 2.5 && tip > -Infinity; return { v0, tip, c: t.c || t.p, r: t.r || T.r, a: t.a || 0, b: t.b || 0, s: 0, ok, why: ok ? '' : 'not on the scan' };
+  });
+  const ang = (q) => Math.atan2(q.c[0] - arch0.xc, arch0.yc - q.c[1]), good = info.filter((q) => q.ok).sort((a, b) => ang(a) - ang(b));
+  if (!good.length) return null;
+  let pts = []; for (const q of good) { const l = pts[pts.length - 1]; if (l && Math.hypot(l[0] - q.c[0], l[1] - q.c[1]) < 2) { l[0] = (l[0] + q.c[0]) / 2; l[1] = (l[1] + q.c[1]) / 2; } else pts.push([q.c[0], q.c[1]]); }
+  if (pts.length === 1) { const [x, y] = pts[0], dx = x - arch0.xc, dy = y - arch0.yc, l = Math.hypot(dx, dy) || 1, tx = dy / l, ty = -dx / l; pts = [[x - 3 * tx, y - 3 * ty], [x + 3 * tx, y + 3 * ty]]; if (ang({ c: pts[0] }) > ang({ c: pts[1] })) pts.reverse(); }
+  { const a = pts[0], b = pts[1], m = pts.length, c = pts[m - 1], d = pts[m - 2], la = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, lc = Math.hypot(c[0] - d[0], c[1] - d[1]) || 1;     // 6 mm on past the middles of the end teeth, so the whole of each end tooth lies along the line
+    pts.unshift([a[0] + (a[0] - b[0]) * 6 / la, a[1] + (a[1] - b[1]) * 6 / la]); pts.push([c[0] + (c[0] - d[0]) * 6 / lc, c[1] + (c[1] - d[1]) * 6 / lc]); }
+  const raw = [], m = pts.length, at = (k) => pts[Math.max(0, Math.min(m - 1, k))];
+  for (let k = 0; k < m - 1; k++) { const p0 = at(k - 1), p1 = at(k), p2 = at(k + 1), p3 = at(k + 2); for (let q = 0; q < 16; q++) { const t = q / 16, t2 = t * t, t3 = t2 * t; raw.push([0, 1].map((e) => 0.5 * (2 * p1[e] + (-p0[e] + p2[e]) * t + (2 * p0[e] - 5 * p1[e] + 4 * p2[e] - p3[e]) * t2 + (-p0[e] + 3 * p1[e] - 3 * p2[e] + p3[e]) * t3))); } }
+  raw.push(pts[m - 1].slice());
+  const cum = [0]; for (let k = 1; k < raw.length; k++) cum.push(cum[k - 1] + Math.hypot(raw[k][0] - raw[k - 1][0], raw[k][1] - raw[k - 1][1]));
+  const step = 0.5, L0 = cum[cum.length - 1], n = Math.max(8, Math.floor(L0 / step) + 1), px = new Float32Array(n), py = new Float32Array(n), tx = new Float32Array(n), ty = new Float32Array(n), ox = new Float32Array(n), oy = new Float32Array(n);
+  for (let k = 0, seg = 0; k < n; k++) { const sk = Math.min(L0, k * step); while (seg < raw.length - 2 && cum[seg + 1] < sk) seg++; const t = (sk - cum[seg]) / (cum[seg + 1] - cum[seg] || 1); px[k] = raw[seg][0] + (raw[seg + 1][0] - raw[seg][0]) * t; py[k] = raw[seg][1] + (raw[seg + 1][1] - raw[seg][1]) * t; }
+  for (let k = 0; k < n; k++) { const a = Math.max(0, k - 2), b = Math.min(n - 1, k + 2), dx = px[b] - px[a], dy = py[b] - py[a], l = Math.hypot(dx, dy) || 1; tx[k] = dx / l; ty[k] = dy / l; let qx = ty[k], qy = -tx[k]; if (qx * (px[k] - arch0.xc) + qy * (py[k] - arch0.yc) < 0) { qx = -qx; qy = -qy; } ox[k] = qx; oy[k] = qy; }
+  const arch = { n, step, px, py, tx, ty, ox, oy, L: (n - 1) * step, xc: arch0.xc, yc: arch0.yc, zHi: arch0.zHi, top: new Float32Array(n), fromTeeth: true };
+  for (const q of good) { K.archCoords(arch, q.c[0], q.c[1], o); q.s = o.s; }
+  const byS = good.slice().sort((a, b) => a.s - b.s), prof = { s: byS.map((q) => q.s), z: byS.map((q) => q.tip) };
+  for (let k = 0; k < n; k++) arch.top[k] = tmTop(prof, k * step);
+  arch.zMax = Math.max(...good.map((q) => q.tip)); arch.prof = prof; arch.teeth = info;
+  return arch;
+};
+/**
+ * The margin when the teeth to cover are marked (the method of Tray Card's tooth-supported trays). archT: K.toothArch's line along the marked
+ * teeth. hfA: the scan's upper envelope (arch frame). mp = { buccal, lingual, adjB, adjL }: the margin height is `buccal` / `lingual` mm below the
+ * tip of the tooth there (local changes added). The tooth itself is everything on the scan joined to its tap that lies above that height and
+ * within r of its middle. With `gate`, a flood that has gone down a crown's wall under its bulge (an undercut) stops where the surface turns out
+ * again: that is the gum, so a large depth cannot carry the appliance onto it.
+ *   Every cell of the grid is then:  1 tooth  — the margin height as above;
+ *     2 bridge — the crest of the ridge across a gap of 3–30 mm between marked teeth, covered 1 mm deep along the line and less to each
+ *                side (none 3.5 mm off it), so the appliance stays in one piece;
+ *     3 near   — beside them (up to 6 mm): the margin carries on at the height of the nearest tooth or bridge cell, but never lower than 0.3 mm
+ *                above the scan there, so the gum, ridge and palate beside the teeth are not covered;   0 far — nothing is covered.
+ *   Where the gum (or anything else beside a tooth) stands above the margin, the margin is raised to 0.3 mm above it at the tooth's edge, and
+ *   comes down again into the tooth at 0.8 mm per mm (gz): the appliance then ends on the tooth just short of the gum, with a clean edge,
+ *   instead of a thin lip lying on the gum.
+ * → tm = { nx, ny, x0, y0, cell, kind, ext, gz (raised margin on tooth cells, −∞ where none), hf, prof, arch, teeth:[{ ok, why, tip, s, s0, s1, n }], runs, bridges }
+ */
+K.toothMargin = (meshA, archT, hfA, mp, opt = {}) => {
+  const T = { ...K.TM, ...opt }, P = meshA.positions, nV = P.length / 3, A = K.vertexAdjacency(meshA), o = {}, arch = archT, prof = archT.prof;
+  const info = archT.teeth.map((q) => ({ ...q, s0: Infinity, s1: -Infinity, n: 0 }));
+  // 2. flood each tooth from its tap
+  const sv = new Float32Array(nV).fill(NaN), lev = new Float32Array(nV), levelAt = (v) => { if (sv[v] !== sv[v]) { K.archCoords(arch, P[3 * v], P[3 * v + 1], o); sv[v] = o.s; lev[v] = K.tmLevel(prof, arch, mp, o.s, o.d); } return lev[v]; };
+  let nz = null;
+  if (T.gate) {                                                       // vertex normals (z part), smoothed over the neighbours, for telling the crown's wall from the gum below it
+    const vn = N.vertexNormals(meshA), z0 = new Float32Array(nV); for (let v = 0; v < nV; v++) z0[v] = vn[3 * v + 2];
+    nz = new Float32Array(nV); for (let v = 0; v < nV; v++) { let s = z0[v], c = 1; for (let q = A.off[v]; q < A.off[v + 1]; q++) { s += z0[A.nb[q]]; c++; } nz[v] = s / c; }
+  }
+  const own = new Int16Array(nV).fill(-1), seen = new Int32Array(nV), UC = -0.15, OUT = 0.25;
+  info.forEach((q, ti) => {
+    if (!q.ok) return; if (P[3 * q.v0 + 2] < levelAt(q.v0)) { q.ok = false; q.why = 'below the margin'; return; }
+    const stamp = ti + 1, r2 = q.r * q.r, cx = q.c[0], cy = q.c[1], st0 = [q.v0], st1 = []; seen[q.v0] = stamp;
+    let box = null; if (q.a > 0 && q.b > 0) { K.archCoords(arch, cx, cy, o); const k = Math.min(arch.n - 1, Math.round(o.s / arch.step)); box = [arch.tx[k] / q.a, arch.ty[k] / q.a, arch.ox[k] / q.b, arch.oy[k] / q.b]; }      // a found tooth: a rounded box its own size (plus 1 mm), lined up with the arch
+    const take = (v) => { if (own[v] < 0) own[v] = ti; q.n++; const s = sv[v]; if (s < q.s0) q.s0 = s; if (s > q.s1) q.s1 = s; };
+    take(q.v0);
+    const ok = (w) => { if (seen[w] === stamp) return false; const dx = P[3 * w] - cx, dy = P[3 * w + 1] - cy; if (box) { const u = Math.abs(dx * box[0] + dy * box[1]), v = Math.abs(dx * box[2] + dy * box[3]); if (u * u * u + v * v * v > 1) return false; } else if (dx * dx + dy * dy > r2) return false; return P[3 * w + 2] >= levelAt(w); };
+    // phase 0: everything reached without going under a bulge; phase 1: on from there down the walls under the bulges, stopping where the surface turns out (the gum)
+    while (st0.length) { const v = st0.pop(); for (let e = A.off[v]; e < A.off[v + 1]; e++) { const w = A.nb[e]; if (!ok(w)) continue; if (nz && nz[w] < UC) { st1.push(w); seen[w] = -stamp; continue; } seen[w] = stamp; take(w); st0.push(w); } }
+    for (const w of st1) { if (seen[w] === -stamp) { seen[w] = stamp; take(w); } }
+    while (st1.length) { const v = st1.pop(); for (let e = A.off[v]; e < A.off[v + 1]; e++) { const w = A.nb[e]; if (!ok(w) || seen[w] === -stamp) continue; if (nz && nz[w] > OUT) { continue; } seen[w] = stamp; take(w); st1.push(w); } }
+  });
+  { let zm = -Infinity; for (let v = 0; v < nV; v++) if (own[v] >= 0 && P[3 * v + 2] > zm) zm = P[3 * v + 2]; if (zm > arch.zMax) arch.zMax = zm; }      // the highest point of the marked teeth (a flat table is set from it)
+  // 3. the teeth on the grid
+  const { nx, ny, x0, y0, cell } = hfA, NC = nx * ny, kind = new Uint8Array(NC), ext = new Float32Array(NC).fill(NaN);
+  for (let v = 0; v < nV; v++) if (own[v] >= 0) { const i = Math.round((P[3 * v] - x0) / cell), j = Math.round((P[3 * v + 1] - y0) / cell); if (i >= 0 && j >= 0 && i < nx && j < ny) kind[j * nx + i] = 1; }
+  { // close pinholes and slivers (0.5 mm), then fill small enclosed holes
+    const grow = (src, val) => { const out = src.slice(); for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; if (src[k] === val) continue; for (let b = -2; b <= 2 && out[k] !== val; b++) for (let a = -2; a <= 2; a++) { if (a * a + b * b > 5) continue; const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && src[jj * nx + ii] === val) { out[k] = val; break; } } } return out; };
+    const d = grow(kind, 1), inv = new Uint8Array(NC); for (let k = 0; k < NC; k++) inv[k] = d[k] ? 0 : 1;
+    const e = grow(inv, 1); for (let k = 0; k < NC; k++) if (!e[k]) kind[k] = 1;
+    const lab = new Int32Array(NC).fill(-1); let L = 0;
+    for (let k0 = 0; k0 < NC; k0++) { if (kind[k0] || lab[k0] >= 0) continue; const comp = [k0]; lab[k0] = L; let edge = false; for (let h = 0; h < comp.length; h++) { const k = comp[h], i = k % nx, j = (k / nx) | 0; if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) edge = true; for (const q of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, j > 0 ? k - nx : -1, j < ny - 1 ? k + nx : -1]) if (q >= 0 && !kind[q] && lab[q] < 0) { lab[q] = L; comp.push(q); } }
+      if (!edge && comp.length * cell * cell < 20) for (const k of comp) kind[k] = 1; L++; }
+  }
+  // 4. bridges across gaps between marked teeth
+  const iv = info.filter((q) => q.ok && q.n > 0).map((q) => [q.s0, q.s1]).sort((a, b) => a[0] - b[0]), runs = [];
+  for (const [a, b] of iv) { if (runs.length && a <= runs[runs.length - 1][1] + 0.5) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], b); else runs.push([a, b]); }
+  const bridges = []; for (let q = 0; q + 1 < runs.length; q++) { const g = runs[q + 1][0] - runs[q][1]; if (g > T.bridgeMin && g <= T.bridgeMax) bridges.push([runs[q][1] - 1, runs[q + 1][0] + 1, g]); }
+  const env = hfA.z;
+  if (bridges.length) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i; if (kind[k] || !(env[k] > -1e9)) continue; K.archCoords(arch, x0 + i * cell, y0 + j * cell, o); if (o.over > 0 || Math.abs(o.d) > T.bridgeW) continue;
+    for (const [a, b] of bridges) if (o.s >= a && o.s <= b) { kind[k] = 2; break; }
+  }
+  // 5. beside the teeth and bridges: the nearest of them, up to T.near mm away
+  const src = new Int32Array(NC).fill(-1), dd = new Float32Array(NC).fill(Infinity), R = T.near / cell; let front = [];
+  for (let k = 0; k < NC; k++) if (kind[k] === 1 || kind[k] === 2) { src[k] = k; dd[k] = 0; front.push(k); }
+  while (front.length) { const nxt = new Set();
+    for (const k of front) { const i = k % nx, j = (k / nx) | 0, si = src[k] % nx, sj = (src[k] / nx) | 0;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { if (!a && !b) continue; const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const q = jj * nx + ii; if (kind[q] === 1 || kind[q] === 2) continue;
+        const d = Math.hypot(ii - si, jj - sj); if (d < dd[q] - 1e-6 && d <= R) { dd[q] = d; src[q] = src[k]; nxt.add(q); } } }
+    front = [...nxt]; }
+  const levC = (c) => { K.archCoords(arch, x0 + (c % nx) * cell, y0 + ((c / nx) | 0) * cell, o); return K.tmLevel(prof, arch, mp, o.s, o.d); };
+  // 6. the gum beside a tooth that stands above the margin: the margin is raised to just above it at the tooth's edge, sloping back down into the tooth
+  const gz = new Float32Array(NC).fill(-Infinity), lc = new Float32Array(NC).fill(NaN), levOf = (c) => (lc[c] === lc[c] ? lc[c] : (lc[c] = levC(c)));
+  for (let k = 0; k < NC; k++) {
+    if (kind[k] || src[k] < 0 || dd[k] * cell > 1.0 || !(env[k] > -1e9) || kind[src[k]] !== 1) continue;
+    const s = src[k], g = env[k] + T.gap, up = g - levOf(s); if (up <= 0.05) continue;
+    const R2 = Math.min(6, up / T.ramp + 0.5) / cell, si = s % nx, sj = (s / nx) | 0, r = Math.ceil(R2);
+    for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) { const ii = si + a, jj = sj + b; if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue; const q = jj * nx + ii; if (kind[q] !== 1) continue; const d = Math.hypot(a, b); if (d > R2) continue; const v = g - T.ramp * d * cell; if (v > gz[q]) gz[q] = v; }
+  }
+  for (let k = 0; k < NC; k++) {
+    if (kind[k] || src[k] < 0) continue; const s = src[k]; kind[k] = 3;
+    if (kind[s] === 2) { K.archCoords(arch, x0 + (s % nx) * cell, y0 + ((s / nx) | 0) * cell, o); ext[k] = env[s] + T.gap - (T.bridge + T.gap) * tmBridgeW(o.d); } else ext[k] = Math.max(levOf(s), gz[s]);
+  }
+  return { nx, ny, x0, y0, cell, kind, ext, gz, hf: hfA, prof, arch, T, teeth: info.map((q) => ({ ok: q.ok, why: q.why, tip: q.tip, s: q.s, s0: q.s0, s1: q.s1, n: q.n })), runs, bridges };
+};
+/** what the marked-teeth grid says at arch (x, y): 0 far, 1 tooth, 2 bridge, 3 near */
+K.tmKind = (tm, x, y) => { const i = Math.round((x - tm.x0) / tm.cell), j = Math.round((y - tm.y0) / tm.cell); return i < 0 || j < 0 || i >= tm.nx || j >= tm.ny ? 0 : tm.kind[j * tm.nx + i]; };
+/** margin height at arch (x, y) with marked teeth; o holds archCoords(x, y) (s, d) */
+K.tmBorder = (tm, arch, mp, x, y, o) => {
+  const i = Math.round((x - tm.x0) / tm.cell), j = Math.round((y - tm.y0) / tm.cell); if (i < 0 || j < 0 || i >= tm.nx || j >= tm.ny) return Infinity;
+  const k = j * tm.nx + i, kd = tm.kind[k];
+  if (kd === 1) return Math.max(K.tmLevel(tm.prof, arch, mp, o.s, o.d), tm.gz[k]);
+  if (kd === 2) { const e = N.sampleField(tm.hf, x, y); return (e === e ? e : tm.hf.z[k]) + tm.T.gap - (tm.T.bridge + tm.T.gap) * tmBridgeW(o.d); }
+  if (kd === 3) { const e = N.sampleField(tm.hf, x, y); return e === e ? Math.max(tm.ext[k], e + tm.T.gap) : tm.ext[k]; }
+  return Infinity;
 };
 
 // ───────────── marching cubes (tables are generated, not typed in) ─────────────
@@ -714,12 +863,12 @@ K.build = async (inp, p0, stage = async () => {}) => {
   const { mw, sol, hf } = C;
   // 2. cavity (cached per clearance and retention; reaches from the cusp tips to a little past the margin)
   const maxAdj = (a) => (a && a.length ? Math.max(0, ...a.map((v) => -v)) : 0), need = { buccal: p.buccal + maxAdj(p.adjB) + 1.0, lingual: p.lingual + maxAdj(p.adjL) + 1.0 };
-  const kC = JSON.stringify([kM, c, p.retention, hL]);
+  const kC = JSON.stringify([kM, c, p.retention, hL, p.tm ? p.tm.key || 'tm' : '']);
   if (C.kC !== kC || C.cover.buccal < need.buccal || C.cover.lingual < need.lingual) {
     await stage('Fit clearance and block-out…');
     S.free(C.cav); C.cav = null; C.cover = { buccal: need.buccal + 1.5, lingual: need.lingual + 1.5 };
     const P = sol.positions, I = sol.indices, nV = P.length / 3, nF = I.length / 3, above = new Uint8Array(nV), use = new Uint8Array(nF);
-    const cov = { ...C.cover, adjB: [], adjL: [], distal: 7, reach: 15 }, lim = { buccal: C.cover.buccal - 0.5, lingual: C.cover.lingual - 0.5, adjB: [], adjL: [], distal: 6, reach: 14 };
+    const cov = { ...C.cover, adjB: [], adjL: [], distal: 7, reach: 15, tm: p.tm || null, tmWiden: 2.5 }, lim = { buccal: C.cover.buccal - 0.5, lingual: C.cover.lingual - 0.5, adjB: [], adjL: [], distal: 6, reach: 14, tm: p.tm || null, tmWiden: 2.0 };
     for (let v = 0; v < nV; v++) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2]; K.borderAt(inp.arch, cov, e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, o); above[v] = e[2] * x + e[6] * y + e[10] * z > o.z ? 1 : 0; }
     let nUse = 0; for (let f = 0; f < nF; f++) if (above[I[3 * f]] || above[I[3 * f + 1]] || above[I[3 * f + 2]]) { use[f] = 1; nUse++; }
     if (!nUse) throw new Error('No part of the scan lies above the margin.');
@@ -737,7 +886,7 @@ K.build = async (inp, p0, stage = async () => {}) => {
   }
   // 3. body (K.body): shell of the set thickness round the covered envelope, table and opposing arch, margin cut with a rounded edge
   await stage('Shaping the appliance…');
-  const mp = { buccal: p.buccal, lingual: p.lingual, adjB: p.adjB, adjL: p.adjL, distal: p.distal, reach: p.reach }, info = {}; let plane = null, planeZ = null, oppLow = null;
+  const mp = { buccal: p.buccal, lingual: p.lingual, adjB: p.adjB, adjL: p.adjL, distal: p.distal, reach: p.reach, tm: p.tm || null }, info = {}; let plane = null, planeZ = null, oppLow = null;
   if (p.type === 'flat') {                                         // flat biting table: a plane in the arch frame, so it does not tilt with the path of insertion
     const rp = inp.oppA && p.meet ? K.restPlane(inp.oppA, inp.arch) : null; let tMax = -Infinity; for (let k = 0; k < inp.arch.n; k++) if (inp.arch.top[k] > tMax) tMax = inp.arch.top[k];
     plane = rp ? { a: rp.a, b: rp.b, d: rp.d + (p.imprint || 0), contacts: rp.contacts } : { a: 0, b: 0, d: (inp.arch.zMax ?? tMax) + c + p.occlusal }; info.plane = plane; info.met = !!rp;
@@ -749,7 +898,7 @@ K.build = async (inp, p0, stage = async () => {}) => {
     for (let j = 0; j < ony; j++) for (let i = 0; i < onx; i++) { let m = Infinity; for (let b = Math.max(0, j - kq); b <= Math.min(ony - 1, j + kq); b++) { const v = tmp[b * onx + i]; if (v < m) m = v; } low[j * onx + i] = m; }
     oppLow = (x, y) => { const i = Math.floor((x - O.x0) / O.cell), j = Math.floor((y - O.y0) / O.cell); if (i < 0 || j < 0 || i >= onx - 1 || j >= ony - 1) return Infinity; const k = j * onx + i; return Math.min(low[k], low[k + 1], low[k + onx], low[k + onx + 1]); };
   }
-  const crownAt = (x, y, z) => { K.archCoords(inp.arch, e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, o); return Math.abs(o.d) < 7 && o.over < 1 && e[2] * x + e[6] * y + e[10] * z > archTop(inp.arch, o.s) - 3; };
+  const crownAt = (x, y, z) => { const xa = e[0] * x + e[4] * y + e[8] * z, ya = e[1] * x + e[5] * y + e[9] * z; K.archCoords(inp.arch, xa, ya, o); if (p.tm && K.tmKind(p.tm, xa, ya) === 2) return true; return Math.abs(o.d) < 7 && o.over < 1 && e[2] * x + e[6] * y + e[10] * z > archTop(inp.arch, o.s) - 3; };      // with marked teeth, a bridged gap counts as crown, so a flat table runs across it
   const bd = K.body(hf, (x, y) => surfaceZ(mp, x, y), crownAt, planeZ, { h: gb, thickness: p.thickness, minThick: p.minThick, clearance: c, edge: p.edge, oppLow });
   if (!bd.mesh || !bd.mesh.indices.length) throw new Error('Nothing to build — the margin leaves no tooth covered.');
   Object.assign(info, bd.info); let body = manOf(M, bd.mesh, C.ids); lap('body');
@@ -845,10 +994,11 @@ const PRESETS = {
   thin: { kind: 'guard', label: 'Thin tray', note: 'A thin, retainer-style tray that follows the teeth closely. Thinner than some splint resins allow: check the instructions for your resin.', set: { thickness: 0.8, minThick: 0.5, edge: 0.4, buccal: 4, lingual: 4, useOpp: false } },
 };
 const P = { jaw: null, type: 'guard', tiltX: 0, tiltY: 0, retention: 0.1, clearance: 0.1, thickness: 2, minThick: 1, occlusal: 2, edge: 0.6, buccal: 3, lingual: 4, adjB: [], adjL: [],
-  useOpp: false, open: 0, openMode: 'hinge', meet: true, imprint: 0, showOpp: true, guide: false, gCan: true, gFront: true, gCa: 35, gFa: 30, gLen: 4, gTips: null, pos: 'case', map: 'thick', section: false, sectionAt: 25, sectionFlip: false };
+  useOpp: false, open: 0, openMode: 'hinge', meet: true, imprint: 0, showOpp: true, guide: false, gCan: true, gFront: true, gCa: 35, gFa: 30, gLen: 4, gTips: null, pos: 'case', map: 'thick', section: false, sectionAt: 25, sectionFlip: false,
+  teeth: null, teethJaw: null };      // marked teeth: null = not decided yet (found automatically the first time the Margin step is shown), [] = none (the margin follows the whole arch)
 const NCTRL = 13;                                                 // margin control points per side
 const kindOf = () => (PRESETS[P.type] || PRESETS.guard).kind;
-const mkDesign = () => ({ jaw: null, raw: null, mtx: null, scanA: null, arch: null, hfA: null, cache: {}, res: null, meshCase: null, thick: null, contact: null, opp: null, dirty: true, error: '', object: null });
+const mkDesign = () => ({ jaw: null, raw: null, mtx: null, scanA: null, arch: null, arch0: null, archT: null, archKey: '', hfA: null, tm: null, tmKey: '', cache: {}, res: null, meshCase: null, thick: null, contact: null, opp: null, dirty: true, error: '', object: null });
 let D = mkDesign(), scans, rev = 0;
 const KIND_COL = [0x2dd4bf, 0xbfe9e1, 0xf2c14e].map((h) => new THREE.Color(h));          // outer, fit surface, blocked-out wall (also stored in the case file)
 
@@ -878,11 +1028,16 @@ const shell = N.createShell({
       <p class="tip">The colours show how far each part of the scan lies under an overhang, measured sideways, for the path shown by the arrow. The appliance follows the teeth into undercuts up to the depth you allow here; anything deeper is filled in (blocked out) so the appliance can still be seated. 0 mm blocks out every undercut. The filled-in wall is accurate to about 0.08 mm.</p>` },
     { id: 'margin', title: 'Margin', html: `
       <p class="lead">Where the appliance ends, measured down from the cusp tips and incisal edges.</p>
+      <div class="h4">Teeth it covers</div>
+      <div class="btns"><button class="btn" id="mgMark" type="button" title="Click a tooth to mark it; click a dark mark to drop that tooth">Mark teeth: off</button><button class="btn" id="mgFind" type="button" title="Find and mark every tooth on the scan">Find the teeth</button><button class="btn" id="mgClr" type="button" title="Unmark every tooth: the margin then follows the whole arch">Clear</button></div>
+      <div class="row"><label>Teeth marked</label><span class="kv" id="mgN">none</span></div>
+      <p class="tip">With teeth marked, the appliance covers those teeth only: each from its own tip down by the amounts below, and never onto the gum, ridge or palate beside them. Mark teeth adds a tooth where you click; clicking a dark mark drops that tooth. Across a gap between marked teeth the appliance rests on the crest of the ridge, so it stays in one piece. With no teeth marked the margin follows the whole arch.</p>
+      <div class="h4">Depth</div>
       <div class="row"><label>Cheek / lip side</label><input type="range" id="mgB" min="0.5" max="9" step="0.25" value="3"><span class="val"></span></div>
       <div class="row"><label>Tongue / palate side</label><input type="range" id="mgL" min="0.5" max="14" step="0.25" value="4"><span class="val"></span></div>
       <div class="btns"><button class="btn" id="mgReset" type="button" title="Undo every local change to the margin">Reset local changes</button></div>
       <div id="mgInfo"></div>
-      <p class="tip">The pink line is the margin. It follows the height of the cusp tips round the arch, so it rises and falls with the teeth. Drag any dot up or down to move the margin just there; the line stays smooth between dots. For an upper appliance a large “tongue / palate side” value carries it onto the palate, but only as far as the scan itself reaches: the Check step warns when the margin runs past the edge of the scan. The colours show the undercuts for the path you chose, so you can see whether the margin reaches them. The outer edge of the appliance is rounded when it is built.</p>` },
+      <p class="tip">The pink line is the margin. It follows the height of the cusp tips (with teeth marked, of each marked tooth), so it rises and falls with the teeth. Drag any dot up or down to move the margin just there; the line stays smooth between dots. With teeth marked it never leaves them: where the gum stands above the depth you set, the margin stops just short of the gum instead. With no teeth marked, a large “tongue / palate side” value carries an upper appliance onto the palate, but only as far as the scan itself reaches: the Check step warns when the margin runs past the edge of the scan. The colours show the undercuts for the path you chose, so you can see whether the margin reaches them. The outer edge of the appliance is rounded when it is built.</p>` },
     { id: 'shell', title: 'Shell and bite', html: `
       <div class="row"><label>Fit clearance</label><input type="range" id="shC" min="0.05" max="0.3" step="0.01" value="0.1"><span class="val"></span></div>
       <div class="row"><label id="shTlab">Thickness</label><input type="range" id="shT" min="0.5" max="4" step="0.1" value="2"><span class="val"></span></div>
@@ -940,16 +1095,17 @@ const BUILD_STEPS = ['shell', 'check', 'export'];
 
 scans = N.createScanSet({
   shell, viewer, appName: 'Splint Card', loadStep: 'load', orientStep: 'orient',
-  onChange: (what) => { if (what === 'visibility') return; if (what !== 'case') resetDesign(); syncUI(); refreshView(); },
+  onChange: (what, det = {}) => { if (what === 'visibility') return; if ((what === 'loaded' && det.reason === 'file' && det.jaw === P.teethJaw) || (what === 'cleared' && (!det.jaw || det.jaw === P.teethJaw))) { P.teeth = null; P.teethJaw = null; } if (what !== 'case') resetDesign(); syncUI(); refreshView(); },
   extendCase: (c) => {
     c.remove('splint');
     const sc = D.jaw && scans[D.jaw];
     if (sc && D.res && !D.dirty) c.add({ role: 'splint', name: `splint-${D.jaw}`, mesh: N.transformMesh({ ...D.meshCase, colors: kindColours(D.meshCase, D.res.triKind) }, sc.matrix.clone().invert()), matrix: sc.matrix, meta: { jaw: D.jaw, report: D.res.report } });
-    c.data.splint = { version: 1, params: { ...P, adjB: [...P.adjB], adjL: [...P.adjL] }, jaw: D.jaw };
+    c.data.splint = { version: 1, params: { ...P, adjB: [...P.adjB], adjL: [...P.adjL], teeth: Array.isArray(P.teeth) ? P.teeth.map((t) => ({ ...t })) : P.teeth }, jaw: D.jaw };
   },
   readCase: (c) => {
     const d = c.data.splint; resetDesign();
-    if (d && d.params) { Object.assign(P, d.params); P.adjB = [...(d.params.adjB || [])]; P.adjL = [...(d.params.adjL || [])]; }
+    if (d && d.params) { Object.assign(P, d.params); P.adjB = [...(d.params.adjB || [])]; P.adjL = [...(d.params.adjL || [])]; P.teeth = Array.isArray(d.params.teeth) ? d.params.teeth.map((t) => ({ ...t })) : []; P.teethJaw = d.params.teethJaw || null; }      // a case saved before teeth could be marked keeps its whole-arch margin
+    else { P.teeth = null; P.teethJaw = null; }
     paramsToUI();
     const it = c.get('splint');
     if (it && prep() && it.meta && it.meta.jaw === D.jaw) { const mesh = N.transformMesh(it.mesh, it.matrix), triKind = kindsFromColours(mesh); setResult({ mesh: null, triKind, report: it.meta.report || {} }, { positions: mesh.positions, indices: mesh.indices, colors: null }); }
@@ -968,11 +1124,11 @@ function prep() {
   resetDesign(); D.jaw = jaw; D.raw = sc.raw; D.mtx = sc.matrix.clone();
   try {
     const f = scans.framed(jaw); D.scanA = N.transformMesh({ positions: f.positions, indices: f.indices }, K.archMatrix(jaw));
-    D.arch = K.analyseArch(D.scanA); D.hfA = N.rasterHeightfield(D.scanA, { cell: 0.25, pad: 1 });
+    D.arch = D.arch0 = K.analyseArch(D.scanA); D.hfA = N.rasterHeightfield(D.scanA, { cell: 0.25, pad: 1 });
   } catch (e) { console.error(e); D.error = String((e && e.message) || e); D.arch = null; return false; }
   return true;
 }
-const buildParams = () => ({ ramps: rampParams(), type: kindOf(), tiltX: P.tiltX, tiltY: P.tiltY, retention: P.retention, clearance: P.clearance, thickness: P.thickness, minThick: P.minThick, occlusal: P.occlusal, meet: P.meet, imprint: P.imprint, edge: P.edge, buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
+const buildParams = () => ({ tm: tmFor(), ramps: rampParams(), type: kindOf(), tiltX: P.tiltX, tiltY: P.tiltY, retention: P.retention, clearance: P.clearance, thickness: P.thickness, minThick: P.minThick, occlusal: P.occlusal, meet: P.meet, imprint: P.imprint, edge: P.edge, buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
 const otherJaw = () => (D.jaw === 'upper' ? 'lower' : 'upper');
 // ---- guidance: the opposing tips are kept in the opposing scan's own case-frame position (bite not opened), so opening the bite moves them with it ----
 const guideOn = () => P.guide && kindOf() === 'flat' && oppUsed();
@@ -1037,7 +1193,7 @@ function gradeThickness() {
 }
 let building = null, queued = false, stashT = 0;
 async function buildPass() {
-  if (!prep()) return; const myRev = rev, inp = { scanA: D.scanA, arch: D.arch, cache: D.cache, oppA: oppUsed() ? opposing().meshA : null };
+  if (!prep()) return; tmFor(); const myRev = rev, inp = { scanA: D.scanA, arch: D.arch, cache: D.cache, oppA: oppUsed() ? opposing().meshA : null };
   try {
     await shell.busy('Building the appliance…', async () => {
       const res = await K.build(inp, buildParams(), async (t) => { shell.setBusyText(t); await N.sleep(16); });
@@ -1103,11 +1259,12 @@ function showUndercuts() {
   arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, b.center[1], D.jaw === 'upper' ? b.min[2] - 2 : b.max[2] + 2), 14, 0xe879f9, 4, 2.4); arrow.userData.noFit = true; viewer.scene.add(arrow);
   viewer.invalidate();
 }
-const marginParams = () => ({ buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL });
+const marginParams = () => ({ buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL, tm: tmFor() });
 function showMargin(withDots = stepId() === 'margin') {
   for (const l of marginLines) l.dispose(); marginLines = [];
-  if (!prep()) return; const Ai = K.archMatrix(D.jaw).invert(), v = new THREE.Vector3();
-  for (const line of K.marginLines(D.hfA, D.arch, marginParams())) marginLines.push(viewer.line(line.map((q) => v.set(q[0], q[1], q[2]).applyMatrix4(Ai).clone()), { color: 0xe879f9, width: 3, depthTest: false }));
+  if (!prep()) return; tmFor(); const Ai = K.archMatrix(D.jaw).invert(), v = new THREE.Vector3();
+  const mpS = marginParams(), small = (l) => { if (!mpS.tm || l.length < 3 || Math.hypot(l[0][0] - l[l.length - 1][0], l[0][1] - l[l.length - 1][1]) > 0.5) return false; let len = 0; for (let k = 1; k < l.length; k++) len += Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]); return len < 8; };      // with marked teeth, a little ring in a deep fossa is covered over anyway: not drawn
+  for (const line of K.marginLines(D.hfA, D.arch, mpS).filter((l) => !small(l))) marginLines.push(viewer.line(line.map((q) => v.set(q[0], q[1], q[2]).applyMatrix4(Ai).clone()), { color: 0xe879f9, width: 3, depthTest: false }));
   if (withDots) placeDots(); else clearDots();
 }
 // ---- local margin changes: a dot every few millimetres on each side, dragged up or down ----
@@ -1122,11 +1279,12 @@ function dotPosition(side, k) {
   return new THREE.Vector3(x, y, z).applyMatrix4(K.archMatrix(D.jaw).invert());
 }
 function placeDots() {
-  if (!D.arch) return clearDots();
+  tmFor(); if (!D.arch) return clearDots();
   if (dots.length !== 2 * NCTRL) { clearDots(); for (const side of ['B', 'L']) for (let k = 0; k < NCTRL; k++) dots.push({ side, k, sprite: viewer.marker(new THREE.Vector3(), { color: 0xa21caf, px: 24 }) }); }
-  for (const d of dots) d.sprite.position.copy(dotPosition(d.side, d.k)); viewer.invalidate();
+  const tm = tmFor(), on = (k) => { if (!tm) return true; const s = k / (NCTRL - 1) * D.arch.L; return tm.runs.some(([a, b]) => s >= a - 1 && s <= b + 1) || tm.bridges.some(([a, b]) => s >= a && s <= b); };
+  for (const d of dots) { d.sprite.position.copy(dotPosition(d.side, d.k)); d.sprite.visible = on(d.k); } viewer.invalidate();
 }
-const hitDot = (x, y, tol) => { let best = -1, bd = tol; dots.forEach((d, i) => { const q = viewer.toScreen(d.sprite.position); if (!q.visible) return; const e = Math.hypot(q.x - x, q.y - y); if (e < bd) { bd = e; best = i; } }); return best; };
+const hitDot = (x, y, tol) => { let best = -1, bd = tol; dots.forEach((d, i) => { if (!d.sprite.visible) return; const q = viewer.toScreen(d.sprite.position); if (!q.visible) return; const e = Math.hypot(q.x - x, q.y - y); if (e < bd) { bd = e; best = i; } }); return best; };
 const marginTool = {
   cursor: '',
   onDown: (i) => { if (i.button !== 0) return false; dragDot = hitDot(i.x, i.y, i.pointerType === 'mouse' ? 16 : 28); return dragDot >= 0; },
@@ -1137,12 +1295,55 @@ const marginTool = {
     const dir = ray.ray.direction, w0 = p0.clone().sub(ray.ray.origin), b = dir.z, den = 1 - b * b; let zc;
     if (den > 0.04) zc = p0.z + (b * dir.dot(w0) - w0.z) / den;                  // nearest point of the vertical line through the dot to the pointer's ray
     else { const h = i.pick(scans[D.jaw] ? [ucObj && ucObj.visible ? ucObj : scans[D.jaw].object] : []); if (!h) return; zc = h.point.z; }
-    const zA = D.jaw === 'upper' ? -zc : zc, key = d.side === 'B' ? 'adjB' : 'adjL', u = d.k / (NCTRL - 1), base = (() => { const mp = { ...marginParams(), [key]: [] }, o = {}, A = D.arch, ii = Math.min(A.n - 1, Math.round(u * A.L / A.step)), sg = d.side === 'B' ? 1 : -1; K.borderAt(A, mp, A.px[ii] + sg * A.ox[ii] * 3, A.py[ii] + sg * A.oy[ii] * 3, o); return o.z; })();
+    const zA = D.jaw === 'upper' ? -zc : zc, key = d.side === 'B' ? 'adjB' : 'adjL', u = d.k / (NCTRL - 1), base = (() => { const mp = { ...marginParams(), [key]: [] }, o = {}, A = D.arch, ii = Math.min(A.n - 1, Math.round(u * A.L / A.step)), sg = d.side === 'B' ? 1 : -1; if (mp.tm) return K.tmLevel(mp.tm.prof, A, mp, u * A.L, sg * 3); K.borderAt(A, mp, A.px[ii] + sg * A.ox[ii] * 3, A.py[ii] + sg * A.oy[ii] * 3, o); return o.z; })();
     if (P[key].length !== NCTRL) P[key] = new Array(NCTRL).fill(0);
     P[key][d.k] = N.clamp(Math.round((zA - base) * 20) / 20, -6, 6); showMargin(true);
   },
   onUp: () => { if (dragDot >= 0) { dragDot = -1; touch(); syncUI(); } },
 };
+// ---- marked teeth (Margin step): the appliance covers the teeth marked here and nothing else ----
+// P.teeth: [{ p (a tap on the tooth), c (its middle, or null), r (how far from the middle it may reach, mm), fdi }] in the scan's own
+// coordinates (so turning the scans in the orientation step does not move them), for the arch P.teethJaw.
+let tMarks = [], markOn = false;
+const teethFor = () => (Array.isArray(P.teeth) && P.teeth.length && P.teethJaw === D.jaw && scans[D.jaw] ? P.teeth : null);
+function tmFor() {
+  const T = teethFor(); if (!T || !D.arch0) { if (D.arch0) D.arch = D.arch0; return null; }
+  const ka = JSON.stringify([T, D.mtx && D.mtx.elements]);
+  if (D.archKey !== ka) { const M = K.archMatrix(D.jaw).multiply(scans[D.jaw].matrix), v = new THREE.Vector3(), toA = (q) => (q ? v.set(q[0], q[1], q[2]).applyMatrix4(M).toArray() : null); D.archT = K.toothArch(D.scanA, D.arch0, T.map((t) => ({ p: toA(t.p), c: toA(t.c), r: t.r, a: t.a, b: t.b }))); D.archKey = ka; D.tm = null; }
+  if (!D.archT) { D.arch = D.arch0; return null; }
+  D.arch = D.archT;                                                    // the arch the rest follows is the line along the marked teeth
+  const key = ka + JSON.stringify([P.buccal, P.lingual, P.adjB, P.adjL]); if (D.tm && D.tmKey === key) return D.tm;
+  D.tm = K.toothMargin(D.scanA, D.archT, D.hfA, { buccal: P.buccal, lingual: P.lingual, adjB: P.adjB, adjL: P.adjL }); D.tm.key = key; D.tmKey = key; return D.tm;
+}
+function showMarks(on) {
+  for (const m of tMarks) viewer.scene.remove(m); tMarks = [];
+  const T = on && teethFor(); if (!T) { viewer.invalidate(); return; }
+  const tm = tmFor(), M = scans[D.jaw].matrix;
+  T.forEach((t, i) => { const bad = tm && tm.teeth[i] && !tm.teeth[i].ok; tMarks.push(viewer.marker(new THREE.Vector3(...t.p).applyMatrix4(M), { color: bad ? 0xf59e0b : 0x1e40af, px: 13 })); });
+  viewer.invalidate();
+}
+function teethChanged(msg) { D.tm = null; showMargin(); showMarks(stepId() === 'margin'); touch(); syncUI(); refreshView(); if (msg) shell.status(msg); }
+function toggleTooth(pt) {                                            // pt: a point on the scan, case frame
+  const sc = scans[D.jaw], q = pt.clone().applyMatrix4(sc.matrix.clone().invert()), T = teethFor() ? P.teeth.map((t) => ({ ...t })) : [];
+  let bi = -1, bd = 3; T.forEach((t, i) => { const d = Math.hypot(t.p[0] - q.x, t.p[1] - q.y, t.p[2] - q.z); if (d < bd) { bd = d; bi = i; } });
+  if (bi >= 0) T.splice(bi, 1); else T.push({ p: [q.x, q.y, q.z].map((x) => +x.toFixed(3)), c: null, r: K.TM.r });
+  P.teeth = T; P.teethJaw = D.jaw; teethChanged(bi >= 0 ? 'Tooth dropped' : `${T.length} ${T.length === 1 ? 'tooth' : 'teeth'} marked`);
+}
+const markTool = {
+  cursor: 'crosshair',
+  onDown: (i) => { if (i.button !== 0) return false; const sc = scans[D.jaw]; if (!sc) return false; const h = i.pick([ucObj && ucObj.visible ? ucObj : sc.object]); if (!h) return false; toggleTooth(h.point); return true; },
+  onMove: () => {}, onUp: () => {},
+};
+/** find every tooth (N.findTeeth) and mark them all; quiet: the automatic first time (no complaint if nothing is found) */
+async function findTeethMarks(quiet) {
+  const jaw = pickJaw(); if (!jaw || !prep()) return; let res = null;
+  await shell.busy('Finding the teeth…', async () => { await N.sleep(20); try { res = N.findTeeth(scans.framed(jaw), { jaw }); } catch (e) { console.error(e); } });
+  if (!res || !res.teeth.length) { if (P.teeth == null) { P.teeth = []; P.teethJaw = jaw; } syncUI(); if (!quiet) shell.status('No teeth found: use Mark teeth and click each one', true); return; }
+  const Mi = scans[jaw].matrix.clone().invert(), v = new THREE.Vector3(), toRaw = (a) => v.set(a[0], a[1], a[2]).applyMatrix4(Mi).toArray().map((x) => +x.toFixed(3));
+  const half = (w) => +((w > 2 ? w : 7) / 2 + 1).toFixed(2);           // each found tooth reaches 1 mm past its own size: along the arch its width, across it its thickness 4 mm below the tips
+  P.teeth = res.teeth.map((t) => ({ p: toRaw(t.tap), c: toRaw(t.centre), a: half(t.width), b: half(t.bl > 2 ? t.bl : t.width), fdi: t.fdi }));
+  P.teethJaw = jaw; teethChanged(`${P.teeth.length} teeth found and marked (${res.teeth[0].fdi}–${res.teeth[res.teeth.length - 1].fdi}) · check them, then add or drop any with Mark teeth`);
+}
 function showThinnest() {
   if (thinMark) { viewer.scene.remove(thinMark); thinMark = null; } if (thinLabel) { thinLabel.remove(); thinLabel = null; }
   if (!D.thick || !D.thick.worstAt) return; const pos = new THREE.Vector3(...D.thick.worstAt), bad = D.thick.worst < -0.1;
@@ -1167,7 +1368,7 @@ const guideTool = {
 let framed = null;
 function refreshView() {
   const id = stepId(), jaw = pickJaw(), design = ['appliance', 'path', 'margin', 'shell', 'check', 'export'].includes(id);
-  if (design && jaw) prep();
+  if (design && jaw && prep()) tmFor();
   if (design && jaw && D.arch && framed !== D && scans[jaw]) { framed = D; viewer.fit(scans[jaw].object); }      // bring the arch being worked on up to full size, once
   const other = jaw === 'upper' ? 'lower' : 'upper';
   if (ucObj) ucObj.visible = false; if (arrow) arrow.visible = false; for (const l of marginLines) l.visible = false;
@@ -1175,7 +1376,7 @@ function refreshView() {
   let showScan = true, showApp = false; legend.hidden = true;
   if (jaw && D.arch) {
     if (id === 'path') { showUndercuts(); showScan = false; legend.hidden = false; legend.innerHTML = `<div><i style="background:#e9dcc6"></i>no undercut</div><div><i style="background:#2dd4bf"></i>gripped (up to ${P.retention.toFixed(2)} mm)</div><div><i style="background:linear-gradient(90deg,#facc15,#dc2626)"></i>blocked out: deeper → redder</div>`; }
-    if (id === 'margin') { showUndercuts(); if (arrow) arrow.visible = false; showScan = false; legend.hidden = false; legend.innerHTML = `<div><i style="background:#e879f9"></i>margin</div><div><i style="background:#2dd4bf"></i>undercut the appliance may grip</div><div><i style="background:linear-gradient(90deg,#facc15,#dc2626)"></i>undercut that is blocked out</div>`; }
+    if (id === 'margin') { showUndercuts(); if (arrow) arrow.visible = false; showScan = false; legend.hidden = false; legend.innerHTML = `<div><i style="background:#e879f9"></i>margin</div>${teethFor() ? '<div><i style="background:#1e40af"></i>marked tooth</div>' : ''}<div><i style="background:#2dd4bf"></i>undercut the appliance may grip</div><div><i style="background:linear-gradient(90deg,#facc15,#dc2626)"></i>undercut that is blocked out</div>`; }
     if (id === 'margin' || id === 'shell') showMargin();
     if (BUILD_STEPS.includes(id) && D.res && !D.dirty) {
       showApp = true; makeObject();
@@ -1193,7 +1394,8 @@ function refreshView() {
   if (id !== 'margin') clearDots();
   const gOn = id === 'shell' && jaw && D.arch && guideOn() && !!showOpp; showGuideDots(gOn);
   if (gOn && gPick) { if (viewer.tool !== guideTool) viewer.setTool(guideTool); shell.hint('Tap the opposing tooth where the point belongs.'); } else if (viewer.tool === guideTool) { viewer.setTool(null); shell.hint(''); }
-  if (id === 'margin' && jaw && D.arch) { if (viewer.tool !== marginTool) viewer.setTool(marginTool); shell.hint('Drag a dot up or down to move the margin there.'); } else if (viewer.tool === marginTool) { viewer.setTool(null); shell.hint(''); }
+  showMarks(id === 'margin' && jaw && D.arch);
+  if (id === 'margin' && jaw && D.arch) { const t = markOn ? markTool : marginTool; if (viewer.tool !== t) viewer.setTool(t); shell.hint(markOn ? 'Click a tooth to mark it; click a dark mark to drop that tooth.' : 'Drag a dot up or down to move the margin there.'); } else if (viewer.tool === marginTool || viewer.tool === markTool) { viewer.setTool(null); shell.hint(''); }
   showSection();
   viewer.invalidate();
 }
@@ -1274,6 +1476,9 @@ $('apType').addEventListener('click', (e) => { const b = e.target.closest('butto
 $('gdAuto').addEventListener('click', () => { P.gTips = null; if (oppUsed()) guideTips(); touch(true); refreshView(); shell.status('Guidance points found again'); });
 $('paReset').addEventListener('click', () => { P.tiltX = P.tiltY = 0; paramsToUI(); touch(); refreshView(); });
 $('mgReset').addEventListener('click', () => { P.adjB = []; P.adjL = []; showMargin(); touch(); shell.status('Local margin changes removed'); });
+$('mgMark').addEventListener('click', () => { if (!pickJaw() || !prep()) return shell.status('Load a scan first', true); markOn = !markOn; syncUI(); refreshView(); });
+$('mgFind').addEventListener('click', () => findTeethMarks(false));
+$('mgClr').addEventListener('click', () => { P.teeth = []; P.teethJaw = D.jaw; teethChanged('Teeth unmarked: the margin follows the whole arch'); });
 $('ckSec').addEventListener('change', (e) => { P.section = e.target.checked; syncUI(); showSection(); if (P.section) faceSection(); });
 $('ckFlip').addEventListener('click', () => { P.sectionFlip = !P.sectionFlip; showSection(); faceSection(); });
 $('ckFace').addEventListener('click', () => faceSection());
@@ -1334,7 +1539,12 @@ function syncUI() {
   $('shTlab').textContent = flat ? 'Wall thickness' : 'Thickness'; $('shUse').disabled = !avail; $('shUseRow').title = avail ? '' : 'Needs the opposing arch, loaded in the same bite';
   $('shOpp').hidden = !(avail && P.useOpp); $('gdOpts').hidden = !P.guide; for (const e of document.querySelectorAll('.flatOnly')) e.hidden = !flat; $('shOccRow').hidden = !flat || (avail && P.useOpp && P.meet);
   $('ckSecRow').hidden = $('ckFace').hidden = $('ckFlip').hidden = !P.section;
-  $('mgInfo').innerHTML = (P.adjB.some((v) => v) || P.adjL.some((v) => v)) ? '<div class="note">The margin has local changes.</div>' : '';
+  { const T = teethFor(), tm = T ? tmFor() : null, bad = tm ? tm.teeth.filter((q) => !q.ok).length : 0, nb = tm ? tm.bridges.length : 0, fd = T ? T.map((t) => t.fdi).filter(Boolean) : [];
+    $('mgN').textContent = T ? `${T.length}${fd.length === T.length && fd.length ? ` (${fd[0]}–${fd[fd.length - 1]})` : ''}` : 'none';
+    $('mgMark').textContent = `Mark teeth: ${markOn ? 'on' : 'off'}`; $('mgMark').classList.toggle('on', markOn); $('mgClr').disabled = !T;
+    $('mgInfo').innerHTML = (T && !tm ? '<div class="note warn">None of the marks is on a tooth of this scan: press Find the teeth, or Clear.</div>' : '') + (tm ? `<div class="note">The appliance covers the marked teeth only${nb ? `, and the crest of the ridge across ${nb === 1 ? 'the gap' : `${nb} gaps`} between them` : ''}.</div>` : !T && jaw && D.arch ? '<div class="note">No teeth marked: the margin follows the whole arch.</div>' : '')
+      + (bad ? `<div class="note warn">${bad} mark${bad > 1 ? 's are' : ' is'} not on a tooth above the margin (amber): turn on Mark teeth and click ${bad > 1 ? 'them' : 'it'} to drop ${bad > 1 ? 'them' : 'it'}.</div>` : '')
+      + ((P.adjB.some((v) => v) || P.adjL.some((v) => v)) ? '<div class="note">The margin has local changes.</div>' : ''); }
   $('ckMap').querySelector('[data-v=contact]').disabled = !(D.contact && !D.dirty); if (P.map === 'contact' && !D.contact) { P.map = 'thick'; SEG.map('thick'); }
   const sum = summaryHtml(); $('shInfo').innerHTML = sum; $('ckSummary').innerHTML = sum; $('exSummary').innerHTML = sum;
   const built = !!(D.res && !D.dirty && !D.error);
@@ -1351,6 +1561,8 @@ $('exCase').addEventListener('click', () => scans.saveCase());
 // ───────────── step changes ─────────────
 shell.onStepChange(async (i) => {
   const id = shell.steps[i].id;
+  if (id !== 'margin' && markOn) markOn = false;
+  if (id === 'margin' && pickJaw() && prep() && (P.teeth == null || (P.teethJaw && P.teethJaw !== D.jaw))) await findTeethMarks(true);
   if (BUILD_STEPS.includes(id) && pickJaw()) await ensureBuilt(); else { syncUI(); refreshView(); }
   if (id === 'path' && pickJaw() && D.arch) viewer.setView(D.jaw === 'upper' ? 'bottom' : 'top');
 });
@@ -1359,7 +1571,7 @@ for (const b of document.querySelectorAll('[data-so=which] button')) if (!b.titl
 $('srcTip').innerHTML = '<b>Sources</b> (checked November 2026). <b>Fit clearance:</b> Formlabs’ application guide for splints gives an offset of 0.05–0.10 mm for Dental LT Clear V2 in 3Shape and exocad (0.01 to −0.03 mm for Dental LT Comfort). <b>Minimum thickness:</b> Formlabs’ manufacturing guide for Dental LT Comfort (PRNT-0106 rev 03, 2024) asks for at least 2 mm on occlusal surfaces and 1 mm on walls for splints and night guards. Other resins and printers differ, so follow the instructions for the resin you print. <b>Hinge:</b> an equilateral “Bonwill triangle” of 101.6 mm (4 in) between the two condyles and the lower incisal point, tilted 26° to the biting plane (“Balkwill angle”), puts the axis about 79 mm behind and 39 mm above the lower incisal edge. These are the classical averages as quoted by Xu &amp; Bu (2026, preprint), who themselves measured 101.0 mm and 22.7°; sides of 97–99 mm were measured on dry mandibles (J Adv Pharm Technol Res 2022;13(S1):S194–7). People differ, so the hinge opening is only an approximation.';
 paramsToUI(); syncUI(); shell.goto(0);
 S.ready();
-window.APP = { N, S, K, shell, viewer, scans, P, get D() { return D; }, dots: () => dots, faceSection, showSection, opposing, gradeThickness, state: { P, get D() { return D; } }, ensureBuilt, touch, prep, refreshView, exportMesh, paramsToUI, kindColours, kindsFromColours };
+window.APP = { N, S, K, shell, viewer, scans, P, tmFor, findTeethMarks, toggleTooth, marks: () => tMarks, get D() { return D; }, dots: () => dots, faceSection, showSection, opposing, gradeThickness, state: { P, get D() { return D; } }, ensureBuilt, touch, prep, refreshView, exportMesh, paramsToUI, kindColours, kindsFromColours };
 </script>
 </body>
 </html>

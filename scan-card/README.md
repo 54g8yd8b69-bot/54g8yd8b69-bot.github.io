@@ -65,6 +65,17 @@ extractions, closed spaces) and part arches. Shells' Teeth step has "Tap for me 
 which fills each tooth's contact points and marks skipped numbers missing. Tap a number on the scan to correct it. It is a
 first pass to check: crowded incisors, splinted or bridged teeth and closed spaces can come out a tooth out.
 
+**Splint: marked teeth.** The Margin step marks the teeth the appliance covers (the method of Tray Card's tooth-supported trays).
+The first time it opens it finds the teeth itself (`findTeeth`) and marks them all; "Mark teeth" adds a tooth where you click and
+drops one when you click its mark; "Clear" goes back to the whole-arch margin. With teeth marked, the margin is the set depth
+below each marked tooth's own tip (the tips joined along a line through the teeth, which the rest of the design then follows),
+and the appliance covers only what is joined to each tooth above that depth and within its own size (plus 1 mm; 7 mm for a
+tooth tapped by hand). A flood that goes down a crown under its bulge stops where the surface turns out again (the gum). Beside
+the teeth nothing is covered: where the gum stands above the depth, the margin rises to 0.3 mm above it at the tooth's edge. A
+gap of 3–30 mm between marked teeth is bridged on the crest of the ridge (1 mm deep), so the appliance stays in one piece; a
+flat table runs across it. The marks are kept in the case file (`data.splint.params.teeth`, in the scan's own coordinates); a
+case saved before this keeps its whole-arch margin.
+
 **Articulator.** An average-value articulator: the arches mounted in their bite on a Bonwill triangle (101.6 mm) and
 Balkwill angle (26°, the values Splint uses), sagittal condylar guidance, Bennett angle and immediate side shift (left and
 right separately if wanted). Forward, side and back movements are guided by the teeth: at each step the condyles run down
