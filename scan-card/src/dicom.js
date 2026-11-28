@@ -1008,7 +1008,8 @@ function twoLevels(v) {
  * trackTooth(G, seed, P) — the tooth a point lies on, followed through the slices of a grid.
  *   G     { I (Int16Array), n0, n1, n2, h (mm in a slice), hz (mm between slices), allow (Uint8Array: 1 where the tooth may be, 0 where it was
  *         cut away, 2 outside the region it must lie in) }: slices run across the tooth
- *   seed  [i, j, k] on the crown        P  { T (the level between soft tissue and tooth), more:[[i, j, k]…] (points that are tooth too) }
+ *   seed  [i, j, k] on the crown        P  { T (the level between soft tissue and tooth), more:[[i, j, k]…] (points that are tooth too),
+ *         smoothRoots (false: the roots are left as followed, not redrawn as smooth curves) }
  * → { mask (Uint8Array, 1 = tooth; the pulp is left out), kEq (the slice the outline started in), cEq [i, j], D0 (the dentine's
  *     level), E0 (the enamel's, or null), Dcap, C (dentine against soft tissue), dark }  or { error }
  */
@@ -1119,7 +1120,7 @@ function trackTooth(G, seed, P) {
           if (vox.length < 6) { for (const p of vox) if (!hull[p]) hull[p] = mid; return; }   // the last of a root's tip: it may only shrink
           // rays from its middle: how far the piece reaches (rp: the outer face of its outermost voxel), how far it reached in the
           // last three slices (rm: what it may win back), and the fall in grey near there
-          const rp = new Float32Array(NRAY), rm = new Float32Array(NRAY), qp = new Int16Array(NRAY), rh = new Float32Array(NRAY), rf = new Float32Array(NRAY), seen = new Uint8Array(NRAY), ext = Math.hypot(i1 - i0 + 1, j1 - j0 + 1) + 2; let sup = 0, strong = 0, blind = 0, brt = 0;
+          const rp = new Float32Array(NRAY), rm = new Float32Array(NRAY), qp = new Int16Array(NRAY), rh = new Float32Array(NRAY), rf = new Float32Array(NRAY), seen = new Uint8Array(NRAY), faceR = new Uint8Array(NRAY), ext = Math.hypot(i1 - i0 + 1, j1 - j0 + 1) + 2; let sup = 0, strong = 0, blind = 0, brt = 0;
           for (let t = 0; t < NRAY; t++) { let last = 0; for (let tt = 0; tt <= ext; tt += 0.5) { const ii = Math.round(cx + tt * RCOS[t]), jj = Math.round(cy + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; if (lab[ii + n0 * jj] === id) last = tt; }
             rp[t] = Math.max(0.5, last); qp[t] = Math.max(2, Math.round(2 * rp[t])); let far = rp[t]; for (let tt = rp[t] + 0.5; tt <= rp[t] + 3; tt += 0.5) { const ii = Math.round(cx + tt * RCOS[t]), jj = Math.round(cy + tt * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; const q = ii + n0 * jj; if (lab[q] === id) continue; if (lab[q] || age[q] > 2) break; far = tt; } rm[t] = far; }
           // the piece's history: its size when smallest, and whether it may still widen. A piece that has split off (a root, a cusp),
@@ -1142,7 +1143,7 @@ function trackTooth(G, seed, P) {
           let t0 = 0, bu = Infinity; for (let t = 0; t < NRAY; t++) for (let s2 = 0; s2 < NS; s2++) if (U[t * NS + s2] < bu) { bu = U[t * NS + s2]; t0 = t; }
           const path = closedChain(U, NRAY, NS, 3, 0.05, t0);
           for (let t = 0; t < NRAY; t++) { prof.set(profs.subarray(t * 64, t * 64 + 64)); const q = qp[t] + path[t] - OI, e = ev(t, q, tmp);
-            if (e >= 0.5) { sup++; seen[t] = 1; const inn = tmp[0], mn = tmp[1], mq = tmp[2]; if (inn - mn >= 0.6 * C) strong++; let aft = mn; for (let a = mq; a <= Math.min(63, mq + 6); a++) if (prof[a] > aft) aft = prof[a]; const rho = N_clamp((aft - mn) / Math.max(1, inn - mn), 0, 1), L = inn - (0.5 + 0.43 * rho) * (inn - mn); let qe = q; for (let a = Math.max(1, q - 4); a <= mq; a++) if (prof[a] <= L) { qe = a - (L - prof[a]) / Math.max(1e-6, prof[a - 1] - prof[a]); break; } rf[t] = Math.max(0.5, qe / 2); }
+            if (e >= 0.5) { sup++; seen[t] = 1; const inn = tmp[0], mn = tmp[1], mq = tmp[2]; if (inn - mn >= 0.6 * C) { strong++; faceR[t] = 1; } let aft = mn; for (let a = mq; a <= Math.min(63, mq + 6); a++) if (prof[a] > aft) aft = prof[a]; const rho = N_clamp((aft - mn) / Math.max(1, inn - mn), 0, 1), L = inn - (0.5 + 0.43 * rho) * (inn - mn); let qe = q; for (let a = Math.max(1, q - 4); a <= mq; a++) if (prof[a] <= L) { qe = a - (L - prof[a]) / Math.max(1e-6, prof[a - 1] - prof[a]); break; } rf[t] = Math.max(0.5, qe / 2); }
             else { rf[t] = rp[t]; let kn = true; for (let a = qp[t] + 1; a <= Math.min(63, qp[t] + 6); a++) if (prof[a] !== prof[a]) { kn = false; break; } if (kn) blind++; }
             { let sm = 0, c = 0; for (let a = qp[t] + 4; a <= Math.min(63, qp[t] + 8); a++) { if (prof[a] !== prof[a]) { c = 0; break; } sm += prof[a]; c++; } if (c && sm / c >= capIn[t] - 0.2 * C) brt++; } }   // (2 to 4 voxels beyond: as bright as the tooth itself)
           m.mg = brt >= 0.1 * NRAY ? (m0.mg || 0) + 1 : Math.max(0, (m0.mg || 0) - 2);   // (slices running in which it lies against something as bright as itself along a tenth of its outline or more)
@@ -1172,6 +1173,7 @@ function trackTooth(G, seed, P) {
               if (back && Aprev > 0.9 * m.trail[L - 1 - back].A) { for (const g of m.trail.slice(L - (back >> 1))) for (const p of g.vox) mask[g.base + p] = 0; return; } } }   // (the root itself narrowed inside what was followed, so its end is put midway)
           const R = Math.ceil(Math.max(...rh)) + 2, ic = Math.round(cx), jc = Math.round(cy);
           for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - cx, dy = jj - cy, p = ii + n0 * jj; if (!hull[p] && Math.hypot(dx, dy) <= radiusAt(rh, dx, dy)) hull[p] = mid; }
+
           // an outline seen nearly all round, of a small piece: inside it, anything brighter than midway between soft tissue and the
           // threshold is the tooth (the wall of a root near its tip, too thin to read as bright as dentine); and see below
           if (m.armed && sup >= 0.8 * NRAY) { polys.push({ k, dir, cx, cy, r: rf.slice() });
@@ -1223,6 +1225,180 @@ function trackTooth(G, seed, P) {
     for (let b = -R; b <= R && !any; b++) for (let a = -R; a <= R && !any; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - g.cx, dy = jj - g.cy; if (mask[base + ii + n0 * jj] && Math.hypot(dx, dy) <= radiusAt(g.r, dx, dy)) any = true; }
     if (!any) continue;   // (the piece was given up after all: bone it ran on into)
     for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - g.cx, dy = jj - g.cy, p = ii + n0 * jj; if (allow[base + p] === 1 && Math.hypot(dx, dy) <= radiusAt(g.r, dx, dy) - 0.25) mask[base + p] = 1; } }
+  // ── roots in the bone, redrawn. Where bone as bright as the root lies against it, a voxel's grey cannot say which of the two
+  //    it is, and an outline kept voxel by voxel takes in wedges of bone and comes out with bumps and spikes on it. A root is
+  //    a smooth thing that changes little from slice to slice: so from the level at which the tooth first stands in bone, each
+  //    piece is drawn again as a smooth closed curve — a few harmonics round its middle — and followed down the root slice by
+  //    slice. In each slice the root's edge is looked for afresh in the picture, near the curve of the slice before; the curve
+  //    is fitted to the edges of that slice and of those just above and below. Where no edge shows, the curve keeps the root's
+  //    shape. Below that level the tooth is what the curves hold. ──
+  if (P.smoothRoots !== false) {
+    const inPoly = (g, ii, jj, pad) => { const dx = ii - g.cx, dy = jj - g.cy; return Math.hypot(dx, dy) <= radiusAt(g.r, dx, dy) + pad; };
+    // what the tooth holds in each slice, as it stands: its separate pieces (hollows in them filled — a root's canal, the ring
+    // of a wide one), each with its middle, its outline along rays from there, and how much of that outline falls away to
+    // soft tissue or air. (The pieces as they were followed will not do: a ring is followed as several lengths of wall.)
+    const chains = [], S1 = new Uint8Array(sl), S3 = new Uint8Array(sl); let lbPrev = null, prev = [];
+    const blobs = (k, dir) => { const base = k * sl, lb = new Int32Array(sl), list = [], st2 = []; for (let p = 0; p < sl; p++) S1[p] = mask[base + p]; solid2(S1, n0, n1, S3);
+      for (let p0 = 0; p0 < sl; p0++) { if (!S3[p0] || lb[p0]) continue; const id = list.length + 1, vox = []; let sx = 0, sy = 0; lb[p0] = id; st2.push(p0);
+        while (st2.length) { const p = st2.pop(), i = p % n0, j = (p / n0) | 0; vox.push(p); sx += i; sy += j; if (i > 0 && S3[p - 1] && !lb[p - 1]) { lb[p - 1] = id; st2.push(p - 1); } if (i < n0 - 1 && S3[p + 1] && !lb[p + 1]) { lb[p + 1] = id; st2.push(p + 1); } if (j > 0 && S3[p - n0] && !lb[p - n0]) { lb[p - n0] = id; st2.push(p - n0); } if (j < n1 - 1 && S3[p + n0] && !lb[p + n0]) { lb[p + n0] = id; st2.push(p + n0); } }
+        list.push({ k, dir, id, cx: sx / vox.length, cy: sy / vox.length, n: vox.length, vox }); }
+      for (const g of list) { if (g.n < 6) continue; const r = new Float32Array(NRAY), reach = 2 * Math.sqrt(g.n) + 4; let strong = 0;
+        for (let t = 0; t < NRAY; t++) { let out = 0.5; for (let q = 0.5; q <= reach; q += 0.5) { const ii = Math.round(g.cx + q * RCOS[t]), jj = Math.round(g.cy + q * RSIN[t]); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) break; if (lb[ii + n0 * jj] === g.id) out = q + 0.5; } r[t] = out;
+          const at = (q) => { const ii = Math.round(g.cx + q * RCOS[t]), jj = Math.round(g.cy + q * RSIN[t]); return ii < 0 || jj < 0 || ii >= n0 || jj >= n1 ? NaN : I[base + ii + n0 * jj]; }, a1 = at(Math.max(0, out - 1.5)), a2 = at(Math.max(0, out - 2.5)), b1 = at(out + 1), b2 = at(out + 2), b3 = at(out + 3);
+          if (Math.max(a1, a2) - Math.min(b1, b2, b3) >= 0.6 * C) strong++; }
+        g.r = r; g.strong = strong; g.inBone = strong < 0.5 * NRAY; }
+      return { lb, list: list.filter((g) => g.r) }; };
+    // each piece joined to the one it came from in the slice before (the one it lies over most): a root from the furcation to
+    // its tip. A piece that alone goes on from another is the same line; two or more that go on from one are parts it has
+    // parted into, each a line of its own
+    for (const dir of occ ? [-occ] : [1, -1]) { lbPrev = null; prev = []; let gap = 0; for (let k = kEq + dir; k >= 0 && k < n2; k += dir) { const { lb, list } = blobs(k, dir); if (!list.length) { if (++gap > 2) break; continue; } gap = 0;
+        for (const g of list) { g.par = null; if (lbPrev) { const cnt = new Map(); for (const p of g.vox) { const id = lbPrev[p]; if (id) cnt.set(id, (cnt.get(id) || 0) + 1); } let bo = 0; for (const [id, c] of cnt) if (c > bo) { const q = prev.find((x) => x.id === id); if (q) { bo = c; g.par = q; } } } }
+        for (const q of prev) { const kids = list.filter((g) => g.par === q); if (kids.length === 1) { kids[0].chain = q.chain; q.chain.push(kids[0]); } }
+        for (const g of list) if (!g.chain) { g.chain = [g]; g.chain.parent = g.par; chains.push(g.chain); }
+        lbPrev = lb; prev = list; } }
+    // from the level at which a piece of some size first stands in bone for 1½ mm running (not for a slice or two: where two
+    // roots part, each faces the other for a moment; and not a scrap), every piece on the root side is redrawn
+    let Aeq = 0; for (let p = 0; p < sl; p++) if (mask[kEq * sl + p]) Aeq++;
+    const nmm = Math.max(2, Math.round(1 / hz)), nrun = Math.max(3, Math.round(1.5 / hz)), rootSide = (ch) => !occ || ch[0].dir === -occ, level = { 1: Infinity, [-1]: Infinity };
+    for (const ch of chains) { ch.a0 = -1; ch.kids = []; if (!rootSide(ch)) continue; const d = ch[0].dir; let run = ch.parent && ch.parent.run ? ch.parent.run : 0;   // (a run goes on from a piece into those it parts into)
+      for (let a = 0; a < ch.length; a++) { const g = ch[a]; run = g.inBone && g.n >= 0.12 * Aeq ? run + 1 : 0; g.run = run; if (run >= nrun) level[d] = Math.min(level[d], Math.max(1, Math.abs(g.k - kEq) - (run - 1))); } }
+    for (const ch of chains) { if (!rootSide(ch)) continue; ch.a0 = ch.findIndex((g) => Math.abs(g.k - kEq) >= level[ch[0].dir]); if (ch.parent) ch.parent.chain.kids.push(ch); }
+    const solveN = (N, b, n) => { const A = Float64Array.from(N), x = Float64Array.from(b); for (let c = 0; c < n; c++) { let pv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r * n + c]) > Math.abs(A[pv * n + c])) pv = r; if (Math.abs(A[pv * n + c]) < 1e-12) return null; if (pv !== c) { for (let q = 0; q < n; q++) { const t = A[c * n + q]; A[c * n + q] = A[pv * n + q]; A[pv * n + q] = t; } const t = x[c]; x[c] = x[pv]; x[pv] = t; }
+        for (let r = c + 1; r < n; r++) { const f = A[r * n + c] / A[c * n + c]; if (!f) continue; for (let q = c; q < n; q++) A[r * n + q] -= f * A[c * n + q]; x[r] -= f * x[c]; } }
+      for (let c = n - 1; c >= 0; c--) { let v = x[c]; for (let q = c + 1; q < n; q++) v -= A[c * n + q] * x[q]; x[c] = v / A[c * n + c]; } return x; };
+    // the grey at a point of a slice (between voxels; evened out with the slices next to it, where they lie close)
+    const zsm = hz <= 0.35, samp = (k, x, y) => { if (!(x >= 0 && y >= 0 && x <= n0 - 1 && y <= n1 - 1)) return NaN; const i = Math.min(n0 - 2, x | 0), j = Math.min(n1 - 2, y | 0), fx = x - i, fy = y - j; let v = 0, w = 0;
+      for (let d = zsm ? -1 : 0; d <= (zsm ? 1 : 0); d++) { const kk = k + d; if (kk < 0 || kk >= n2) continue; const q = kk * sl + i + n0 * j, wt = d ? 1 : 2; v += wt * ((I[q] * (1 - fx) + I[q + 1] * fx) * (1 - fy) + (I[q + n0] * (1 - fx) + I[q + n0 + 1] * fx) * fy); w += wt; } return v / w; };
+    // the root's edge looked for afresh in the picture, along rays from a middle, near where a curve says it should be (no
+    // further in or out of it than given): a fall from tooth to something darker, where it is steepest — the nearest such to
+    // the curve, a stronger one a little further off counting for more. Where there is none: is it dark on either side of the
+    // curve (then the root is not there, and its edge is as far in as it is bright), or bright on and on beyond it (open)?
+    const gmin = 0.1 * C, gfull = 0.3 * C, stepZ = hz / h, inB = Math.max(1, 1.5 * stepZ), outB = Math.max(0.15, 0.2 * stepZ), G = new Float32Array(64);
+    const measure = (k, cx, cy, Rp, inw, outw, Tb) => { const r = new Float32Array(NRAY).fill(-1), w = new Float32Array(NRAY), kind = new Uint8Array(NRAY), lev = [], base = k * sl;
+      for (let t = 0; t < NRAY; t++) { const c = RCOS[t], s = RSIN[t], v = (q) => samp(k, cx + q * c, cy + q * s), wall = v(Math.max(0.4 * Rp[t], Rp[t] - mm(0.6))); if (wall === wall) lev.push(wall);
+        let n = 0, blind = false; const q0 = Math.max(1, Rp[t] - inw) - 0.25; for (let q = q0; q <= Rp[t] + outw + 0.25 + 1e-6 && n < 64; q += 0.25, n++) { const ii = Math.round(cx + q * c), jj = Math.round(cy + q * s); if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1 || allow[base + ii + n0 * jj] === 0) { blind = true; break; } const a = v(q - 1), b = v(q + 1); if (!(a === a && b === b)) { blind = true; break; } G[n] = a - b; }
+        let best = -1, bs = 0, bg = 0; for (let i = 1; i < n - 1; i++) { const g = G[i]; if (g < gmin || g < G[i - 1] || g < G[i + 1]) continue; const den = G[i - 1] - 2 * g + G[i + 1], q = q0 + 0.25 * (i + (den < 0 ? 0.5 * (G[i - 1] - G[i + 1]) / den : 0)); if (Math.max(v(Math.max(0, q - 2)), v(Math.max(0, q - 1.25))) < Tb) continue; const sc = Math.min(g, gfull) * (1 - 0.35 * Math.min(2, Math.abs(q - Rp[t]))); if (sc > bs) { bs = sc; bg = g; best = q; } }
+        // (the fall found, the edge itself is put where the grey passes the threshold on it — as everywhere else on the tooth.
+        //  Blurred together with the dark ligament the fall is steepest a little inside the root's face. Where it does not come
+        //  down to the threshold — bone as bright beyond: at the darkest point of the thin line between, if one shows)
+        if (best >= 0) { const v0 = v(best); let q = best, hit = false; if (v0 >= T) { while (q < best + 1.5 && v(q + 0.125) >= T) q += 0.125; if (q < best + 1.5) { const a = v(q), b = v(q + 0.125); q += 0.125 * (a - T) / Math.max(1e-6, a - b); hit = true; } } else { while (q > best - 1 && v(q - 0.125) < T) q -= 0.125; if (q > best - 1) { const a = v(q - 0.125), b = v(q); q -= 0.125 * (T - b) / Math.max(1e-6, a - b); hit = true; } }
+          if (hit) best = q; else if (v0 >= T) { let qm = best, vm = v0; for (let x = best + 0.25; x <= best + 2.5; x += 0.25) { const y = v(x); if (!(y === y)) break; if (y < vm) { vm = y; qm = x; } } let back = vm; for (let x = qm + 0.25; x <= qm + 2; x += 0.25) { const y = v(x); if (y > back) back = y; } if (qm > best && back - vm >= 0.4 * (v(best - 1) - vm)) best = qm - 0.25; }
+          r[t] = best; w[t] = Math.max(0.3, Math.min(1, bg / gfull)); kind[t] = 1; continue; } if (blind) continue;
+        const qi = Rp[t] - 1, vin = v(Math.max(0.5, qi));
+        if (qi >= 0.5 && vin < Tb && v(Rp[t] + 1) < Tb && v(Rp[t] + 2) < Tb) { let q = qi; const lim = Math.max(0.5, Rp[t] - 2 * inw - 1); while (q > lim && !(v(q) >= Tb)) q -= 0.25; r[t] = Math.max(0.5, q + 0.5); w[t] = 0.5; kind[t] = 2; }
+        else if (vin >= Tb && v(Rp[t] + mm(0.75)) >= Tb && v(Rp[t] + mm(1.5)) >= Tb) kind[t] = 3; }
+      let open = 0, opp = 0; const sp = Math.round(NRAY / 12); for (let t = 0; t < NRAY; t++) { if (kind[t] !== 3) continue; open++; for (let d = -sp; d <= sp; d++) if (kind[(t + NRAY / 2 + d + NRAY) % NRAY] === 3) { opp++; break; } }
+      lev.sort((a, b) => a - b); return { r, w, kind, open, opp, inside: lev.length ? lev[lev.length >> 1] : -Infinity }; };
+    const inCurve = (c, x, y, pad) => { const dx = x - c.cx, dy = y - c.cy; return Math.hypot(dx, dy) <= radiusAt(c.R, dx, dy) + pad; };
+    const middle = (c) => { let A = 0, sx = 0, sy = 0; for (let t = 0; t < NRAY; t++) { const u = (t + 1) % NRAY, x1 = c.R[t] * RCOS[t], y1 = c.R[t] * RSIN[t], x2 = c.R[u] * RCOS[u], y2 = c.R[u] * RSIN[u], a = x1 * y2 - x2 * y1; A += a; sx += a * (x1 + x2); sy += a * (y1 + y2); } return A > 1e-9 ? [c.cx + sx / (3 * A), c.cy + sy / (3 * A)] : [c.cx, c.cy]; };
+    const about = (c, nx, ny) => { if (!inCurve(c, nx, ny, 0)) return null; const R = new Float32Array(NRAY); for (let t = 0; t < NRAY; t++) { let lo = 0, hi = 0.5; while (hi < 400 && inCurve(c, nx + hi * RCOS[t], ny + hi * RSIN[t], 0)) { lo = hi; hi += 0.5; } for (let i = 0; i < 5; i++) { const m = (lo + hi) / 2; if (inCurve(c, nx + m * RCOS[t], ny + m * RSIN[t], 0)) lo = m; else hi = m; } R[t] = Math.max(0.5, lo); } return { cx: nx, cy: ny, R }; };
+    // (how much of the smallest outline without hollows that goes round an outline the outline itself fills: 1 for an oval, less for one with a waist)
+    const solidity = (R) => { const P = Array.from(R, (r, t) => [r * RCOS[t], r * RSIN[t]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), H = []; for (const p of P) { while (H.length >= 2 && cr(H[H.length - 2], H[H.length - 1], p) <= 0) H.pop(); H.push(p); } const lo = H.length + 1; for (let i = P.length - 2; i >= 0; i--) { const p = P[i]; while (H.length >= lo && cr(H[H.length - 2], H[H.length - 1], p) <= 0) H.pop(); H.push(p); }
+      let A = 0; for (let i = 0; i < H.length - 1; i++) A += H[i][0] * H[i + 1][1] - H[i + 1][0] * H[i][1]; return polyArea(R) / Math.max(1e-9, Math.abs(A) / 2); };
+    const clipped = (g, pc, pad) => inCurve(pc, g.cx, g.cy, 0) ? Float32Array.from(g.r, (r, t) => { let q = r; while (q > 0.5 && !inCurve(pc, g.cx + q * RCOS[t], g.cy + q * RSIN[t], pad)) q -= 0.25; return q; }) : null;
+    const fits = [], PHI = Float64Array.from({ length: NRAY }, (_, t) => 2 * Math.PI * t / NRAY);
+    // follow(ch) — one line of pieces, redrawn from the level on; follow([], { k, dir, cur }) — a line that starts from a curve
+    // alone (one of two roots a curve has come to hold: see below)
+    const follow = (ch, start) => { const L = ch.length, a0 = start ? 0 : ch.a0, dir = start ? start.dir : ch[0].dir; if (a0 < 0) return;
+      // (a piece that begins below the level is a root that parted from the piece before it — not one that came from nothing or
+      //  from a piece given up; nor one that lies, for the most part, outside the curve of a root that itself goes on: that is
+      //  bone the root ran on into)
+      const par = start ? null : ch.parent, kill = (from) => { for (let a = from; a < L; a++) ch[a].dead = true; }; if (!start && (ch.dropped || (par && par.dead) || (!par && a0 === 0 && Math.abs(ch[0].k - kEq) > 1))) { kill(0); return; }
+      if (!start && a0 === 0 && par && par.fit && !par.raw && par.chain[par.chain.length - 1] !== par) { const R = clipped(ch[0], { cx: par.sx, cy: par.sy, R: par.fit }, 0.5); if (!R || polyArea(R) < 0.6 * polyArea(ch[0].r)) { kill(0); return; } }
+      const med = (start ? polyArea(start.cur.R) : ch.map((g) => g.n).sort((a, b) => a - b)[L >> 1]) * h * h, r0s = Array.from(start ? start.cur.R : ch[a0].r).sort((a, b) => a - b), long = r0s[Math.floor(0.9 * NRAY)] / Math.max(0.5, r0s[Math.floor(0.1 * NRAY)]);   // (a long outline — a ribbon of a root — takes more waves to draw)
+      const M = (med >= 40 ? 6 : med >= 15 ? 5 : med >= 8 ? 4 : med >= 3 ? 3 : 2) + (med >= 8 && long > 2 ? 2 : med >= 8 && long > 1.5 ? 1 : 0), Pn = 2 * M + 1, B = new Float64Array(Pn), basis = (phi) => { B[0] = 1; for (let m = 1; m <= M; m++) { B[2 * m - 1] = Math.cos(m * phi); B[2 * m] = Math.sin(m * phi); } };
+      const curveOf = (coef) => { const R = new Float32Array(NRAY); for (let t = 0; t < NRAY; t++) { basis(PHI[t]); let rr = 0; for (let i = 0; i < Pn; i++) rr += coef[i] * B[i]; R[t] = Math.max(0.5, rr); } return R; };
+      const add = (s, phi, rho, w) => { basis(phi); for (let i = 0; i < Pn; i++) { s.b[i] += w * B[i] * rho; for (let j = 0; j < Pn; j++) s.N[i * Pn + j] += w * B[i] * B[j]; } }, blank = (k, cx, cy) => ({ k, cx, cy, N: new Float64Array(Pn * Pn), b: new Float64Array(Pn), sup: 0 });
+      // (where no edge shows, the curve as it was, lightly; and a ray counts by the length of outline it stands for — the longer the further out)
+      const edges = (s, ms, Rk, rho) => { let mr = 0; for (let t = 0; t < NRAY; t++) mr += Rk[t] / NRAY; for (let t = 0; t < NRAY; t++) { const real = ms.kind[t] === 1 || ms.kind[t] === 2; if (ms.kind[t] === 1) s.sup++; add(s, PHI[t], real ? ms.r[t] : Rk[t] * rho, (real ? ms.w[t] : 0.2) * Math.max(0.5, Math.min(3, Rk[t] / mr))); } return s; };
+      // one slice's edges, with those of the slices next to it (the nearer the more): the smooth curve that fits them, with no
+      // more wave in it than they call for
+      const solve = (N, b) => { for (let m = 1; m <= M; m++) { N[(2 * m - 1) * Pn + 2 * m - 1] += 0.5 * m * m; N[2 * m * Pn + 2 * m] += 0.5 * m * m; } N[0] += 1e-6; const c = solveN(N, b, Pn); return c ? curveOf(c) : null; };
+      const st = [], sg = Math.max(1, 0.6 / hz), win = Math.ceil(2.5 * sg), pooled = (a, lo, hi) => { const N = new Float64Array(Pn * Pn), b = new Float64Array(Pn); let any = false; for (let c = Math.max(0, lo); c <= hi; c++) { const q = st[c]; if (!q) continue; any = true; const gw = Math.exp(-0.5 * ((c - a) / sg) ** 2); for (let i = 0; i < Pn * Pn; i++) N[i] += gw * q.N[i]; for (let i = 0; i < Pn; i++) b[i] += gw * q.b[i]; } return any ? solve(N, b) : null; };
+      // above the level the pieces stand as they were drawn: their edges, round a middle evened out along the tooth
+      for (let a = Math.max(0, a0 - win - 1); a < a0; a++) { const g = ch[a]; let sx = 0, sy = 0, c = 0; for (let q = Math.max(0, a - 2); q <= Math.min(a0 - 1, a + 2); q++) { sx += ch[q].cx; sy += ch[q].cy; c++; } const s = blank(g.k, sx / c, sy / c);
+        for (let t = 0; t < NRAY; t++) { const x = g.cx + g.r[t] * RCOS[t] - s.cx, y = g.cy + g.r[t] * RSIN[t] - s.cy; add(s, Math.atan2(y, x), Math.hypot(x, y), 1); } st[a] = s; }
+      const wallOf = (k, c) => { const lv = []; for (let t = 0; t < NRAY; t++) { const q = Math.max(0.4 * c.R[t], c.R[t] - mm(0.6)), v = samp(k, c.cx + q * RCOS[t], c.cy + q * RSIN[t]); if (v === v) lv.push(v); } lv.sort((x, y) => x - y); return lv.length ? lv[lv.length >> 1] : D0; };
+      // the curve to start from: that of the slices just above — or, for a piece that begins below the level, its own first
+      // outline, smoothed. Either is then settled onto the edges of the first slice (in or out: it was drawn voxel by voxel;
+      // and one half of a curve that held two roots may have a way to go)
+      const kAt = (a) => start ? start.k + dir * a : a < L ? ch[a].k : ch[L - 1].k + dir * (a - L + 1); let cur = start ? start.cur : null; if (a0 > 0) { const R = pooled(a0 - 1, a0 - 1 - win, a0 - 1); if (R) cur = { cx: st[a0 - 1].cx, cy: st[a0 - 1].cy, R }; }
+      if (!cur) { const g = ch[a0], s = blank(g.k, g.cx, g.cy); for (let t = 0; t < NRAY; t++) add(s, PHI[t], g.r[t], 1); const R = solve(s.N, s.b); cur = { cx: g.cx, cy: g.cy, R: R ? R.map((r, t) => Math.min(r, g.r[t] + 0.5)) : Float32Array.from(g.r) }; }
+      let Dref = wallOf(kAt(a0), cur), Tb = T + 0.5 * Math.max(0, Dref - T);   // (as bright as tooth: half-way from the threshold to the root's own dentine, as it has been over the last millimetre)
+      // (a piece such a curve cannot be made to fit is left as it was drawn, with only single-voxel spikes and nicks smoothed away)
+      const asDrawn = () => { for (let a = a0; a < L; a++) { const g = ch[a]; fits.push({ k: g.k, sx: g.cx, sy: g.cy, fit: g.r, vox: g.vox, raw: true }); Object.assign(g, { sx: g.cx, sy: g.cy, fit: g.r, raw: true }); } ch.raw = true; };
+      let was = new Uint8Array(NRAY);
+      { const R0 = cur.R, more = start ? 4 : 1.5; for (let it = 0; it < (start ? 4 : 2); it++) { const ms = measure(kAt(a0), cur.cx, cur.cy, cur.R, 1.5, 1.5, Tb), s = edges(blank(kAt(a0), cur.cx, cur.cy), ms, cur.R, 1), R = solve(s.N, s.b); if (!R) break; was = Uint8Array.from(ms.kind, (x, t) => x === 1 && Math.abs(ms.r[t] - R[t]) <= 0.75 ? 1 : 0); cur = { cx: cur.cx, cy: cur.cy, R: R.map((r, t) => Math.max(0.5, Math.min(R0[t] + more, Math.max(R0[t] - 2.5, r)))) }; }
+        const m = middle(cur); cur = about(cur, m[0], m[1]) || cur; Dref = wallOf(kAt(a0), cur); Tb = T + 0.5 * Math.max(0, Dref - T); }
+      // (a curve drawn round one middle cannot hold a piece with a deep waist — two roots not yet parted: such a piece is left
+      //  as it was drawn)
+      if (!start) { const g = ch[a0]; let inn = 0; for (let t = 0; t < NRAY; t++) for (const f of [0.5, 0.9]) if (inCurve(cur, g.cx + f * g.r[t] * RCOS[t], g.cy + f * g.r[t] * RSIN[t], 0.5)) inn++; const q = Array.from(g.r).sort((x, y) => x - y), waist = q[Math.floor(0.9 * NRAY)] / Math.max(0.5, q[Math.floor(0.1 * NRAY)]); if (P.debug) P.debug({ what: 'cover', k: g.k, n: g.n, inn: inn / (2 * NRAY), M, A0: polyArea(g.r), A1: polyArea(cur.R), waist, sol0: solidity(g.r), sol1: solidity(cur.R) }); if (waist > 4 || solidity(cur.R) < 0.915) { asDrawn(); return; } }
+      // down the root, slice by slice: the curve of the slice before, moved on as the root has been moving, says where this
+      // slice's edge is to be looked for; where none shows, the root is taken to keep its shape (narrowing as it does where
+      // its edge does show); and it may widen only little by little. The root ends where its own edge has shown round less
+      // than a fifth of it for ¾ mm, or where what the curve holds is no longer as bright as tooth, or is next to nothing — or
+      // where the curve lies open, on two opposite sides, onto more of the same brightness (a plate of bone the root has run
+      // into) — or where, long since narrowed to a third, it has stopped narrowing (bone it has run on into)
+      // (a tip with its edge, or darkness, nearly all round it need only be as bright as the threshold)
+      const endKids = start ? [] : ch.kids.filter((q) => q.parent === ch[L - 1]), A0c = polyArea(cur.R), hist = [], areas = [], env = Float32Array.from(cur.R), fromLevel = !start && !(a0 === 0 && par && par.fit && !par.raw); let thin = false, vx = 0, vy = 0, lastOk = a0 - 1, split = false, cutAt = -1, waisted = 0, lobes = null;
+      if (a0 >= 3) { vx = (st[a0 - 1].cx - st[a0 - 3].cx) / 2; vy = (st[a0 - 1].cy - st[a0 - 3].cy) / 2; }
+      for (let a = a0; ; a++) { const k = kAt(a); if (k < 0 || k >= n2) break; const vn = Math.hypot(vx, vy), vm = 1.25 * stepZ; if (vn > vm) { vx *= vm / vn; vy *= vm / vn; }
+        // (where the piece was drawn as parting into others: a root does part so, into two
+        //  or more parts of some size that between them hold half and more of what it held (or a third, where the middle of
+        //  the curve is by now not tooth at all) — they take over; a few scraps of bone it ran on into do not, and the root is
+        //  followed on as it is)
+        if (a === L && endKids.length) { let ak = 0, big = 0; const Ac = polyArea(cur.R); for (const q of endKids) { const R = clipped(q[0], cur, 1), A = R ? polyArea(R) : 0; q.share = A / Ac; ak += A; if (A >= 0.12 * Ac) big++; }
+          if (P.debug) P.debug({ what: 'split', k, Ac: Ac * h * h, kids: endKids.map((q) => ({ n: q[0].n * h * h, share: q.share, cx: q[0].cx, cy: q[0].cy })), cur: { cx: cur.cx, cy: cur.cy } });
+          const mid = []; for (let t = 0; t < NRAY; t++) { const v = samp(k, cur.cx + 0.2 * cur.R[t] * RCOS[t], cur.cy + 0.2 * cur.R[t] * RSIN[t]); if (v === v) mid.push(v); } mid.sort((x, y) => x - y); const hollow = mid.length > 0 && mid[mid.length >> 1] < Tb;
+          if ((big >= 2 && ak >= 0.5 * Ac) || (hollow && ak >= 0.3 * Ac)) { for (const q of endKids) if (q.share < (hollow ? 0.05 : 0.12)) q.dropped = true; split = true; cutAt = L - 1; break; } for (const q of endKids) q.dropped = true; }
+        const px = cur.cx + vx, py = cur.cy + vy, Rp = cur.R, ms = measure(k, px, py, Rp, inB, 1, Tb), rat = []; for (let t = 0; t < NRAY; t++) if (ms.kind[t] === 1) rat.push(ms.r[t] / Rp[t]); rat.sort((x, y) => x - y);
+        const s = edges(blank(k, px, py), ms, Rp, rat.length ? Math.max(0.85, Math.min(1.02, rat[rat.length >> 1])) : 1); st[a] = s; let dk = 0; for (let t = 0; t < NRAY; t++) if (ms.kind[t] === 2) dk++;
+        // (the curve may move in or out only so far in a slice — but, where the edge showed in the slice before as well, out as far
+        //  as the edge, and never more than half a voxel inside it: left to its smoothness alone the curve would wear the ends off
+        //  a long root, slice by slice. An edge that shows where none did before — none that the curve lay on — may be bone come
+        //  up against the root; and no edge takes the curve out past where the root has lately been: a root does not widen so)
+        const R = pooled(a, a - win, a) || Float32Array.from(Rp); for (let t = 0; t < NRAY; t++) { const e = ms.kind[t] === 1 && (was[t] || was[(t + 1) % NRAY] || was[(t + NRAY - 1) % NRAY]) ? ms.r[t] : -1, hi = Math.max(Rp[t] + outB, Math.min(e + 0.25, env[t] + outB)), lo = Math.min(hi, Math.max(0.5, Rp[t] - inB - 0.5, e - 0.5)); R[t] = Math.max(lo, Math.min(hi, R[t])); env[t] = Math.max(R[t], env[t] - 0.15); }
+        s.held = Uint8Array.from(ms.kind, (x, t) => x === 1 && (was[t] || was[(t + 1) % NRAY] || was[(t + NRAY - 1) % NRAY]) ? 1 : 0); was = Uint8Array.from(ms.kind, (x, t) => x === 1 && Math.abs(ms.r[t] - R[t]) <= 0.75 ? 1 : 0); const A = polyArea(R); areas[a] = A; Object.assign(s, { R, inside: ms.inside, Tb, open: ms.open, opp: ms.opp });
+        // (the curve itself come to hold two roots — pinched to a deep waist, with no tooth across the waist, two slices running:
+        //  from here on two lines, one round each. So too where the pieces were not followed as parting, or not followed at all)
+        { let t1 = 0; for (let t = 1; t < NRAY; t++) if (R[t] < R[t1]) t1 = t; let t2 = -1; for (let t = 0; t < NRAY; t++) { const d = Math.min((t - t1 + NRAY) % NRAY, (t1 - t + NRAY) % NRAY); if (d >= NRAY / 4 && (t2 < 0 || R[t] < R[t2])) t2 = t; }
+          const ta = Math.min(t1, t2), tb = Math.max(t1, t2); let mA = 0, mB = 0; for (let t = 0; t < NRAY; t++) { if (t > ta && t < tb) mA = Math.max(mA, R[t]); else if (t !== ta && t !== tb) mB = Math.max(mB, R[t]); } let two = null;
+          if (Math.max(R[t1], R[t2]) < 0.45 * Math.min(mA, mB) && Math.min(mA, mB) >= mm(1)) { const x1 = px + R[ta] * RCOS[ta], y1 = py + R[ta] * RSIN[ta], x2 = px + R[tb] * RCOS[tb], y2 = py + R[tb] * RSIN[tb]; let dark = 0, nn = 0; for (let f = 0.15; f <= 0.851; f += 0.1) { const v = samp(k, x1 + f * (x2 - x1), y1 + f * (y2 - y1)); if (v === v) { nn++; if (v < Tb) dark++; } } if (nn && dark >= 0.6 * nn) two = { ta, tb, x1, y1, x2, y2 }; }
+          waisted = two ? waisted + 1 : 0;
+          if (two && waisted >= 2 && a > a0) { const c = { cx: px, cy: py, R }, side = (x, y) => (two.x2 - two.x1) * (y - two.y1) - (two.y2 - two.y1) * (x - two.x1), made = [];
+            for (const sec of [(t) => t > two.ta && t < two.tb, (t) => t < two.ta || t > two.tb]) { let sx = 0, sy = 0, cn = 0; for (let t = 0; t < NRAY; t++) if (sec(t)) { sx += px + 0.6 * R[t] * RCOS[t]; sy += py + 0.6 * R[t] * RSIN[t]; cn++; } if (!cn) continue; const mx = sx / cn, my = sy / cn, sg0 = Math.sign(side(mx, my)), inLobe = (x, y) => inCurve(c, x, y, 0) && sg0 * side(x, y) >= 0; if (!sg0 || !inLobe(mx, my)) continue;
+              const Rl = new Float32Array(NRAY); for (let t = 0; t < NRAY; t++) { let lo = 0, hi = 0.5; while (hi < 400 && inLobe(mx + hi * RCOS[t], my + hi * RSIN[t])) { lo = hi; hi += 0.5; } for (let i = 0; i < 5; i++) { const m = (lo + hi) / 2; if (inLobe(mx + m * RCOS[t], my + m * RSIN[t])) lo = m; else hi = m; } Rl[t] = Math.max(0.5, lo); } if (polyArea(Rl) >= mm(1.2) * mm(1.2)) made.push({ cx: mx, cy: my, R: Rl }); }
+            if (made.length === 2) { lobes = made; split = true; cutAt = a - 1; st.length = a; if (P.debug) P.debug({ what: 'two', k, a }); break; } } }
+        const stall = a - nmm >= a0 && A < 0.3 * A0c && A > 0.95 * areas[a - nmm]; if (stall) lastOk = Math.min(lastOk, a - nmm);
+        const plate = ms.opp >= NRAY / 9 && (A < 0.7 * A0c || !fromLevel), dim = !(ms.inside >= Tb || (ms.inside >= T && s.sup + dk >= 0.8 * NRAY)); if (a === lastOk + 1) thin = dim && !plate && !stall;   // (how it first gave out)
+        if (!stall && s.sup >= 0.2 * NRAY && !dim && !plate && A >= mm(0.6) * mm(0.6)) { lastOk = a; hist.push(ms.inside); if (hist.length > nmm) hist.shift(); Dref = hist.slice().sort((x, y) => x - y)[hist.length >> 1]; Tb = T + 0.5 * Math.max(0, Dref - T); } else if ((a - lastOk) * hz > 0.75) break;
+        if (P.debug) { let res = 0, nr = 0, big = 0; for (let t = 0; t < NRAY; t++) if (ms.kind[t] === 1) { const d = Math.abs(ms.r[t] - R[t]); res += d * d; nr++; if (d > 1.5) big++; } P.debug({ what: 'step', k, a, A: A * h * h, sup: s.sup, rms: Math.sqrt(res / Math.max(1, nr)), big, open: ms.open, shr: ms.kind.filter((x) => x === 2).length, inside: ms.inside, Tb }); }
+        const c = { cx: px, cy: py, R }, [mx, my] = middle(c), nc = about(c, mx, my) || c; vx = 0.5 * vx + 0.5 * (nc.cx - cur.cx); vy = 0.5 * vy + 0.5 * (nc.cy - cur.cy); cur = nc; }
+      // (a piece of some length on which no curve would hold at all is left as it was drawn)
+      if (lastOk < a0 && !split) { if (L - a0 >= 1.5 * nmm && fromLevel) asDrawn(); else kill(a0); return; }   // (… unless it parted from a root already redrawn: then it is no root)
+      const end = split ? cutAt : Math.min(st.length - 1, lastOk + Math.round(0.25 / hz));
+      // (and one that was drawn going on for 2 mm and more past where the curve gave out — still half the size it began at, the
+      //  curve by then holding less than half of it — the curve has not followed: it too is left as drawn)
+      if (!split && fromLevel && end < L - 1 - 2 * nmm && areas[end] < 0.5 * ch[end].n && ch[end].n >= 0.5 * ch[a0].n) { asDrawn(); return; }
+      // (a tip the curve gave out on — too thin by then to show as bright as tooth — but along which something small was drawn
+      //  on for a little: the tip is carried on along that, tapering)
+      let tail = end; if (!split && thin && end < L - 1 && (L - 1 - end) * hz <= 2.2 && areas[end] <= mm(2) * mm(2)) { let fine = true; for (let a = end + 1; fine && a < L; a++) if (ch[a].n > Math.max(2 * areas[end], 1.5 * mm(2) * mm(2))) fine = false; if (fine) tail = L - 1; }
+      // the curves themselves: each slice's edge looked for once more, now near the curve that the slices above and below it
+      // agree on, and the curve fitted again
+      const again = []; for (let a = a0; a <= end; a++) { const s = st[a], Rc = pooled(a, a - win, Math.min(end, a + win)) || s.R, ms = measure(s.k, s.cx, s.cy, Rc, 1, 0.5, s.Tb); again[a] = Object.assign(edges(blank(s.k, s.cx, s.cy), ms, Rc, 1), { R: s.R, sup: s.sup, inside: s.inside, open: s.open, opp: s.opp, ms, held: s.held }); }
+      for (let a = a0; a <= end; a++) st[a] = again[a];
+      for (let a = a0; a <= end; a++) { const s = st[a], R = pooled(a, a - win, Math.min(end, a + win)) || s.R; for (let t = 0; t < NRAY; t++) R[t] = Math.max(Math.min(R[t], s.R[t] + 0.75), s.ms.kind[t] === 1 && s.held[t] ? Math.min(s.ms.r[t] - 0.5, s.R[t] + 0.75) : 0.5); const f = { k: s.k, sx: s.cx, sy: s.cy, fit: R, sup: s.sup, inside: s.inside, open: s.open, opp: s.opp }; fits.push(f); if (a < L) Object.assign(ch[a], f); }
+      for (let a = end + 1; a <= tail; a++) { const g = ch[a], sc = Math.min(1, Math.sqrt(areas[end] * (1 - 0.7 * (a - end) / (tail - end + 1)) / Math.max(1e-6, polyArea(g.r)))), f = { k: g.k, sx: g.cx, sy: g.cy, fit: Float32Array.from(g.r, (r, t) => Math.max(0.5, sc * (g.r[(t + NRAY - 1) % NRAY] + 2 * r + g.r[(t + 1) % NRAY]) / 4)), raw: true }; fits.push(f); Object.assign(g, f); }
+      kill(tail + 1); ch.end = end; if (lobes) for (const c of lobes) follow([], { k: kAt(end + 1), dir, cur: c });
+    };
+    for (const ch of chains) follow(ch);
+    if (P.debug) P.debug({ what: 'chains', level, chains: chains.map((ch) => ({ dir: ch[0].dir, k0: ch[0].k, a0: ch.a0, end: ch.end, raw: !!ch.raw, recs: ch.map((g) => ({ k: g.k, cx: g.cx, cy: g.cy, n: g.n, strong: g.strong, inBone: g.inBone, sup: g.sup, inside: g.inside, fit: !!g.fit, dead: !!g.dead, r: Array.from(g.r) })) })), fits: fits.map((f) => ({ k: f.k, sx: f.sx, sy: f.sy, sup: f.sup, inside: f.inside, open: f.open, opp: f.opp, area: polyArea(f.fit) * h * h, R: Array.from(f.fit) })) });
+    // below the level the tooth is what those curves hold, and nothing else
+    for (const dir of [1, -1]) if (level[dir] < Infinity) for (let k = kEq + dir * level[dir]; k >= 0 && k < n2; k += dir) mask.fill(0, k * sl, (k + 1) * sl);
+    for (const g of fits) { const base = g.k * sl, R = Math.ceil(Math.max(...g.fit)) + 1, ic = Math.round(g.sx), jc = Math.round(g.sy);
+      if (g.vox) { S1.fill(0); for (const p of g.vox) S1[p] = 1; for (const p of g.vox) for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const i = p % n0 + a, j = ((p / n0) | 0) + b; if (i < 1 || j < 1 || i >= n0 - 1 || j >= n1 - 1) continue; const q = i + n0 * j; if (mask[base + q] || allow[base + q] !== 1) continue; let c = 0; for (let v = -1; v <= 1; v++) for (let u = -1; u <= 1; u++) c += S1[q + u + n0 * v]; if (c >= 5) mask[base + q] = 1; } continue; }
+      for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const ii = ic + a, jj = jc + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const dx = ii - g.sx, dy = jj - g.sy, p = ii + n0 * jj; if (allow[base + p] === 1 && Math.hypot(dx, dy) <= radiusAt(g.fit, dx, dy)) mask[base + p] = 1; } }
+  }
   // further points that are tooth (a root the outline lost): a small start round each, followed both ways and added
   for (const q of P.more || []) {
     if (q[2] < 0 || q[2] >= n2 || mask[q[0] + n0 * q[1] + sl * q[2]]) continue; const base = q[2] * sl, R = Math.ceil(mm(1.25)), s2 = new Uint8Array(sl), ref = I[base + q[0] + n0 * q[1]];
@@ -1259,8 +1435,11 @@ function cavities(mask, inR, nx, ny, nz) {
  *   o.erase  [{ p:[x,y,z], r }…] balls cut away      o.roi   { shape:'cyl'|'box', c:[x,y], r, z0, z1 } (mm): the tooth lies inside
  *   o.T      the level between soft tissue and tooth (data units)        o.fill  fill the pulp (default true)
  *   o.method 'flood': the earlier way (floodTooth), which shares the bright material out between the tooth and the region's edge
- * The outline is found in the widest slice of the crown and followed slice by slice (trackTooth). Holes left inside (the pulp)
- * are filled. Slices are the scan's own: a tooth lying more than about 45° from the scan's long axis is not followed well.
+ *   o.smoothRoots  false: leave the roots as they were followed, voxel by voxel (default: roots standing in bone are redrawn)
+ * The outline is found in the widest slice of the crown and followed slice by slice (trackTooth); from the level where the
+ * tooth first stands in bone each root is then redrawn, slice by slice, as a smooth closed curve fitted to its own edge. Holes
+ * left inside (the pulp) are filled. Slices are the scan's own: a tooth lying more than about 45° from the scan's long axis
+ * is not followed well.
  * → { lab: Uint8Array over box (1 = tooth), box:{ i0, j0, k0, nx, ny, nz }, count, volume (mm³), lo, hi (mm), touch (voxels
  *     of it against the edge of the region), T, dI, ref, seedOk, axis, centre, crown:+1|−1 (which way along axis the crown
  *     is), length, ends, top (the middle of the crown's widest slice), levels:{ dentine, enamel, contrast } }  or { error }
@@ -1288,7 +1467,7 @@ export function segmentTooth(vol, o) {
   }
   const vq = (p) => [Math.max(0, Math.min(nx - 1, Math.round((p[0] - org[0]) / sx) - i0)), Math.max(0, Math.min(ny - 1, Math.round((p[1] - org[1]) / sy) - j0)), Math.max(0, Math.min(nz - 1, Math.round((p[2] - org[2]) / sz) - k0))];
   const seeds = (o.seeds || []).map(vq); if (!seeds.length) return { error: 'Tap the tooth.', box };
-  const tr = trackTooth({ I, n0: nx, n1: ny, n2: nz, h: (sx + sy) / 2, hz: sz, allow }, seeds[0], { T, more: seeds.slice(1), debug: o.debug, soft: o.soft ?? windowPresets(vol).soft.l }); if (tr.error) return { error: tr.error, box };
+  const tr = trackTooth({ I, n0: nx, n1: ny, n2: nz, h: (sx + sy) / 2, hz: sz, allow }, seeds[0], { T, more: seeds.slice(1), debug: o.debug, soft: o.soft ?? windowPresets(vol).soft.l, smoothRoots: o.smoothRoots }); if (tr.error) return { error: tr.error, box };
   let lab = tr.mask;
   if (o.not && o.not.length) { const f = floodTooth(vol, { ...o, pad, within: lab, noBorder: true, fill: false, maxVoxels: Infinity }); if (!f.error) lab = f.lab; }
   // the piece the first point is on (or the largest, if the point fell in the pulp), then the pulp filled
@@ -1325,7 +1504,14 @@ export function segmentTooth(vol, o) {
   // a tooth that lies across the slices (an impacted tooth on its side: what was followed has its long axis more than 35° from
   // the slices' own) cannot be followed from slice to slice: it is outlined by flooding from the taps instead, as bright
   // tissue ringed by something darker — if that finds plainly more of it, and no more of it pressing on the region's edge
-  if (o.method !== 'track' && Math.abs(ax[2]) < 0.82 && tmax - tmin > 9 && tmax - tmin > 1.15 * (hi[2] - lo[2])) { const fl = floodTooth(vol, o); if (!fl.error && fl.volume > 1.2 * count * sx * sy * sz && fl.touch <= touch + 20) { fl.lying = true; return fl; } }
+  if (o.method !== 'track' && Math.abs(ax[2]) < 0.82 && tmax - tmin > 9 && tmax - tmin > 1.15 * (hi[2] - lo[2])) { const fl = floodTooth(vol, o); if (!fl.error && fl.volume > 1.2 * count * sx * sy * sz && fl.touch <= touch + 20) {
+      // (… unless what the flood finds stands upright: then the tooth is not lying — the outline went wrong from where it was
+      //  started, as from a tap by the biting surface where the tooth it bites on is met. It is followed once more from the
+      //  bright point nearest the middle of the crown the flood found, and that is kept if it holds a tooth standing up)
+      if (!o.again && fl.axis && Math.abs(fl.axis[2]) >= 0.9 && fl.top) { const q = voxelOf(vol, fl.top[0], fl.top[1], fl.top[2]).map(Math.round), [nx, ny, nz] = vol.dims, R = Math.ceil(3 / sx); let bd = Infinity, sd = null;
+        if (q[2] >= 0 && q[2] < nz) for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) { const i = q[0] + a, j = q[1] + b, d = a * a + b * b; if (i < 0 || j < 0 || i >= nx || j >= ny || d >= bd || vol.data[i + nx * (j + ny * q[2])] < o.T + 0.25 * Math.abs(o.T)) continue; bd = d; sd = [vol.origin[0] + i * sx, vol.origin[1] + j * sy, vol.origin[2] + q[2] * sz]; }
+        if (sd) { const sg2 = segmentTooth(vol, { ...o, seeds: [sd, ...seeds.slice(1)], again: true }); if (!sg2.error && !sg2.lying && Math.abs(sg2.axis[2]) >= 0.82 && sg2.volume >= 0.5 * fl.volume && sg2.touch <= fl.touch + 20) { sg2.restarted = true; return sg2; } } }
+      fl.lying = true; return fl; } }
   let up = 0, nu = 0, dn = 0, nd = 0; const qt = (tmax - tmin) / 4; for (let a = 0; a < tq.length; a += 2) { if (tq[a] > tmax - qt) { up += tq[a + 1]; nu++; } else if (tq[a] < tmin + qt) { dn += tq[a + 1]; nd++; } }
   const crown = (nu ? up / nu : 0) >= (nd ? dn / nd : 0) ? 1 : -1, ref = tr.E0 != null ? (tr.D0 + tr.E0) / 2 : tr.D0, dI = Math.max(50, ref - T);
   const top = [org[0] + (i0 + tr.cEq[0]) * sx, org[1] + (j0 + tr.cEq[1]) * sy, org[2] + (k0 + tr.kEq) * sz];
@@ -1624,6 +1810,10 @@ export function segmentCanal(vol, seg, o = {}) {
   const pos = dv.filter((x) => x > 0), mf = pos.length ? pos[pos.length >> 1] : 0.02, qd = Math.max(0.8, Math.min(0.995, o.quantile ?? 0.95 - 0.25 * (frac - 0.5))), sf = dv.length ? dv[Math.floor((dv.length - 1) * 0.9)] : 0.04, delta = Math.max(0.02, dv.length ? dv[Math.floor((dv.length - 1) * qd)] : 0.06);
   // (only the middle of a dip counts — where it is deepest across the slice: the blurred flank of a canal is not a second canal beside it)
   const crest = new Uint8Array(n); for (let k = 0; k < n2; k++) for (let j = 1; j < n1 - 1; j++) for (let i = 1; i < n0 - 1; i++) { const q = i + n0 * j + sl * k, x = f[q]; if (x > 0 && x >= f[q - 1] && x >= f[q + 1] && x >= f[q - n0] && x >= f[q + n0] && x >= f[q - n0 - 1] && x >= f[q - n0 + 1] && x >= f[q + n0 - 1] && x >= f[q + n0 + 1]) crest[q] = 1; }
+  // (a canal has dentine all round it: a dip within ⅓ mm of the tooth's own outline is its darker rim, or the ligament just
+  //  outside it where the outline runs a little wide — not a canal, and it scores nothing)
+  { const dR = disc(Math.max(1, Math.round(0.35 / h))); for (let k = 0; k < n2; k++) { const base = k * sl; for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = base + i + n0 * j; if (!crest[q] || wide[q]) continue;
+        for (let m = 0; m < dR.length; m += 2) { const ii = i + dR[m], jj = j + dR[m + 1]; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1 || ins[base + ii + n0 * jj] !== 1) { crest[q] = 0; break; } } } } }
   // ── the canals: lines of dip from slice to slice (the best continuation worked out from the root end up), one after another ──
   const s = new Float32Array(n), V = new Float32Array(n), ptr = new Int8Array(n), paths = [], kA = fromTop ? 0 : n2 - 1, sup = Math.max(1, Math.round(0.6 / h)), minScore = (o.minScore ?? 1.5) * (0.25 / h), maxPaths = o.maxPaths ?? 10, minRun = Math.max(2, Math.round((o.minRun ?? 1) / h));
   for (let it = 0; it < maxPaths + 8 && paths.length < maxPaths; it++) {

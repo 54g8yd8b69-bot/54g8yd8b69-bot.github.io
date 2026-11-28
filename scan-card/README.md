@@ -90,16 +90,31 @@ middle to the edge of the bright tissue, carried across where it touches the nex
 both ways: at each slice the edge is looked for near where it was — a fall in grey from the tooth's own level there —
 and where none can be seen (a root lying against bone as bright as dentine) the outline stays as it was. A root or cusp
 that has split off only narrows; the biting side ends where the crown stops narrowing (the tooth above); a root ends at
-its tip, or where what is followed stops narrowing in bone. Where the bone is as bright as the root the outline may take in
-a little of it, and its end is a guess: the eraser and "Not tooth" taps tidy it. A tooth lying across the slices (impacted,
-on its side) is outlined by the older flood from the taps instead. Then a closed replica STL, optionally enlarged and
+its tip, or where what is followed stops narrowing in bone. Roots standing in bone are then drawn again: followed voxel by
+voxel, bone as bright as the root comes out as bumps and spikes on it, so from the level where the tooth first stands in
+bone (for 1½ mm running) each piece of it in a slice — hollows filled — becomes a smooth closed curve instead (a few
+harmonics round its middle) and is followed down the root on its own. In each slice the root's edge is looked for afresh
+along rays near the curve of the slice before — the nearest fall from tooth to something darker, put where the grey passes
+the threshold — and the curve is fitted to the edges of that slice and of those just above and below. Where no edge shows
+the root keeps its shape; it may widen only little by little, and only out to an edge it was already on; it ends where its
+own edge stops showing, where it is no longer as bright as tooth, or where the curve lies open on two opposite sides onto a
+plate of bone, and a thin tip is carried on tapering for at most 2 mm. Where the pieces part (a furcation) each part
+starts its own curve; a curve that comes to hold two roots — pinched to a waist with no tooth across it — parts into two
+by itself; two roots not yet parted (an outline with a deep waist) are left as followed. If the outline goes wrong from
+where it was started (a tap by the biting surface, where the opposing tooth is met) and the older flood finds a tooth
+standing upright, it is followed once more from the middle of that crown. A root that leans steeply away, or runs close
+along a plate of bone, may still be followed only part of its length, and where root and bone cannot be told apart its end
+is a guess: the eraser and "Not tooth" taps tidy it, and a tap on the neck of the tooth rather than its biting surface
+gives the outline its best start. A tooth lying across
+the slices (impacted, on its side) is outlined by the older flood from the taps instead. Then a closed replica STL, optionally enlarged and
 with a handle, for preparing the socket in autotransplantation. Root canals: the pulp chamber and canals of the picked
 tooth. A canal narrower than the scan's blur is only a faint dip in the dentine's grey, so two things are done. The wide
 hollows (chamber, wide canals) are cut where the grey is midway between pulp and dentine. Narrow canals are followed
 as lines from slice to slice across the tooth's own axis: at each voxel the dip below the dentine walling it in (in at
 least three of four directions, so the tooth's darker rim is not a canal) is measured, and the line along which that dip
 adds up to more than noise does — moving at most one voxel sideways per slice, starting from the chamber or a canal
-already found — is a canal; it ends where the dip ahead is lost in the noise. Each is drawn as a tube as wide as its dip
+already found — is a canal; it ends where the dip ahead is lost in the noise. A dip within ⅓ mm of the tooth's own
+outline scores nothing (the darker rim, or the ligament just outside). Each is drawn as a tube as wide as its dip
 says it is for the scan's blur. Tinted red in the slices and shown as an orange solid inside a pale glass tooth in 3D,
 with volume, length, canals side by side in the root and how much was followed by its faint dip alone, "Slices along the
 tooth" to walk down the root, and an STL. What a scan cannot show is not drawn: canals narrower than about a voxel, the
