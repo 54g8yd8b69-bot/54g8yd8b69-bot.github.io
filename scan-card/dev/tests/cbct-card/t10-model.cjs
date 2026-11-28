@@ -49,11 +49,15 @@ function makePack() {
     await page.evaluate((z) => { APP.S.cur[2] = Math.round(APP.D.voxelOf(APP.S.vol, 0, 0, z)[2]); APP.crossChanged(); }, p[2]); await page.waitForTimeout(250); if (tool) await page.click(`#cbTool [data-v=${tool}]`);
     const [x, y] = await screenOf(page, 'ax', p); await page.mouse.click(x, y); await a.idle(); await page.waitForFunction(() => APP.S.tooth.rules && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 120000 }); await page.waitForTimeout(300); };
   const modelDone = async () => { await page.waitForFunction(() => APP.S.tooth.model && !APP.MODEL.run && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 300000 }); await a.idle(); await page.waitForTimeout(300); };
-  await tap(45); let st = await state(); const rulesVol = st.seg.volume;
-  ok(st.on === 'rules' && st.by === 'rules' && st.seg && !st.seg.model && st.st === 'off' && st.note === '', `to begin with the outline is by the rules (45: ${st.seg.volume.toFixed(0)} mm³) and nothing of the model is loaded`);
-  await page.click('#dBy [data-v=model]'); await page.waitForFunction(() => APP.MODEL.state === 'ask', null, { timeout: 60000 }); st = await state();
-  ok(st.st === 'ask' && /one-off download of about \d+ MB/.test(st.note) && /not sent anywhere/.test(st.note) && st.seg && !st.seg.model && Math.abs(st.seg.volume - rulesVol) < 1e-6 && await page.evaluate(() => !!document.querySelector('#dGet')), `choosing “Model” asks before fetching anything (“${st.note.slice(0, 58)}…”); the rules’ outline stays meanwhile`);
-  await page.click('#dGet'); await modelDone(); st = await state();
+  await page.waitForFunction(() => APP.MODEL.state === 'ask', null, { timeout: 60000 }); let st = await state();
+  ok(st.on === 'model' && st.by === 'model' && st.st === 'ask' && /one-off download of about \d+ MB/.test(st.note) && /not sent anywhere/.test(st.note) && await page.evaluate(() => !!document.querySelector('#dGet') && !APP.MODEL.worker), `“Model” is the outline of choice: opening the step looks for the pack on this device and, not finding it, asks before fetching anything (“${st.note.slice(0, 58)}…”)`);
+  await tap(45); st = await state(); const rulesVol = st.seg.volume, hex = () => page.evaluate(() => (APP.r3objs.tooth.userData.solid || APP.r3objs.tooth.material).color.getHex());
+  ok(st.st === 'ask' && st.seg && !st.seg.model && /by the rules/.test(st.out) && /outline shown is by the rules/.test(st.note) && await hex() === 0x5eead4, `until it is downloaded a tapped tooth is outlined by the rules, and the page says so (45: ${st.seg.volume.toFixed(0)} mm³)`);
+  // the download held up for a moment: meanwhile the rules' outline is marked as a stand-in (amber, "the model is working")
+  await page.route('**/fake.onnx', async (r) => { await new Promise((res) => setTimeout(res, 1500)); r.continue(); });
+  await page.click('#dGet'); await page.waitForFunction(() => APP.MODEL.state === 'loading', null, { timeout: 30000 }); await page.waitForTimeout(250); const mid = await state(), midHex = await hex();
+  ok(/stand-in/.test(mid.out) && midHex === 0xf5b446 && mid.seg && !mid.seg.model, 'while the model is fetched and run, the rules’ outline is marked as a stand-in (amber in 3D and in the slices, “stand-in: the model is working”)');
+  await modelDone(); st = await state(); ok(await hex() === 0x5eead4 && !/stand-in/.test(st.out), '… and the model’s outline, when it arrives, is teal again');
   ok(st.st === 'ready' && st.info && st.info.kept === false && st.info.stored === true && st.info.version === 'test-1' && st.seq === 1, `“Download the model” fetched the pack (${(bytes / 1e6).toFixed(1)} MB here: the real engine, a stand-in network), checked it and kept it on the device; the network was run once`);
   if (!(st.rows.every(Boolean) && st.fit)) console.log('    state', JSON.stringify({ rows: st.rows, fit: st.fit, out: st.out, M: st.M }));
   ok(st.seg && st.seg.model && Math.abs(st.seg.volume / TV[45] - 1) < 0.05 && st.seg.up && st.M && st.M.teeth >= 2 && !st.M.clipped && st.rows.every(Boolean) && st.fit && /model/.test(st.out) && /Outline/.test(st.out) && !/Threshold/.test(st.out),
@@ -63,6 +67,10 @@ function makePack() {
   await page.click('.step[data-id=replica] h3'); await a.idle(); await page.click('#rMake'); await a.idle(); await page.waitForFunction(() => APP.S.rep.info, null, { timeout: 120000 });
   const ri = await page.evaluate(() => APP.S.rep.info);
   ok(ri.closed && ri.parts === 1 && Math.abs(ri.volume / TV[45] - 1) < 0.05, `the replica made from it is closed, in one piece, ${ri.volume.toFixed(0)} mm³ (in this scan ${TV[45].toFixed(0)})`);
+  // on the Root canals step, a new outline of the tooth has the canals looked for again by itself (here there are none to find: the teeth are solid)
+  await page.click('.step[data-id=canal] h3'); await page.waitForFunction(() => APP.S.canal.seg && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 120000 }); await a.idle();
+  const v0 = await page.evaluate(() => APP.S.canal.ver); await page.evaluate(() => APP.segment({ frame: false })); await a.idle(); await page.waitForFunction(() => APP.S.canal.seg && !document.querySelector('#busy').classList.contains('show'), null, { timeout: 120000 });
+  ok(await page.evaluate(() => APP.S.canal.ver) >= v0 + 2 && await page.evaluate(() => !!APP.S.canal.seg), 'on the Root canals step, when the tooth’s outline changes the canals are looked for again without being asked');
   // cuts by hand do not run the network again; nor does going to the rules and back
   await page.click('.step[data-id=tooth] h3'); await a.idle();
   const t45 = teeth[45], cut = [0, 1, 2].map((q) => t45.base[q] - t45.w[q] * t45.root * 0.7);
@@ -89,10 +97,10 @@ function makePack() {
 
   // ── where the pack is not there (as in the single-file copy): said plainly, and the rules carry on
   const b = await open({ init: { fn: (x) => { window.TOOTHSEG = { base: x }; }, arg: '/dev/data/no-such-pack/' } }); await b.demo(); await b.page.click('.step[data-id=tooth] h3'); await b.idle();
-  await b.page.click('#dBy [data-v=model]'); await b.page.waitForFunction(() => APP.MODEL.state === 'none', null, { timeout: 60000 });
+  await b.page.waitForFunction(() => APP.MODEL.state === 'none', null, { timeout: 60000 });
   { const t = teeth[45], p = [0, 1, 2].map((q) => t.base[q] + t.w[q] * t.crown * 0.3); await b.page.evaluate((z) => { APP.S.cur[2] = Math.round(APP.D.voxelOf(APP.S.vol, 0, 0, z)[2]); APP.crossChanged(); }, p[2]); await b.page.waitForTimeout(250); const [x, y] = await screenOf(b.page, 'ax', p); await b.page.mouse.click(x, y); await b.idle(); await b.page.waitForFunction(() => APP.S.tooth.seg, null, { timeout: 120000 }); await b.page.waitForTimeout(400); }
-  const nb = await b.page.evaluate(() => ({ note: document.getElementById('dModel').textContent, seg: APP.S.tooth.seg && !APP.S.tooth.seg.error ? { model: !!APP.S.tooth.seg.model, volume: APP.S.tooth.seg.volume } : null, rows: document.getElementById('dR').closest('.row').hidden }));
+  const nb = await b.page.evaluate(() => ({ off: document.querySelector('#dBy [data-v=model]').disabled, on: document.querySelector('#dBy .on').dataset.v, note: document.getElementById('dModel').textContent, seg: APP.S.tooth.seg && !APP.S.tooth.seg.error ? { model: !!APP.S.tooth.seg.model, volume: APP.S.tooth.seg.volume } : null, rows: document.getElementById('dR').closest('.row').hidden }));
   const other = b.errors.filter((e) => !/404|Failed to load resource|worker/i.test(e));
-  ok(/cannot be loaded in this copy/.test(nb.note) && nb.seg && !nb.seg.model && Math.abs(nb.seg.volume / 422 - 1) < 0.03 && !nb.rows && other.length === 0, `with no pack beside the page, “Model” says it cannot be loaded here and the rules’ outline is used (45: ${nb.seg && nb.seg.volume.toFixed(0)} mm³) ${other.slice(0, 2).join(' | ')}`);
+  ok(/cannot be loaded in this copy/.test(nb.note) && nb.off && nb.on === 'rules' && nb.seg && !nb.seg.model && Math.abs(nb.seg.volume / 422 - 1) < 0.03 && !nb.rows && other.length === 0, `with no pack beside the page, the step says the model cannot be loaded in this copy, “Model” is out of reach and the rules’ outline is used (45: ${nb.seg && nb.seg.volume.toFixed(0)} mm³) ${other.slice(0, 2).join(' | ')}`);
   await b.close();
 })().catch((e) => { console.error(e); process.exit(1); });

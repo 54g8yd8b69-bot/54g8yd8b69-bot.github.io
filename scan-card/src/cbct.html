@@ -341,7 +341,7 @@ function obliqueData(v, g) {
   }
   return b;
 }
-const tintPx = (px, q) => { const p = px[q], r = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.5 + 0.55 * 166) | 0) << 16) | (((gg * 0.5 + 0.55 * 212) | 0) << 8) | ((r * 0.5 + 0.55 * 45) | 0); };
+const tintPx = (px, q) => { const p = px[q], r = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (Math.min(255, (bb * 0.5 + 0.55 * TINT[2]) | 0) << 16) | (Math.min(255, (gg * 0.5 + 0.55 * TINT[1]) | 0) << 8) | Math.min(255, (r * 0.5 + 0.55 * TINT[0]) | 0); };
 /** the tooth found, tinted into a turned slice: each pixel looks up the label of the voxel it falls in */
 function tintOblique(v, px, g) {
   const sg = S.tooth.seg, W = sg.vol || S.vol, { lab, box } = sg, { i0, j0, k0, nx, ny, nz } = box, o = g.ob, f = o.f, b0 = [i0, j0, k0];
@@ -939,48 +939,59 @@ async function segment(o = {}) {
     t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null; dropCanal(o.keepCanalT);
     if (!sg.error) { const f = D.replicaField(S.vol, sg, { smooth: t.smooth }); const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 2 }); D.taubin(m, 2); t.preview = m; }
     if (r3objs.tooth) viewer.remove(r3objs.tooth); r3objs.tooth = null; if (r3objs.rep) { viewer.remove(r3objs.rep); r3objs.rep = null; }
-    if (t.preview) { r3objs.tooth = meshObj(t.preview, 0x5eead4); viewer.add(r3objs.tooth); if (o.frame !== false && !t.framed) { t.framed = true; fit3D(r3objs.tooth); } }
+    if (t.preview) { r3objs.tooth = meshObj(t.preview, standInShown ? 0xf5b446 : 0x5eead4); viewer.add(r3objs.tooth); if (o.frame !== false && !t.framed) { t.framed = true; fit3D(r3objs.tooth); } }
     roi3D();
   } finally { segBusy = false; }
   if (segAgain) { segAgain = false; return segment(o); }
   if (S.tool === 'tooth' && T().seg && !T().seg.error) S.tool = 'browse';
   setTools(); show3D(); invalidate(); syncUI();
   if (wantModel) modelRun();
+  if (stepId() === 'canal' && T().seg && !T().seg.error && !S.canal.seg) findCanal().catch(() => {});
 }
 
 // ───────────── the tooth model (ToothSeg): the outline drawn by a trained network in place of the rules ─────────────
 // The network runs in a worker of its own (toothseg/worker.js: ONNX Runtime) on a cube of the scan round the tap. The cube,
 // and what is made of the network's answer, are dicom.js's (modelFrame … toothFromMask), so the page only passes them along.
 // The pack — the network and the engine, about 76 MB — is fetched only when asked for, and kept on the device afterwards.
-const MODEL = { by: 'rules', state: 'off', worker: null, done: 0, total: 0, info: null, err: '', run: null, seq: 0, tick: null,
+const MODEL = { by: 'model', state: 'off', worker: null, done: 0, total: 0, info: null, err: '', run: null, seq: 0, tick: null,
   base: new URL((window.TOOTHSEG && window.TOOTHSEG.base) || 'toothseg/', document.baseURI).href };
-const modelPref = (v) => { try { if (v === undefined) return localStorage.getItem('notile.cbct.outline'); localStorage.setItem('notile.cbct.outline', v); } catch (_) { /* no storage here */ } return null; };
+const modelPref = (v) => { try { if (v === undefined) return localStorage.getItem('notile.cbct.outline2'); localStorage.setItem('notile.cbct.outline2', v); } catch (_) { /* no storage here */ } return null; };
 const modelKey = (t) => (t.seeds.length ? `${S.loads}|${t.seeds[0].map((x) => x.toFixed(3)).join(',')}` : '');
+/** the tooth shown is the rules' stand-in for the model's outline, which is being loaded or worked out */
+const standIn = () => { const t = T(); return MODEL.by === 'model' && t.seeds.length > 0 && !!t.seg && !t.seg.error && !t.seg.model && !(t.model && t.model.error) && (!!MODEL.run || MODEL.state === 'loading'); };
+let TINT = [45, 212, 166], standInShown = false;                 // the tint of the tooth in the slices: teal; amber while it is a stand-in
+function toothColours() {
+  const on = standIn(); if (on === standInShown) return; standInShown = on; TINT = on ? [245, 180, 70] : [45, 212, 166];
+  if (r3objs.tooth) { const m = r3objs.tooth.userData.solid || r3objs.tooth.material; if (m && m.color) m.color.setHex(on ? 0xf5b446 : 0x5eead4); }   // (the solid material: on the Root canals step the tooth wears the glass one)
+  segVer++; invalidate(); viewer.invalidate();
+}
 /** give up a run that is under way (a worker cannot be interrupted, only ended: it is started afresh when next needed) */
 function modelStop() {
   clearInterval(MODEL.tick); MODEL.tick = null; if (!MODEL.run) return;
   MODEL.run = null; if (MODEL.worker) { MODEL.worker.terminate(); MODEL.worker = null; MODEL.state = 'off'; }
 }
+/** no pack in this copy of the tool: the rules are used, and "Model" is put out of reach */
+function modelNone() { MODEL.state = 'none'; MODEL.by = 'rules'; SEG.by('rules'); syncModel(); if (T().seeds.length && T().roi && T().seg && T().seg.model) segment({ frame: false, fit: false }); else syncUI(); }
 /** start the worker and have it load the pack: from this device if it is there; fetched only if allow is true (else it asks) */
 function modelLoad(allow) {
   if (MODEL.worker) return; let w;
-  if (!/^https?:/.test(MODEL.base)) { MODEL.state = 'none'; syncModel(); return; }   // (a single-file copy opened from disk: there is no pack beside it to load)
-  try { w = new Worker(new URL('worker.js', MODEL.base), { type: 'module' }); } catch (_) { MODEL.state = 'none'; syncModel(); return; }
+  if (!/^https?:/.test(MODEL.base)) return modelNone();           // (a single-file copy opened from disk: there is no pack beside it to load)
+  try { w = new Worker(new URL('worker.js', MODEL.base), { type: 'module' }); } catch (_) { return modelNone(); }
   MODEL.worker = w; MODEL.state = 'loading'; MODEL.done = 0; MODEL.total = 0; MODEL.err = '';
   w.onmessage = (e) => modelMsg(w, e.data || {});
   w.onerror = (e) => { if (e && e.preventDefault) e.preventDefault(); if (MODEL.worker !== w) return; w.terminate(); MODEL.worker = null; const ran = MODEL.run; MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null;
-    if (ran) { MODEL.state = 'error'; MODEL.err = 'The model stopped before it finished (this device may not have the memory for it).'; } else MODEL.state = 'none'; syncModel(); syncUI(); };
-  w.postMessage({ type: 'load', base: MODEL.base, allow: !!allow }); syncModel();
+    if (ran) { MODEL.state = 'error'; MODEL.err = 'The model stopped before it finished (this device may not have the memory for it).'; syncModel(); syncUI(); } else modelNone(); };
+  w.postMessage({ type: 'load', base: MODEL.base, allow: !!allow }); syncUI();
 }
 function modelMsg(w, m) {
   if (MODEL.worker !== w) return;
   if (m.type === 'progress') { MODEL.done = m.done; MODEL.total = m.total; syncModel(); }
-  else if (m.type === 'need') { w.terminate(); MODEL.worker = null; MODEL.state = 'ask'; MODEL.total = m.total; syncModel(); }
-  else if (m.type === 'ready') { MODEL.state = 'ready'; MODEL.info = m; syncModel(); modelRun(); }
+  else if (m.type === 'need') { w.terminate(); MODEL.worker = null; MODEL.state = 'ask'; MODEL.total = m.total; syncModel(); syncUI(); if (T().seeds.length) shell.status('For a better outline of this tooth, press “Download the model” on the Pick a tooth step (once)'); }
+  else if (m.type === 'ready') { MODEL.state = 'ready'; MODEL.info = m; syncUI(); modelRun(); }
   else if (m.type === 'done') modelDone(m);
   else if (m.type === 'error') {
     if (MODEL.run && m.id === MODEL.run.id) { const t = T(); t.model = { key: MODEL.run.key, error: /memory|alloc|OOM/i.test(m.message) ? 'The model ran out of memory on this device.' : 'The model could not outline this tooth (' + m.message + ').' }; MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null; w.terminate(); MODEL.worker = null; MODEL.state = 'off'; syncUI(); }
-    else { w.terminate(); MODEL.worker = null; MODEL.state = /not available/.test(m.message) ? 'none' : 'error'; MODEL.err = m.message; syncModel(); }
+    else { w.terminate(); MODEL.worker = null; if (/not available/.test(m.message)) return modelNone(); MODEL.state = 'error'; MODEL.err = m.message; syncModel(); syncUI(); }
   }
 }
 /** hand the tooth at the first tap to the network (once per tap: its answer is kept with the tooth) */
@@ -993,7 +1004,8 @@ function modelRun(pass = 1, frame = null) {
   const rules = t.rules && !t.rules.error ? t.rules : null, fr = frame || D.modelFrame(S.vol, t.seeds[0], rules), map = D.modelMap(S.vol, rules && rules.levels, S.P), cube = D.modelCube(S.vol, fr.centre, fr.n, map);
   const id = ++MODEL.seq; MODEL.run = { id, key, pass, fr, cube: { n: cube.n, o: cube.o, h: cube.h }, t0: performance.now(), mapped: !!map };
   MODEL.worker.postMessage({ type: 'run', id, x: cube.x, n: cube.n }, [cube.x.buffer]);
-  clearInterval(MODEL.tick); MODEL.tick = setInterval(syncModel, 1000); syncModel();
+  clearInterval(MODEL.tick); MODEL.tick = setInterval(syncModel, 1000); syncModel(); syncUI();
+  if (pass === 1) shell.status('The model is outlining the tooth (about a minute): the amber outline is the rules’ stand-in until then');
 }
 function modelDone(m) {
   const R = MODEL.run; if (!R || m.id !== R.id) return; const t = T();
@@ -1006,7 +1018,8 @@ function modelDone(m) {
   }
   MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null;
   t.model = one.error ? { key: R.key, error: one.error } : { key: R.key, cube: R.cube, ids: teeth.ids, teeth: teeth.count, secs: (performance.now() - R.t0) / 1000, net: m.secs, pass: R.pass, mapped: R.mapped, clipped: one.touches.some((p) => p[0] || p[1]), parted: one.parted, maskKey: '', mask: null };
-  segment({ frame: false, keepCanalT: true });
+  const secs = t.model.error ? 0 : t.model.secs;
+  segment({ frame: false, keepCanalT: true }).then(() => { if (T().seg && T().seg.model) shell.status(`The tooth is now outlined by the model (${secs.toFixed(0)} s)`); });
 }
 /** the model's tooth for the taps as they stand: the tooth at each "Tooth" tap, together (kept until the taps change) */
 function modelMask(t) {
@@ -1017,15 +1030,17 @@ function modelMask(t) {
 function syncModel() {
   const el = $('dModel'), t = T(), on = MODEL.by === 'model', mb = (b) => (b / 1e6).toFixed(0); let h = '';
   if (on) {
-    if (MODEL.state === 'ask') h = `<p class="note">The model is a one-off download of about ${MODEL.total ? mb(MODEL.total) : 76} MB — the network and the engine that runs it — kept on this device afterwards. The scan is not sent anywhere: the model runs here.</p><div class="btns"><button class="btn pri" id="dGet" type="button" title="Fetch the tooth model and keep it on this device">Download the model</button></div>`;
+    if (MODEL.state === 'ask') h = `<p class="note warn">${t.seeds.length && t.seg && !t.seg.error ? 'The outline shown is by the rules. The model follows roots more fully and without the bumps. ' : ''}The model is a one-off download of about ${MODEL.total ? mb(MODEL.total) : 76} MB — the network and the engine that runs it — kept on this device afterwards. The scan is not sent anywhere: the model runs here.</p><div class="btns"><button class="btn pri" id="dGet" type="button" title="Fetch the tooth model and keep it on this device">Download the model</button></div>`;
     else if (MODEL.state === 'loading') h = `<div class="prog"><i style="width:${MODEL.total ? Math.round(100 * MODEL.done / MODEL.total) : 0}%"></i></div><p class="note">${MODEL.total && MODEL.done < MODEL.total ? `Getting the model… ${mb(MODEL.done)} of ${mb(MODEL.total)} MB` : 'Starting the model…'}</p>`;
-    else if (MODEL.state === 'none') h = '<p class="note warn">The model cannot be loaded in this copy of the tool (it needs its files beside the page, as on notile.co.uk): the rules’ outline is used.</p>';
     else if (MODEL.state === 'error') h = `<p class="note warn">${N.esc(MODEL.err || 'The model could not be started.')} The rules’ outline is used.</p><div class="btns"><button class="btn" id="dGet" type="button" title="Try to load the tooth model again">Try again</button></div>`;
-    else if (MODEL.run) h = `<p class="note">The model is outlining the tooth… ${Math.round((performance.now() - MODEL.run.t0) / 1000)} s${MODEL.run.pass > 1 ? ' (a second pass: the tooth reached the edge of the first)' : ''}. It usually takes about a minute; the rules’ outline shows meanwhile.</p>`;
+    else if (MODEL.run) h = `<p class="note warn">The model is outlining the tooth… ${Math.round((performance.now() - MODEL.run.t0) / 1000)} s${MODEL.run.pass > 1 ? ' (a second pass: the tooth reached the edge of the first)' : ''}. It usually takes about a minute. The amber outline shown meanwhile is the rules’ stand-in: it will be replaced.</p>`;
     else if (t.model && t.model.error) h = `<p class="note warn">${N.esc(t.model.error)} The rules’ outline is shown.</p>`;
     else if (MODEL.state === 'ready' && !t.seeds.length) h = '<p class="note">The model is ready: tap a tooth.</p>';
   }
+  if (MODEL.state === 'none') h = '<p class="note">The tooth model cannot be loaded in this copy of the tool (its files are not beside the page, as they are on notile.co.uk): the rules’ outline is used.</p>';
   if (el.innerHTML !== h) el.innerHTML = h;
+  { const b = $('dBy').querySelector('[data-v=model]'); if (MODEL.state === 'none') { b.disabled = true; b.title = 'The tooth model is not in this copy of the tool'; } }
+  toothColours();
   const mdl = !!(on && t.seg && t.seg.model); for (const id of ['dShape', 'dR', 'dUp', 'dDown', 'dT']) $(id).closest('.row').hidden = mdl; $('dFit').hidden = mdl;
 }
 function roi3D() {
@@ -1109,10 +1124,10 @@ const SEG = {
 SEG.cshow = N.segBind($('cShow'), (v) => { S.canal.show = v; show3D(); }, 'glass');
 const SEGV = { shape: 'cyl', setShape: null };
 SEGV.setShape = N.segBind($('dShape'), (v) => { SEGV.shape = v; if (T().roi) roiFromSliders(); }, 'cyl');
-SEG.by = N.segBind($('dBy'), (v) => { MODEL.by = v; modelPref(v); if (v === 'model') { if (MODEL.state === 'off' || MODEL.state === 'error') { MODEL.state = 'off'; modelLoad(false); } } else modelStop(); if (T().seeds.length && T().roi) segment({ frame: false, fit: false, keepCanalT: true }); else syncUI(); }, 'rules');
+SEG.by = N.segBind($('dBy'), (v) => { MODEL.by = v; modelPref(v); if (v === 'model') { if (MODEL.state === 'off' || MODEL.state === 'error') { MODEL.state = 'off'; modelLoad(false); } } else modelStop(); if (T().seeds.length && T().roi) segment({ frame: false, fit: false, keepCanalT: true }); else syncUI(); }, 'model');
 $('dModel').addEventListener('click', (e) => { if (e.target.id === 'dGet') { MODEL.state = 'off'; modelLoad(true); } });
 $('lFlip').addEventListener('click', () => { if (!S.vol || !S.vol.guessed || S.busy) return; setVolume(D.flipStack(S.vol)); shell.status('The scan was turned over, top to bottom: anything picked or measured on it was cleared'); });
-if (modelPref() === 'model') { MODEL.by = 'model'; SEG.by('model'); }
+if (modelPref() === 'rules') { MODEL.by = 'rules'; SEG.by('rules'); }
 $('vFit').addEventListener('click', () => { for (const v of Object.values(views)) { v.fitted = false; v.autoFit = true; } invalidate(); });
 $('vStraight').addEventListener('click', straighten);
 $('vCentre').addEventListener('click', () => { if (S.vol) { S.cur = S.vol.dims.map((n) => (n - 1) / 2); crossChanged(); } });
@@ -1154,13 +1169,14 @@ function syncUI() {
   let out = '';
   if (sg && !sg.error) {
     const M = sg.model ? t.model : null;
-    out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 || (M && M.clipped) ? ' warn' : ''}">${M ? (M.clipped ? 'model · reaches the edge' : 'model') : sg.touch > 20 ? 'reaches the edge' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div>${M ? `<div><span>Outline</span><b>model, in ${M.secs.toFixed(0)} s</b></div>` : `<div><span>Threshold</span><b>${t.T}</b></div>`}<div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
+    const wait = standIn();
+    out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 || (M && M.clipped) || wait ? ' warn' : ''}">${M ? (M.clipped ? 'model · reaches the edge' : 'model') : wait ? 'stand-in: the model is working' : sg.touch > 20 ? 'reaches the edge' : MODEL.by === 'model' && MODEL.state !== 'none' ? 'by the rules' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div>${M ? `<div><span>Outline</span><b>model, in ${M.secs.toFixed(0)} s</b></div>` : `<div><span>Threshold</span><b>${t.T}</b></div>`}<div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
     if (sg.touch > 20) out += '<p class="note warn">The tooth touches the edge of the region: widen it or move it, or the crown or a root may be cut off.</p>';
     if (M && M.parted) out += '<p class="note warn">The model had joined this tooth to another it touches (the one it bites on, most likely): they were parted at the narrow bridge between them. Check the outline there.</p>';
     if (M && M.clipped) out += '<p class="note warn">The tooth reaches the edge of the part of the scan the model was given: a root tip or the crown may be cut off. Tap nearer the middle of the tooth and pick it again.</p>';
     if (M && M.mapped) out += '<p class="note">This scan’s grey values are not on a CT-like scale, so they were stretched to one for the model: look at its outline with extra care.</p>';
   }
-  $('dOut').innerHTML = out; shell.markDone('tooth', !!(sg && !sg.error)); syncModel(); for (const x of $('dBy').querySelectorAll('button')) x.disabled = !has;
+  $('dOut').innerHTML = out; shell.markDone('tooth', !!(sg && !sg.error)); for (const x of $('dBy').querySelectorAll('button')) x.disabled = !has; syncModel();
   // the replica
   const ri = S.rep.info; $('rHdRow').hidden = $('rHlRow').hidden = !S.rep.handle;
   $('rOut').innerHTML = ri ? `<div class="sum"><h5>Replica<span class="okb${ri.closed && ri.parts === 1 ? '' : ' bad'}">${ri.closed ? (ri.parts === 1 ? 'closed, one piece' : ri.parts + ' pieces') : 'not closed'}</span></h5><div><span>Volume</span><b>${ri.volume.toFixed(0)} mm³</b></div><div><span>Tooth length</span><b>${mm(ri.toothLength)}</b></div><div><span>Enlarged by</span><b>${mm(ri.pdl, 2)}</b></div><div><span>Handle</span><b>${ri.handle ? 'yes' : 'no'}</b></div><div><span>Triangles</span><b>${ri.tris.toLocaleString('en-GB')}</b></div></div>` : '';
@@ -1168,7 +1184,7 @@ function syncUI() {
   // the root canals
   const cs = S.canal.seg, toothOk = !!(sg && !sg.error), vx = has ? Math.min(...S.vol.spacing) : 0;
   $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null;
-  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Check the red against the grey of the slices.';
+  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : (standIn() ? 'The tooth’s outline is still the rules’ stand-in: the model’s is on its way, and the canals will be found again inside it. ' : MODEL.by === 'model' && MODEL.state === 'ask' && !sg.model ? 'This tooth is outlined by the rules: download the model on the “Pick a tooth” step for a fuller, smoother outline, inside which more of the canals are found. ' : '') + 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Check the red against the grey of the slices.';
   let co = '';
   if (cs && !cs.error) {
     co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Stops short of the tooth’s root end by</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
@@ -1186,6 +1202,7 @@ shell.onStepChange(() => {
   shell.hint(S.vol ? TOOLS[S.tool][1] : '');
   if (id === 'pano' && S.vol && !S.pano && S.arch.curve) makePano();
   if (id === 'canal' && S.vol && T().seg && !T().seg.error) { if (!S.canal.seg) findCanal().catch(() => {}); if (r3objs.tooth) fit3D(r3objs.tooth); }
+  if (id === 'tooth' && S.vol && MODEL.by === 'model' && MODEL.state === 'off') modelLoad(false);   // (is the model on this device? if not, the step asks)
 });
 
 // ───────────── inside Scan Card: the case ─────────────

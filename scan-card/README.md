@@ -111,13 +111,16 @@ gives the outline its best start. A tooth lying across
 the slices (impacted, on its side) is outlined by the older flood from the taps instead.
 "Outline by: Model" draws the outline with a trained network in place of those rules: ToothSeg's instance network
 (Isensee, van Nistelrooij, Krämer, Vinayahalingam and others; weights CC BY 4.0, trained on the ToothFairy2 scans),
-run on the device with ONNX Runtime Web in a worker of its own. It is asked for before anything is fetched: the pack
+run on the device with ONNX Runtime Web in a worker of its own. Where its pack is beside the page it is the outline of
+choice ("Rules" stays one press away, and is remembered). Nothing is fetched before the page has asked: the pack
 (`cbct/toothseg/`, about 76 MB: the engine's WebAssembly and the weights) is downloaded once, checked (size and
 SHA-256) and kept in the browser's store; the scan is never sent anywhere. The network is given a cube of 0.2 mm
 voxels round the tap (centred on the rules' outline, 4½ mm to spare; about a minute on one processor thread) and
 marks each voxel as background, the middle of a tooth or its rim. The middles are the teeth, each grown out into the
 rim; the tapped one becomes the outline, and a tooth the network joined to the one it bites on is parted at the narrow
-bridge between them (the page says when). The rules' outline shows until the model's is ready; the answer is kept with
+bridge between them (the page says when). Until the pack is downloaded a tapped tooth is outlined by the rules and the step says so; while the model is
+fetched or working, the rules' outline is shown as a stand-in — amber in the slices and in 3D, marked "stand-in" — and
+is replaced when the model's arrives (on the Root canals step the canals are then found again by themselves). The answer is kept with
 the tap, so cuts with the eraser, "Not tooth" (a 1 mm ball) and going back to "Rules" do not run it again. The
 replica's surface is set between voxels at the grey half way across the model's outline. On the two real scans it
 was tried on (0.25 mm and 0.2 mm voxels, from two makes of scanner) its outlines followed the roots to their tips without

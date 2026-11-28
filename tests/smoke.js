@@ -401,7 +401,8 @@ run({name:'Landing page',fn:async()=>{
         for(let k=a0[2];k<=a1[2];k++)for(let j=a0[1];j<=a1[1];j++)for(let i=a0[0];i<=a1[0];i++){const v=Math.round(-1000+2700*Math.max(0,Math.min(1,0.5-f(o[0]+i*h,o[1]+j*h,o[2]+k*h)/h))),q=i+nx*(j+ny*k);sum+=(v+1000)/2700;if(v>d[q])d[q]=v}
         if(String(t.name)==='45')v45=sum*h*h*h}
       V.min=-1000;V.max=1700;const demo=APP.S.demo;APP.setVolume(V);APP.S.demo=demo;APP.shell.goto('tooth');return v45});
-    await pg.click('#dBy [data-v=model]');await pg.waitForFunction(()=>APP.MODEL.state==='ask',null,{timeout:60000});
+    await pg.waitForFunction(()=>APP.MODEL.state==='ask',null,{timeout:60000});
+    expect(await pg.evaluate(()=>APP.MODEL.by==='model'&&document.querySelector('#dBy [data-v=model]').classList.contains('on')),'the model is not the outline of choice where its pack is beside the page');
     expect(/one-off download/.test(await pg.textContent('#dModel'))&&!(await pg.evaluate(()=>APP.MODEL.worker)),'“Model” did not ask before fetching: '+await pg.textContent('#dModel'));
     await pg.click('#dGet');await pg.waitForFunction(()=>APP.MODEL.state==='ready'||APP.MODEL.state==='error'||APP.MODEL.state==='none',null,{timeout:120000});
     expect(await pg.evaluate(()=>APP.MODEL.state)==='ready','the model did not start: '+await pg.textContent('#dModel'));
