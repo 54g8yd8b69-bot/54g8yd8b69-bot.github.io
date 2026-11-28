@@ -1724,13 +1724,25 @@ function gauss3(F, n, s) {
  *     per slice, along which the dip adds up to the most — above what noise alone adds up to — is a canal. It ends where the
  *     dip ahead no longer outweighs the noise. Lines are taken one after another, each from the chamber or from a canal
  *     already found, until none is left that stands out;
+ *   · a line leaves the chamber rootwards (what comes up to it from the crown's side is not a canal), and a short line that
+ *     leaves a hollow only to come back to the same hollow is that hollow's flank;
  *   · each is drawn as a tube whose width follows from the depth of its dip and the scan's blur: a canal d across dips
- *     by 1 − exp(−d² / 8σ²).
- * → { mask (wide hollows and the voxels the canals pass through), wide, paths: [{ q, pts, r, f, score }], grid: { n, h, O, u, v, w },
- *     I, inT, f, T, auto, pulp, dentine, count, volume, pieces, lo, hi, length, apexGap, crownGap, canals, levels, faint (mm of
- *     canal drawn from its dip alone), noise: { level, spread, floor }, has(x, y, z) } or { error }
+ *     by 1 − exp(−d² / 8σ²);
+ *   · a canal runs on to the end of its root whether the scan shows it or not. The roots are read from the tooth's own
+ *     outline (its pieces slice by slice; a piece with nothing below it, after 1½ mm of root of its own, is a tip). A line
+ *     that gives out short of its root's tip is carried on to ¾ mm from the tip along the likeliest course — through what
+ *     dip there is, otherwise down the middle of the root — or into the first canal or hollow it meets; a root no canal
+ *     reached gets one from the chamber the same way. Such a stretch is "seen" only where its own dip stands out as a
+ *     found line's must; the rest is "presumed": kept apart in every result, so that it can be drawn and counted apart.
+ * → { mask (seen: wide hollows and the voxels the canals pass through), maskP (presumed stretches), wide,
+ *     paths: [{ q, pts, r, f, pres (per point: 1 presumed), forcedFrom (index from which it was carried on), score }],
+ *     grid: { n, h, O, u, v, w }, I, inT, f, T, auto, pulp, dentine, and of what is seen: count, volume, pieces, lo, hi, length,
+ *     apexGap, crownGap, canals, levels, faint (mm of canal drawn from its dip alone); presumed (mm), apexGapAll, loAll, hiAll
+ *     (with the presumed stretches), roots (tips found), noise: { level, spread, floor },
+ *     has(x, y, z) → 0 | 1 seen | 2 presumed (read between the voxels once canalField has been worked out) } or { error }
  * o: T (the grey below which a wide hollow counts — default midway between pulp and dentine; set higher, fainter canals are
- *    followed too), psf (the scan's blur σ in mm: default 1¼ voxels), maxVoxels, sidePad, endPad, minRun (mm), maxPaths
+ *    followed too), psf (the scan's blur σ in mm: default 1¼ voxels), maxVoxels, sidePad, endPad, minRun (mm), maxPaths,
+ *    reach (false: no canal is carried on beyond what its dip shows)
  */
 export function segmentCanal(vol, seg, o = {}) {
   if (!seg || seg.error || !seg.lab) return { error: 'Pick the tooth first.' };
@@ -1798,6 +1810,8 @@ export function segmentCanal(vol, seg, o = {}) {
     const L = slLev[k], f2 = (L - Is[q]) / Math.max(1, L - pulp);
     if (ins[q] === 1 && f2 >= Math.min(tW, 0.35) && f2 > fv) { const need = L - 0.3 * span; let ok = 0; for (let d = 0; d < 4; d++) { const a = DIR[d][0], b = DIR[d][1], R = R2[d < 2 ? 0 : 1]; if (sideMax(q, i, j, a, b, R) >= need && sideMax(q, i, j, -a, -b, R) >= need) ok++; } if (ok >= 3) fv = f2; }
     f[q] = Math.min(1.2, fv); if (ins[q] === 1 && fv >= tW) wide[q] = 1; }
+  // (a single voxel of a wide hollow that noise left out — hollow on all four sides in its slice and above or below — belongs to it)
+  for (let pass = 0; pass < 2; pass++) for (let k = 1; k < n2 - 1; k++) for (let j = 1; j < n1 - 1; j++) for (let i = 1; i < n0 - 1; i++) { const q = i + n0 * j + sl * k; if (!wide[q] && ins[q] === 1 && wide[q - 1] && wide[q + 1] && wide[q - n0] && wide[q + n0] && (wide[q - sl] || wide[q + sl])) wide[q] = 1; }
   // ── wide hollows: the pulp (chamber and wide canal) is the largest; others count when a canal leads to them ──
   const id = new Int32Array(n), list = [null];
   for (let q0 = 0; q0 < n; q0++) { if (!wide[q0] || id[q0]) continue; const L = list.length, P = { size: 0, crown: 0, vox: [] }; id[q0] = L; st.push(q0);
@@ -1806,9 +1820,10 @@ export function segmentCanal(vol, seg, o = {}) {
     list.push(P); }
   const minVox = Math.max(3, Math.ceil((o.minPiece ?? 0.1) / (h * h * h))); let ch = 0;
   for (let L = 1; L < list.length; L++) if (list[L].size >= minVox && (!ch || list[L].size > list[ch].size)) ch = L;
-  const keep = new Uint8Array(n), anch = new Uint8Array(n), near = new Uint8Array(n), joined = new Uint8Array(list.length);
+  const keep = new Uint8Array(n), anch = new Uint8Array(n), near = new Uint8Array(n), nid = new Int16Array(n), joined = new Uint8Array(list.length);
+  const markN = (q, r, idn) => { const i = q % n0, j = ((q / n0) | 0) % n1, base = q - i - n0 * j; for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1 && a * a + b * b <= r * r + 0.5) { const t = base + ii + n0 * jj; near[t] = 1; if (idn && !nid[t]) nid[t] = idn; } } };
   const mark = (arr, q, r, rz = 0) => { const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let cz = -rz; cz <= rz; cz++) { const kk = k + cz; if (kk < 0 || kk >= n2) continue; for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1 && a * a + b * b <= r * r + 0.5) arr[ii + n0 * jj + sl * kk] = 1; } } };
-  const join = (L) => { if (!L || joined[L]) return; joined[L] = 1; for (const q of list[L].vox) { keep[q] = 1; mark(anch, q, 2, 1); mark(near, q, 1); } };
+  const join = (L) => { if (!L || joined[L]) return; joined[L] = 1; for (const q of list[L].vox) { keep[q] = 1; mark(anch, q, 2, 1); markN(q, 1, -1); } };
   join(ch);
   // ── what noise alone looks like: the dips of plain dentine (most of the tooth). A line that picks the darkest of nine voxels
   //    at every step gathers, from noise alone, about what the darkest twentieth of them shows: that is the floor a canal's
@@ -1834,23 +1849,97 @@ export function segmentCanal(vol, seg, o = {}) {
     if (q0 < 0) break;
     const pts = []; let q = q0; for (;;) { pts.push(q); const bp = ptr[q]; if (bp < 0) break; const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; q = (i + (bp % 3) - 1) + n0 * (j + ((bp / 3) | 0) - 1) + sl * (k + ap); }
     let first = 0; while (first < pts.length - 1 && near[pts[first + 1]]) first++;   // (its run through what is already found is not part of it, but for the voxel it leaves from)
-    const run = pts.slice(first); let gain = 0; for (const p of run) if (!near[p]) gain += crest[p] || wide[p] ? f[p] - delta : -0.5 * delta; for (const p of run) mark(near, p, sup);
-    if (run.length < minRun || gain < minScore) continue;
+    if (ch) for (let a = pts.length - 1; a > first; a--) if (id[pts[a]] === ch) { first = a; break; }   // (nor is a line that comes up to the chamber from the crown's side: a canal leaves the chamber rootwards)
+    const run = pts.slice(first); let gain = 0; for (const p of run) if (!near[p]) gain += crest[p] || wide[p] ? f[p] - delta : -0.5 * delta; const okRun = run.length >= minRun && gain >= minScore; for (const p of run) markN(p, sup, okRun ? paths.length + 1 : 0);
+    if (!okRun) continue;
     for (const p of run) { mark(anch, p, 2, 1); if (id[p]) join(id[p]); else { const i = p % n0, j = ((p / n0) | 0) % n1; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1) join(id[p + a + n0 * b]); } } }
     paths.push({ q: run, score: gain });
   }
   if (!ch && !paths.length) return { ...base0, grid, I, inT, f, error: 'No canal space shows inside this tooth: raise the canal threshold, or check the tooth was picked whole.' };
+  // ── the roots, and the canals carried on to their ends ──
+  //    A canal runs on to the end of its root whether the scan shows it or not. So: the pieces of the tooth in each slice are
+  //    linked from slice to slice towards the root end, and a piece with nothing below it, at the end of 1½ mm of root of its
+  //    own, is a root's tip. Where a line of dip gives out short of its root's tip, and for a root in which no canal was
+  //    found, the most likely course is taken as far as ¾ mm from the tip: through what dip there is, otherwise down the
+  //    middle of the root (o.reach === false: not done). Such a stretch counts as seen only where its dip stands above the
+  //    noise; the rest is "presumed".
+  const tips = [];
+  if (o.reach !== false) {
+    const comp = new Int32Array(n), CP = [null], dt = new Uint8Array(n);
+    for (let k = t0; k <= t1; k++) { const base = k * sl; for (let r0 = 0; r0 < sl; r0++) { if (ins[base + r0] !== 1 || comp[base + r0]) continue; const c = { k, vox: [], up: [], down: [] }, L = CP.length; comp[base + r0] = L; st.push(r0);
+        while (st.length) { const r = st.pop(), i = r % n0, j = (r / n0) | 0; c.vox.push(r);
+          if (i > 0 && ins[base + r - 1] === 1 && !comp[base + r - 1]) { comp[base + r - 1] = L; st.push(r - 1); } if (i < n0 - 1 && ins[base + r + 1] === 1 && !comp[base + r + 1]) { comp[base + r + 1] = L; st.push(r + 1); }
+          if (j > 0 && ins[base + r - n0] === 1 && !comp[base + r - n0]) { comp[base + r - n0] = L; st.push(r - n0); } if (j < n1 - 1 && ins[base + r + n0] === 1 && !comp[base + r + n0]) { comp[base + r + n0] = L; st.push(r + n0); } }
+        CP.push(c); } }
+    for (let L = 1; L < CP.length; L++) { const c = CP[L], kb = c.k + ap; if (kb < t0 || kb > t1) continue; const got = new Set(), base = kb * sl; for (const r of c.vox) { const d = comp[base + r]; if (d && !got.has(d)) { got.add(d); c.down.push(d); CP[d].up.push(L); } } }
+    const depth = new Int32Array(CP.length); for (let a = 1; a < CP.length; a++) { const L = fromTop ? a : CP.length - a; let m = 0; for (const d of CP[L].down) if (depth[d] > m) m = depth[d]; depth[L] = m + 1; }
+    // (how far each voxel lies inside its slice's outline, in tenths of a voxel)
+    { const A = new Float32Array(sl); for (let k = t0; k <= t1; k++) { const base = k * sl; for (let r = 0; r < sl; r++) A[r] = ins[base + r] === 1 ? 1e3 : 0;
+        for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const r = i + n0 * j; if (!A[r]) continue; let m = A[r]; m = Math.min(m, (i > 0 ? A[r - 1] : 0) + 1, (j > 0 ? A[r - n0] : 0) + 1, (i > 0 && j > 0 ? A[r - n0 - 1] : 0) + 1.414, (i < n0 - 1 && j > 0 ? A[r - n0 + 1] : 0) + 1.414); A[r] = m; }
+        for (let j = n1 - 1; j >= 0; j--) for (let i = n0 - 1; i >= 0; i--) { const r = i + n0 * j; if (!A[r]) continue; let m = A[r]; m = Math.min(m, (i < n0 - 1 ? A[r + 1] : 0) + 1, (j < n1 - 1 ? A[r + n0] : 0) + 1, (i < n0 - 1 && j < n1 - 1 ? A[r + n0 + 1] : 0) + 1.414, (i > 0 && j < n1 - 1 ? A[r + n0 - 1] : 0) + 1.414); A[r] = m; }
+        for (let r = 0; r < sl; r++) dt[base + r] = Math.min(250, Math.round(A[r] * 10)); } }
+    const largestUp = (L) => { let up = CP[L].up[0]; for (const x of CP[L].up) if (CP[x].vox.length > CP[up].vox.length) up = x; return up; };
+    const backN = Math.max(1, Math.round(0.75 / h)), minRoot = Math.max(3, Math.round(1.5 / h)), tipOf = new Map();
+    for (let L = 1; L < CP.length; L++) { if (CP[L].down.length || inCrown(CP[L].k)) continue; let m = L, len = 1;
+      while (CP[m].up.length && len < minRoot) { const up = largestUp(m); let deepest = true; for (const d of CP[up].down) if (d !== m && (depth[d] > depth[m] || (depth[d] === depth[m] && d < m))) deepest = false; if (!deepest) break; m = up; len++; }
+      if (len < minRoot) continue;
+      let S = L; for (let s2 = 0; s2 < backN && CP[S].up.length; s2++) S = largestUp(S);
+      let md = 0; const bS = CP[S].k * sl; for (const r of CP[S].vox) if (dt[bS + r] > md) md = dt[bS + r];
+      const tp = { L, S, k: CP[L].k, kS: CP[S].k, stop: CP[S].vox.filter((r) => dt[bS + r] >= 0.5 * md) }; tips.push(tp); tipOf.set(L, tp); }
+    // the best course from a voxel down to a tip's end: what dip there is counts as in the search above; plain dentine costs
+    // half the noise floor a voxel, up to three times that next to the root's surface; a step sideways costs a little
+    const dC = 10 * Math.max(1, 0.75 / h), side = 0.1 * delta;
+    const sF = (q) => (near[q] ? 0 : (crest[q] || wide[q]) && f[q] > delta ? f[q] - delta : -0.5 * delta * (1 + 2 * Math.max(0, 1 - dt[q] / dC)));
+    const forcedFrom = (tp, kTop) => { const bS = tp.kS * sl; for (let r = 0; r < sl; r++) { V[bS + r] = -Infinity; ptr[bS + r] = -1; } for (const r of tp.stop) V[bS + r] = sF(bS + r);
+      const steps = Math.abs(kTop - tp.kS); for (let t = 1; t <= steps; t++) { const k = tp.kS - ap * t, kb = k + ap, base = k * sl;
+        for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = base + i + n0 * j; if (ins[q] !== 1) { V[q] = -Infinity; ptr[q] = -1; continue; } let best = -Infinity, bp = -1;
+          for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const val = V[kb * sl + ii + n0 * jj] - (da || db ? side : 0); if (val > best) { best = val; bp = (da + 1) + 3 * (db + 1); } } }
+          if (best > -Infinity) { V[q] = sF(q) + best; ptr[q] = bp; } else { V[q] = -Infinity; ptr[q] = -1; } } } };
+    const follow = (q0) => { const pts = []; let q = q0; for (;;) { pts.push(q); const bp = ptr[q]; if (bp < 0) break; const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; q = (i + (bp % 3) - 1) + n0 * (j + ((bp / 3) | 0) - 1) + sl * (k + ap); } return pts; };
+    const hollowAt = (q, r) => { const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let c = -1; c <= 1; c++) { const kk = k + c; if (kk < 0 || kk >= n2) continue; for (let b = -r; b <= r; b++) for (let a = -r; a <= r; a++) { const ii = i + a, jj = j + b; if (ii < 0 || jj < 0 || ii >= n0 || jj >= n1) continue; const t = ii + n0 * jj + sl * kk; if (keep[t] && id[t]) return id[t]; } } return 0; };
+    const lay = (run, idn) => { for (const p of run) { markN(p, sup, idn); mark(anch, p, 2, 1); if (id[p]) join(id[p]); } };
+    // 1. each line found, on to the tip of the root it is in (or into another canal, where that is the likelier course)
+    for (let a = 0; a < paths.length; a++) { const P = paths[a], e = P.q[P.q.length - 1], ke = (e / sl) | 0, L0 = comp[e]; if (!L0) continue;
+      const cands = [], seenC = new Set([L0]), stack = [L0]; while (stack.length) { const L = stack.pop(), tp = tipOf.get(L); if (tp && (tp.kS - ke) * ap > backN) cands.push(tp); for (const d of CP[L].down) if (!seenC.has(d)) { seenC.add(d); stack.push(d); } }
+      let best = null, bv = -Infinity; for (const tp of cands) { forcedFrom(tp, ke); if (V[e] > bv) { bv = V[e]; best = tp; } } if (!best) continue;
+      if (cands.length > 1) forcedFrom(best, ke);
+      const ext = follow(e).slice(1); let cut = 0; while (cut < ext.length && (!nid[ext[cut]] || nid[ext[cut]] === a + 1)) cut++;
+      if (cut < ext.length && nid[ext[cut]] < 0) { ext.length = cut + 1; P.merged = true;   // it runs into a wide hollow: it ends there
+        // (a short line that leaves a hollow only to come back to it is that hollow's own flank, not a canal)
+        const h0 = hollowAt(P.q[0], 2); if (h0 && h0 === hollowAt(ext[cut], 1) && P.q.length + ext.length < Math.round(4 / h)) { P.drop = true; for (let q = 0; q < n; q++) if (nid[q] === a + 1) nid[q] = 0; continue; } }
+      else if (cut < ext.length) { P.merged = true;   // it runs into another canal: drawn into that canal's own line, at no more than 45°
+        const B = paths[nid[ext[cut]] - 1], qc = cut > 0 ? ext[cut - 1] : e, ic = qc % n0, jc = ((qc / n0) | 0) % n1, kc = (qc / sl) | 0, at = (k) => { let bq = -1, bd = Infinity; for (const q of B.q) { const d = Math.abs(((q / sl) | 0) - k); if (d < bd) { bd = d; bq = q; } } return bq; };
+        const q1 = at(kc + ap), g = Math.max(1, Math.ceil(Math.max(Math.abs((q1 % n0) - ic), Math.abs((((q1 / n0) | 0) % n1) - jc)))), qt = at(kc + ap * g), kt = (qt / sl) | 0, it = qt % n0, jt = ((qt / n0) | 0) % n1, steps = (kt - kc) * ap; ext.length = cut;
+        if (steps >= 1 && Math.max(Math.abs(it - ic), Math.abs(jt - jc)) <= steps) for (let t = 1; t <= steps; t++) ext.push(Math.round(ic + (it - ic) * t / steps) + n0 * Math.round(jc + (jt - jc) * t / steps) + sl * (kc + ap * t));
+        if (!ext.length) continue; }
+      else if (ext.length < minRun) continue;
+      P.forcedFrom = P.q.length; for (const p of ext) P.q.push(p); lay(ext, a + 1); }
+    // 2. a root no canal has reached (none ends within 1½ mm of its tip's end): from the chamber, or from the canal nearest at hand
+    const served = new Set(); for (const P of paths) { if (P.drop) continue; let c = P.q.length - 1; while (c > 0 && !comp[P.q[c]]) c--; const e = P.q[c], ke = (e / sl) | 0, L0 = comp[e]; if (!L0) continue; const seenC = new Set([L0]), stack = [L0]; while (stack.length) { const L = stack.pop(), tp = tipOf.get(L); if (tp && (tp.kS - ke) * ap <= backN + 2) served.add(tp); for (const d of CP[L].down) if (!seenC.has(d)) { seenC.add(d); stack.push(d); } } }
+    for (const tp of tips) { if (served.has(tp)) continue;
+      forcedFrom(tp, crownTip); let q0 = -1, bv = -Infinity; const steps = Math.abs(crownTip - tp.kS); for (let t = 1; t <= steps; t++) { const base = (tp.kS - ap * t) * sl; for (let r = 0; r < sl; r++) if (anch[base + r] && V[base + r] > bv) { bv = V[base + r]; q0 = base + r; } }
+      if (q0 < 0) continue; const pts = follow(q0); let first = 0; while (first < pts.length - 1 && near[pts[first + 1]]) first++; const run = pts.slice(first); if (run.length < minRun) continue;
+      paths.push({ q: run, score: bv, forcedFrom: 0 }); lay(run, paths.length); }
+  }
+  for (let a = paths.length - 1; a >= 0; a--) if (paths[a].drop) paths.splice(a, 1);
   // ── each canal's width from the depth of its dip: a canal d across, blurred by the scan (σ), dips by 1 − exp(−d²/8σ²) ──
-  const sig = o.psf ?? 1.25 * vox, mask = Uint8Array.from(keep); let faint = 0, tubeVol = 0;
-  for (const P of paths) { const m = P.q.length, fr = new Float32Array(m), r = new Float32Array(m), ij = new Float32Array(2 * m), kk = new Int32Array(m); P.f = fr; P.r = r; P.ij = ij; P.k = kk;
+  const sig = o.psf ?? 1.25 * vox, mask = Uint8Array.from(keep), maskP = new Uint8Array(n), minR = o.minRadius ?? 0.1; let faint = 0, tubeVol = 0, presumed = 0;
+  for (const P of paths) { const m = P.q.length, fr = new Float32Array(m), r = new Float32Array(m), ij = new Float32Array(2 * m), kk = new Int32Array(m), pres = new Uint8Array(m); P.f = fr; P.r = r; P.ij = ij; P.k = kk; P.pres = pres;
     // the line itself, evened out: from voxel to voxel it steps a whole voxel sideways or none; the canal does not
     for (let a = 0; a < m; a++) { const q = P.q[a]; ij[2 * a] = q % n0; ij[2 * a + 1] = ((q / n0) | 0) % n1; kk[a] = (q / sl) | 0; }
     for (let pass = 0; pass < 4; pass++) { const c = ij.slice(); for (let a = 1; a < m - 1; a++) { ij[2 * a] = (c[2 * a - 2] + 2 * c[2 * a] + c[2 * a + 2]) / 4; ij[2 * a + 1] = (c[2 * a - 1] + 2 * c[2 * a + 1] + c[2 * a + 3]) / 4; } }
     P.pts = Array.from({ length: m }, (_, a) => [0, 1, 2].map((d) => O[d] + h * (ij[2 * a] * u[d] + ij[2 * a + 1] * v[d] + kk[a] * w[d])));
-    for (let a = 0; a < m; a++) { let sm = 0, cnt = 0; for (let b = Math.max(0, a - 2); b <= Math.min(m - 1, a + 2); b++) { sm += f[P.q[b]]; cnt++; } fr[a] = sm / cnt; const fe = Math.max(0, Math.min(0.6, fr[a] - mf)); r[a] = keep[P.q[a]] ? (o.minRadius ?? 0.1) : Math.max(o.minRadius ?? 0.1, Math.min(0.45, 0.5 * sig * Math.sqrt(-8 * Math.log(1 - fe)))); }   // (inside a wide hollow the hollow's own surface is drawn, not a tube)
+    // a stretch that was carried on: seen where its own dip, over 1½ mm of it, stands above the noise — for at least 1 mm, and
+    // by as much in all as a line found by its dip must. A presumed stretch shorter than 1 mm between two that are seen is seen
+    if (P.forcedFrom != null) { const f0 = P.forcedFrom, Wn = Math.max(2, Math.round(0.75 / h)), ev = new Float32Array(m); for (let a = f0; a < m; a++) { const q = P.q[a]; ev[a] = keep[q] ? delta : crest[q] || wide[q] ? f[q] - delta : -0.5 * delta; }
+      for (let a = f0; a < m; a++) { let sm = 0, cnt = 0; for (let b = Math.max(f0, a - Wn); b <= Math.min(m - 1, a + Wn); b++) { sm += ev[b]; cnt++; } pres[a] = sm / cnt > 0 ? 0 : 1; }
+      const minS = Math.max(2, Math.round(1 / h));
+      for (let a = f0; a < m;) { let b = a, gain = 0; while (b < m && pres[b] === 0) { gain += ev[b]; b++; } if (b > a && (b - a < minS || gain < minScore)) for (let c = a; c < b; c++) pres[c] = 1; a = Math.max(b, a) + (b === a ? 1 : 0); }   // (and it must stand out as a line found by its dip does)
+      for (let a = f0; a < m;) { let b = a; while (b < m && pres[b] === 1) b++; if (b > a && b - a < minS && (b < m || P.merged) && (a > f0 || f0 > 0)) for (let c = a; c < b; c++) pres[c] = 0; a = Math.max(b, a) + (b === a ? 1 : 0); } }   // (or between one and the canal it runs into)
+    for (let a = 0; a < m; a++) { let sm = 0, cnt = 0; for (let b = Math.max(0, a - 2); b <= Math.min(m - 1, a + 2); b++) { sm += f[P.q[b]]; cnt++; } fr[a] = sm / cnt; const fe = Math.max(0, Math.min(0.6, fr[a] - mf)); r[a] = keep[P.q[a]] || pres[a] ? minR : Math.max(minR, Math.min(0.45, 0.5 * sig * Math.sqrt(-8 * Math.log(1 - fe)))); }   // (inside a wide hollow the hollow's own surface is drawn, not a tube)
     { const c = r.slice(); for (let a = 1; a < m - 1; a++) r[a] = (c[a - 1] + 2 * c[a] + c[a + 1]) / 4; }
-    for (let a = 0; a < m; a++) { const q = P.q[a]; if (!keep[q]) { faint += h; tubeVol += Math.PI * r[a] * r[a] * h; } mask[q] = 1; if (r[a] > 0.75 * h) mark(mask, q, 1); } }
-  for (let q = 0; q < n; q++) if (mask[q] && !ins[q]) mask[q] = 0;
+    for (let a = 0; a < m; a++) { const q = P.q[a]; if (pres[a]) { presumed += h; if (!mask[q]) maskP[q] = 1; continue; } if (!keep[q]) { faint += h; tubeVol += Math.PI * r[a] * r[a] * h; } mask[q] = 1; maskP[q] = 0; if (r[a] > 0.75 * h) mark(mask, q, 1); } }
+  for (let q = 0; q < n; q++) if (!ins[q]) mask[q] = maskP[q] = 0; else if (mask[q]) maskP[q] = 0;
   // ── what was found ──
   let count = 0, wideN = 0, c0 = n2, c1 = -1; const plo = [Infinity, Infinity, Infinity], phi = [-Infinity, -Infinity, -Infinity];
   for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { const q = i + n0 * j + sl * k; if (!mask[q]) continue; count++; if (keep[q]) wideN++; if (k < c0) c0 = k; if (k > c1) c1 = k;
@@ -1867,33 +1956,54 @@ export function segmentCanal(vol, seg, o = {}) {
   const runL = Math.max(2, Math.round(0.75 / h)); let canals = 1;
   for (let m = 2; m <= 6; m++) { let len = 0, ok = false; for (const L of levels) { len = L.root && L.count >= m ? len + 1 : 0; if (len >= runL) { ok = true; break; } } if (ok) canals = m; else break; }
   const apexEnd = fromTop ? c0 : c1, crownEnd = fromTop ? c1 : c0;
-  const has = (x, y, z) => { const d = [x - O[0], y - O[1], z - O[2]], i = Math.round(dot(d, u) / h), j = Math.round(dot(d, v) / h), k = Math.round(dot(d, w) / h); return i >= 0 && j >= 0 && k >= 0 && i < n0 && j < n1 && k < n2 && mask[i + n0 * j + sl * k] === 1; };
-  return { ...base0, by: 'tooth', mask, wide: keep, paths, f, I, inT, grid, tW, count, volume: wideN * h * h * h + tubeVol, pieces, lo: plo, hi: phi, length: (c1 - c0 + 1) * h, apexGap: Math.max(0, fromRoot(apexEnd)), crownGap: Math.abs(crownTip - crownEnd) * h, canals, levels, faint, noise: { level: mf, spread: sf, floor: delta }, has };
+  // all of it, presumed stretches too: how far it reaches and its bounds
+  let a0 = c0, a1 = c1; const alo = plo.slice(), ahi = phi.slice();
+  for (let k = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++) { if (!maskP[i + n0 * j + sl * k]) continue; if (k < a0) a0 = k; if (k > a1) a1 = k; for (let a = 0; a < 3; a++) { const x = O[a] + h * (i * u[a] + j * v[a] + k * w[a]); if (x < alo[a]) alo[a] = x; if (x > ahi[a]) ahi[a] = x; } }
+  const out = { ...base0, by: 'tooth', mask, maskP, wide: keep, paths, f, I, inT, grid, tW, count, volume: wideN * h * h * h + tubeVol, pieces, lo: plo, hi: phi, loAll: alo, hiAll: ahi, length: (c1 - c0 + 1) * h, apexGap: Math.max(0, fromRoot(apexEnd)), apexGapAll: Math.max(0, fromRoot(fromTop ? a0 : a1)), crownGap: Math.abs(crownTip - crownEnd) * h, canals, levels, faint, presumed, roots: tips.length, voxel: vox, noise: { level: mf, spread: sf, floor: delta }, fine: null };
+  // has(x, y, z) → 0 (not canal), 1 (canal seen in the scan) or 2 (a presumed stretch). Once canalField has been worked out
+  // for it (out.fine), the answer is read between the voxels — the hollow's own smooth edge, and a narrow canal wherever the
+  // slice, one voxel thick, touches its tube; before that, by voxel.
+  out.has = (x, y, z) => { const d = [x - O[0], y - O[1], z - O[2]], a = dot(d, u), b = dot(d, v), c = dot(d, w), F = out.fine;
+    if (F) { const fx = (a - F.off[0]) / F.h, fy = (b - F.off[1]) / F.h, fz = (c - F.off[2]) / F.h, [m0, m1, m2] = F.n; if (fx < 0 || fy < 0 || fz < 0 || fx > m0 - 1 || fy > m1 - 1 || fz > m2 - 1) return 0;
+      const i = Math.min(m0 - 2, fx | 0), j = Math.min(m1 - 2, fy | 0), k = Math.min(m2 - 2, fz | 0), tx = fx - i, ty = fy - j, tz = fz - k, q = i + m0 * (j + m1 * k), ms = m0 * m1;
+      const tri = (G) => ((G[q] * (1 - tx) + G[q + 1] * tx) * (1 - ty) + (G[q + m0] * (1 - tx) + G[q + m0 + 1] * tx) * ty) * (1 - tz) + ((G[q + ms] * (1 - tx) + G[q + ms + 1] * tx) * (1 - ty) + (G[q + ms + m0] * (1 - tx) + G[q + ms + m0 + 1] * tx) * ty) * tz;
+      if (tri(F.Fw) < 0) return 1; if (tri(F.Ft) >= F.margin) return 0; return F.cls[Math.round(fx) + m0 * (Math.round(fy) + m1 * Math.round(fz))] === 2 ? 2 : 1; }
+    const i = Math.round(a / h), j = Math.round(b / h), k = Math.round(c / h); if (i < 0 || j < 0 || k < 0 || i >= n0 || j >= n1 || k >= n2) return 0; const q = i + n0 * j + sl * k; return mask[q] ? 1 : maskP[q] ? 2 : 0; };
+  return out;
 }
 /**
- * canalField(cs, o) → { F, n, h }: the canals as a field for N.isoMesh, on a grid three times as fine as the canal grid (twice
- * for a large tooth) and only as large as the canals: below 0 inside. A wide hollow's surface lies where its dip is at the
- * threshold; a narrow canal is a tube of its own width round its line. (Coordinates: canalToPatient.)
+ * canalField(cs, o) → { F, n, h, Fw, Ft, cls, part(which), any }: the canals as a field for N.isoMesh, on a grid three times
+ * as fine as the canal grid (twice for a large tooth) and only as large as the canals: below 0 inside. A wide hollow's
+ * surface lies where its dip is at the threshold (Fw); a narrow canal is a tube of its own width round its line (Ft: the
+ * distance to the nearest tube's surface; cls: that tube's kind, 1 seen, 2 presumed). F is all of it; part('seen') and
+ * part('presumed') are the two apart, for drawing them apart (any.presumed: whether there is a presumed stretch at all).
+ * It also gives cs.has its fine answer (cs.fine; o.keep === false: not) — a narrow canal counts wherever a slice one voxel
+ * thick touches its tube (o.margin, default half a voxel). (Coordinates: canalToPatient.)
  */
 export function canalField(cs, o = {}) {
-  const { grid, f, wide, mask, paths, tW } = cs, [n0, n1, n2] = grid.n, h = grid.h, sl = n0 * n1, n = mask.length;
-  let b0 = [n0, n1, n2], b1 = [-1, -1, -1]; for (let q = 0; q < n; q++) if (mask[q]) { const p = [q % n0, ((q / n0) | 0) % n1, (q / sl) | 0]; for (let a = 0; a < 3; a++) { if (p[a] < b0[a]) b0[a] = p[a]; if (p[a] > b1[a]) b1[a] = p[a]; } }
+  const { grid, f, wide, mask, paths, tW } = cs, [n0, n1, n2] = grid.n, h = grid.h, sl = n0 * n1, n = mask.length, maskP = cs.maskP;
+  let b0 = [n0, n1, n2], b1 = [-1, -1, -1]; for (let q = 0; q < n; q++) if (mask[q] || (maskP && maskP[q])) { const p = [q % n0, ((q / n0) | 0) % n1, (q / sl) | 0]; for (let a = 0; a < 3; a++) { if (p[a] < b0[a]) b0[a] = p[a]; if (p[a] > b1[a]) b1[a] = p[a]; } }
   for (let a = 0; a < 3; a++) { b0[a] = Math.max(0, b0[a] - 2); b1[a] = Math.min(grid.n[a] - 1, b1[a] + 2); }
-  const cells = (b1[0] - b0[0]) * (b1[1] - b0[1]) * (b1[2] - b0[2]), sub = o.sub ?? (cells * 27 <= 12e6 ? 3 : cells * 8 <= 16e6 ? 2 : 1), hf = h / sub, m = [0, 1, 2].map((a) => (b1[a] - b0[a]) * sub + 1), F = new Float32Array(m[0] * m[1] * m[2]);
+  const cells = (b1[0] - b0[0]) * (b1[1] - b0[1]) * (b1[2] - b0[2]), sub = o.sub ?? (cells * 27 <= 12e6 ? 3 : cells * 8 <= 16e6 ? 2 : 1), hf = h / sub, m = [0, 1, 2].map((a) => (b1[a] - b0[a]) * sub + 1), N3 = m[0] * m[1] * m[2], Fw = new Float32Array(N3), Ft = new Float32Array(N3).fill(1e3), cls = new Uint8Array(N3);
   // the wide hollows: the dip, where it belongs to one of them or lies next to one (elsewhere none). The surface is drawn a
   // little outside where the dip is at the threshold: a voxel only counts as hollow once the hollow covers most of it
   const lev = tW - 0.06, fk = new Float32Array(n); for (let q = 0; q < n; q++) { if (!wide[q]) continue; const i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; for (let dc = -1; dc <= 1; dc++) { const kk = k + dc; if (kk < 0 || kk >= n2) continue; for (let db = -1; db <= 1; db++) { const jj = j + db; if (jj < 0 || jj >= n1) continue; for (let da = -1; da <= 1; da++) { const ii = i + da; if (ii < 0 || ii >= n0) continue; const r = ii + n0 * jj + sl * kk; fk[r] = wide[r] ? Math.max(f[r], tW + 0.02) : Math.min(f[r], lev - 0.02); } } } }
   for (let c = 0; c < m[2]; c++) { const zc = b0[2] + c / sub, k = Math.min(n2 - 2, Math.floor(zc)), tz = zc - k; for (let b = 0; b < m[1]; b++) { const yc = b0[1] + b / sub, j = Math.min(n1 - 2, Math.floor(yc)), ty = yc - j; for (let a = 0; a < m[0]; a++) {
     const xc = b0[0] + a / sub, i = Math.min(n0 - 2, Math.floor(xc)), tx = xc - i, q = i + n0 * j + sl * k;
     const fv = ((fk[q] * (1 - tx) + fk[q + 1] * tx) * (1 - ty) + (fk[q + n0] * (1 - tx) + fk[q + n0 + 1] * tx) * ty) * (1 - tz) + ((fk[q + sl] * (1 - tx) + fk[q + sl + 1] * tx) * (1 - ty) + (fk[q + sl + n0] * (1 - tx) + fk[q + sl + n0 + 1] * tx) * ty) * tz;
-    F[a + m[0] * (b + m[1] * c)] = 0.75 * (lev - fv); } } }   // (¾ mm: about the width over which a blurred edge falls)
-  // the narrow canals: tubes round their lines
-  for (const P of paths) for (let s = 0; s < P.q.length; s++) { const e = Math.min(P.q.length - 1, s + 1), ra = P.r[s], rb = P.r[e];
-    const pa = [(P.ij[2 * s] - b0[0]) * h, (P.ij[2 * s + 1] - b0[1]) * h, (P.k[s] - b0[2]) * h], pb = [(P.ij[2 * e] - b0[0]) * h, (P.ij[2 * e + 1] - b0[1]) * h, (P.k[e] - b0[2]) * h], ab = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2], rr = Math.max(ra, rb) + 2 * hf;
+    Fw[a + m[0] * (b + m[1] * c)] = 0.75 * (lev - fv); } } }   // (¾ mm: about the width over which a blurred edge falls)
+  // the narrow canals: tubes round their lines (each grid point keeps its nearest tube's kind: seen 1, presumed 2)
+  const reach = Math.max(2 * hf, o.reach ?? 0.75 * (cs.voxel || h));
+  for (const P of paths) for (let s = 0; s < P.q.length; s++) { const e = Math.min(P.q.length - 1, s + 1), ra = P.r[s], rb = P.r[e], kind = P.pres && P.pres[s] && P.pres[e] ? 2 : 1;
+    const pa = [(P.ij[2 * s] - b0[0]) * h, (P.ij[2 * s + 1] - b0[1]) * h, (P.k[s] - b0[2]) * h], pb = [(P.ij[2 * e] - b0[0]) * h, (P.ij[2 * e + 1] - b0[1]) * h, (P.k[e] - b0[2]) * h], ab = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2], rr = Math.max(ra, rb) + reach;
     const lo3 = [0, 1, 2].map((a) => Math.max(0, Math.floor((Math.min(pa[a], pb[a]) - rr) / hf))), hi3 = [0, 1, 2].map((a) => Math.min(m[a] - 1, Math.ceil((Math.max(pa[a], pb[a]) + rr) / hf)));
-    for (let c = lo3[2]; c <= hi3[2]; c++) for (let b = lo3[1]; b <= hi3[1]; b++) for (let a = lo3[0]; a <= hi3[0]; a++) { const x = a * hf - pa[0], y = b * hf - pa[1], z = c * hf - pa[2], t = L2 > 0 ? Math.max(0, Math.min(1, (x * ab[0] + y * ab[1] + z * ab[2]) / L2)) : 0, d = Math.hypot(x - t * ab[0], y - t * ab[1], z - t * ab[2]) - (ra + t * (rb - ra)), g = a + m[0] * (b + m[1] * c); if (d < F[g]) F[g] = d; } }
+    for (let c = lo3[2]; c <= hi3[2]; c++) for (let b = lo3[1]; b <= hi3[1]; b++) for (let a = lo3[0]; a <= hi3[0]; a++) { const x = a * hf - pa[0], y = b * hf - pa[1], z = c * hf - pa[2], t = L2 > 0 ? Math.max(0, Math.min(1, (x * ab[0] + y * ab[1] + z * ab[2]) / L2)) : 0, d = Math.hypot(x - t * ab[0], y - t * ab[1], z - t * ab[2]) - (ra + t * (rb - ra)), g = a + m[0] * (b + m[1] * c); if (d < Ft[g] - (kind === 2 && cls[g] === 1 ? 0.05 : 0)) { Ft[g] = d; cls[g] = kind; } } }
   grid.off = [b0[0] * h, b0[1] * h, b0[2] * h];
-  return { F, n: m, h: hf };
+  // all of it (F), and its two parts for drawing apart: what the scan shows, and the presumed stretches
+  const F = new Float32Array(N3); for (let g = 0; g < N3; g++) F[g] = Math.min(Fw[g], Ft[g]);
+  const part = (which) => { const G = new Float32Array(N3); if (which === 'presumed') for (let g = 0; g < N3; g++) G[g] = cls[g] === 2 ? Ft[g] : 1e3; else for (let g = 0; g < N3; g++) G[g] = Math.min(Fw[g], cls[g] === 2 ? 1e3 : Ft[g]); return G; };
+  if (o.keep !== false) cs.fine = { Fw, Ft, cls, n: m, h: hf, off: grid.off, margin: o.margin ?? 0.5 * (cs.voxel || h) };
+  return { F, n: m, h: hf, Fw, Ft, cls, part, any: { presumed: cls.includes(2) } };
 }
 /** a canal mesh from N.isoMesh(canalField(cs)…) (millimetres in the canal grid's own frame) → the patient's coordinates */
 export function canalToPatient(mesh, cs) {

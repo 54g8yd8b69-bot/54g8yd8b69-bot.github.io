@@ -19,6 +19,12 @@ button{touch-action:manipulation}
 #cbBar .btn{padding:5px 9px;font-size:11.5px;background:#16365a;color:#dbe7f3;border-color:#1e4772}
 #cbBar .sp{flex:1}
 #cbBar .rd{color:#9fb6cf;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#cbBar .btn.on{background:var(--teal2);color:#fff;border-color:var(--teal2)}
+#cbImg{flex-basis:100%;display:flex;gap:6px 18px;align-items:center;flex-wrap:wrap;padding:3px 0 1px}
+#cbImg[hidden]{display:none}
+#cbImg label{display:flex;align-items:center;gap:7px;color:#dbe7f3;font-size:11.5px;min-width:0}
+#cbImg input[type=range]{width:120px;accent-color:#2dd4bf}
+#cbImg .val{color:#9fb6cf;font-variant-numeric:tabular-nums;min-width:30px;text-align:right}
 html.embed #cbBar{padding-left:8px}
 #cbGrid{display:grid;gap:2px;min-height:0;min-width:0;background:#08131f}
 #cbGrid.mpr{grid-template:"ax co" 1fr "sa r3" 1fr / 1fr 1fr}
@@ -90,7 +96,7 @@ const EMPTY = '<div><b>Open a CBCT scan</b>Drop the DICOM folder, files or a .zi
 // ───────────── state ─────────────
 const S = {
   vol: null, H: null, P: null, series: [], seriesId: null, skipped: 0, files: 0,
-  cur: [0, 0, 0], win: { l: 0, w: 1 }, preset: 'bone', tool: 'browse', layout: 'mpr', max: null,
+  cur: [0, 0, 0], win: { l: 0, w: 1 }, sharp: 0, preset: 'bone', tool: 'browse', layout: 'mpr', max: null,
   fr: frames0(), frVer: 0, rotating: null, rotTag: null,
   measures: [], draft: null,
   arch: { points: [], curve: null, ver: 0, slab: 10, mode: 'mean', s: 0, count: 3, step: 2, width: 30 },
@@ -99,7 +105,7 @@ const S = {
   surf: { mesh: null, info: null, detail: 0.5, largest: false, T: null },
   tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false },
   rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
-  canal: { T: null, seg: null, mesh: null, show: 'glass', ver: 0 },
+  canal: { T: null, seg: null, mesh: null, meshP: null, show: 'glass', pres: 'show', ver: 0 },
   pending: null, demo: null, busy: false, loads: 0,
 };
 
@@ -121,9 +127,10 @@ const shell = N.createShell({
       <div class="row"><label>Window</label><div class="seg" id="vPreset"><button data-v="bone" type="button" title="Bone and teeth">Bone</button><button data-v="teeth" type="button" title="Enamel, dentine and pulp">Teeth</button><button data-v="soft" type="button" title="Soft tissue and airway">Soft</button><button data-v="full" type="button" title="Every value in the scan">Full</button></div></div>
       <div class="row"><label>Level</label><input type="range" id="vLevel" step="1"><span class="val"></span></div>
       <div class="row"><label>Width</label><input type="range" id="vWidth" step="1"><span class="val"></span></div>
+      <div class="row"><label>Sharpness</label><input type="range" id="vSharp" min="-100" max="100" step="5" value="0"><span class="val"></span></div>
       <div class="btns"><button class="btn" id="vFit" type="button" title="Show each slice whole again">Fit the slices</button><button class="btn" id="vCentre" type="button" title="Put the cross-hair back in the middle of the scan">Centre the cross-hair</button><button class="btn" id="vStraight" type="button" title="Turn the cross-hair back square to the scan">Straighten the cross-hair</button></div>
       <div id="vInfo"></div>
-      <p class="tip">Use the bar above the slices for the tools: Point moves the cross-hair, Move pans, Window changes brightness (drag across for width, up and down for level), Distance and Angle measure on any slice — the panoramic and cross-sections too. Measurements are in millimetres in the plane of the slice. The window presets are display settings only.</p>
+      <p class="tip">Use the bar above the slices for the tools: Point moves the cross-hair, Move pans, Window changes brightness and contrast (drag up and down for level, across for width), Image opens brightness, contrast and sharpness sliders on any step, Distance and Angle measure on any slice — the panoramic and cross-sections too. Measurements are in millimetres in the plane of the slice. The window presets and the sharpness are display settings only: sharpening makes edges and fine canals stand out and noise with them (below 0 it smooths instead); nothing is measured or outlined from the sharpened picture.</p>
       <p class="tip">Turning the cross-hair: with Point, drag one of the round handles on its lines. The other two slices turn with the lines and become oblique slices, still square to each other and to the slice you turned it in — for example, turn it in the axial slice to lie along the arch, then in the cross-cut slice to follow a tooth’s long axis. The angle shows by the handle and in each slice’s label; it settles on straight within half a degree. With a slice selected, [ and ] turn its lines 1° at a time (0.1° with Shift). “Straighten” puts every slice back square to the scan.</p>` },
     { id: 'd3', title: '3D and surface', optional: true, html: `
       <p class="lead">The scan in 3D: the brightest value along each line of sight (MIP), or the surface where it crosses a threshold. Make that surface into an STL model.</p>
@@ -175,6 +182,7 @@ const shell = N.createShell({
     { id: 'canal', title: 'Root canals', optional: true, html: `
       <p class="lead" id="cLead"></p>
       <div class="row"><label>Canal threshold</label><input type="range" id="cT" step="1"><span class="val"></span></div>
+      <div class="row"><label>Presumed course</label><div class="seg" id="cPres"><button data-v="show" type="button" title="Where a canal is not seen as far as the end of its root, its likely course on to the end is drawn in yellow">Shown</button><button data-v="hide" type="button" title="Only what the scan itself shows">Hidden</button></div></div>
       <div class="row"><label>Tooth shown as</label><div class="seg" id="cShow"><button data-v="glass" type="button" title="The tooth as clear glass round the canals">Glass</button><button data-v="hide" type="button" title="The canals on their own">Hidden</button></div></div>
       <div class="btns"><button class="btn pri" id="cFind" type="button" title="Find the pulp chamber and canals again, at the threshold worked out from this tooth">Find the canals</button><button class="btn" id="cAlign" type="button" title="Turn the slices to run along and across this tooth’s long axis">Slices along the tooth</button><button class="btn" id="cStl" type="button" title="Download the canals as an STL file, in the scan’s coordinates">Download STL</button></div>
       <div id="cOut"></div>
@@ -187,7 +195,8 @@ shell.setEmpty(true);
 
 // ───────────── the views ─────────────
 const grid = N.el('div', { id: 'cb', hidden: '' }, `
-  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><button class="btn" id="cbStraight" type="button" title="Turn the cross-hair back square to the scan" hidden>Straighten</button><span class="sp"></span><span class="rd" id="cbRead"></span></div>
+  <div id="cbBar"><div class="seg" id="cbTool"></div><button class="btn" id="cbClear" type="button" title="Remove all measurements">Clear measurements</button><button class="btn" id="cbStraight" type="button" title="Turn the cross-hair back square to the scan" hidden>Straighten</button><button class="btn" id="cbImage" type="button" title="Brightness, contrast and sharpness of the slices" aria-expanded="false">Image</button><span class="sp"></span><span class="rd" id="cbRead"></span>
+    <div id="cbImg" hidden><label>Brightness<input type="range" id="iB" min="-100" max="100" step="1" value="0"><span class="val"></span></label><label>Contrast<input type="range" id="iC" min="0" max="100" step="1" value="50"><span class="val"></span></label><label>Sharpness<input type="range" id="iS" min="-100" max="100" step="5" value="0"><span class="val"></span></label><button class="btn" id="iReset" type="button" title="Back to the bone window with no sharpening">Reset</button></div></div>
   <div id="cbGrid" class="mpr">
     ${['ax', 'co', 'sa'].map((v) => `<div class="vp" data-v="${v}" data-a="${v}" style="grid-area:${v}"></div>`).join('')}
     <div class="vp r3" data-v="r3" data-a="r3" style="grid-area:r3"></div>
@@ -309,6 +318,19 @@ function buildLUT() {
   const V = S.vol, lo = V.min, n = V.max - lo + 1, a = S.win.l - S.win.w / 2, w = Math.max(1, S.win.w); LUT = new Uint32Array(n);
   for (let q = 0; q < n; q++) { let g = ((lo + q - a) / w) * 255; g = g < 0 ? 0 : g > 255 ? 255 : g | 0; LUT[q] = 0xFF000000 | (g << 16) | (g << 8) | g; }
 }
+/**
+ * a slice's values made sharper (amount > 0: each value moved away from the average of its surroundings, by up to three times
+ * the difference at 100) or smoother (amount < 0: towards it, all the way at −100). The surroundings are those of the picture
+ * itself — about one voxel round each point. For the display only.
+ */
+const sharpBuf = {};
+function sharpen(src, cols, rows, key) {
+  const a = S.sharp > 0 ? S.sharp / 100 * 3 : S.sharp / 100, n = cols * rows, B = sharpBuf[key] && sharpBuf[key].o.length === n ? sharpBuf[key] : (sharpBuf[key] = { o: new Int16Array(n), t: new Float32Array(n) }), { o, t } = B, lo = S.vol.min, hi = S.vol.max;
+  for (let r = 0; r < rows; r++) { const b = r * cols; for (let c = 0; c < cols; c++) { const c0 = c > 1 ? c - 2 : 0, c1 = c > 0 ? c - 1 : 0, c3 = c < cols - 1 ? c + 1 : cols - 1, c4 = c < cols - 2 ? c + 2 : cols - 1; t[b + c] = (src[b + c0] + 4 * src[b + c1] + 6 * src[b + c] + 4 * src[b + c3] + src[b + c4]) / 16; } }
+  for (let r = 0; r < rows; r++) { const r0 = (r > 1 ? r - 2 : 0) * cols, r1 = (r > 0 ? r - 1 : 0) * cols, r2 = r * cols, r3 = (r < rows - 1 ? r + 1 : rows - 1) * cols, r4 = (r < rows - 2 ? r + 2 : rows - 1) * cols;
+    for (let c = 0; c < cols; c++) { const bl = (t[r0 + c] + 4 * t[r1 + c] + 6 * t[r2 + c] + 4 * t[r3 + c] + t[r4 + c]) / 16, v = src[r2 + c], x = v + a * (v - bl); o[r2 + c] = x < lo ? lo : x > hi ? hi : x; } }
+  return o;
+}
 /** the values shown by a view (Int16Array, cols × rows) */
 const bufs = {};
 function imageData(v, g) {
@@ -363,21 +385,27 @@ function pixelFrame(v, g) {
   if (v.kind === 'co') return { P0: [o[0], o[1] + Math.round(S.cur[1]) * sy, o[2] + (nz - 1) * sz], du: [sx, 0, 0], dv: [0, 0, -sz] };
   return { P0: [o[0] + Math.round(S.cur[0]) * sx, o[1], o[2] + (nz - 1) * sz], du: [0, sy, 0], dv: [0, 0, -sz] };
 }
-/** the canals found, tinted red into a slice image (on the Root canals step, in place of the tooth's tint) */
-function tintCanal(v, px, g) {
-  const cs = S.canal.seg, F = pixelFrame(v, g); let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity;
-  for (let m = 0; m < 8; m++) { const P = [0, 1, 2].map((a) => ((m >> a) & 1 ? cs.hi[a] + cs.grid.h : cs.lo[a] - cs.grid.h)), [aa, bb] = fromVox(v, ...w2v(P)); c0 = Math.min(c0, aa / g.su); c1 = Math.max(c1, aa / g.su); r0 = Math.min(r0, bb / g.sv); r1 = Math.max(r1, bb / g.sv); }
-  c0 = Math.max(0, Math.floor(c0) - 1); c1 = Math.min(g.cols - 1, Math.ceil(c1) + 1); r0 = Math.max(0, Math.floor(r0) - 1); r1 = Math.min(g.rows - 1, Math.ceil(r1) + 1);
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-    if (!cs.has(F.P0[0] + c * F.du[0] + r * F.dv[0], F.P0[1] + c * F.du[1] + r * F.dv[1], F.P0[2] + c * F.du[2] + r * F.dv[2])) continue;
-    const q = r * g.cols + c, p = px[q], rr = p & 255, gg = (p >> 8) & 255, bb = (p >> 16) & 255; px[q] = 0xFF000000 | (((bb * 0.35 + 0.65 * 40) | 0) << 16) | (((gg * 0.35 + 0.65 * 50) | 0) << 8) | ((rr * 0.35 + 0.65 * 255) | 0);
-  }
+/**
+ * the canals found, as a picture laid over a slice (on the Root canals step, in place of the tooth's tint): red where the scan
+ * shows them, yellow where a stretch is presumed. It is worked out four times as fine as the slice's own pixels — the canal
+ * finder's answer is read between the voxels — over the part of the slice the canals lie in, and kept until the slice or the
+ * canals change. → { cv, c0, r0, cols, rows } (in the slice's pixels) or null
+ */
+function canalLayer(v, g, fast) {
+  const cs = S.canal.seg, F = pixelFrame(v, g), showP = S.canal.pres !== 'hide', lo = showP && cs.loAll ? cs.loAll : cs.lo, hi = showP && cs.hiAll ? cs.hiAll : cs.hi, pad = 2 * cs.grid.h; let c0 = Infinity, c1 = -Infinity, r0 = Infinity, r1 = -Infinity;
+  for (let m = 0; m < 8; m++) { const P = [0, 1, 2].map((a) => ((m >> a) & 1 ? hi[a] + pad : lo[a] - pad)), [aa, bb] = fromVox(v, ...w2v(P)); c0 = Math.min(c0, aa / g.su); c1 = Math.max(c1, aa / g.su); r0 = Math.min(r0, bb / g.sv); r1 = Math.max(r1, bb / g.sv); }
+  c0 = Math.max(0, Math.floor(c0) - 1); c1 = Math.min(g.cols - 1, Math.ceil(c1) + 1); r0 = Math.max(0, Math.floor(r0) - 1); r1 = Math.min(g.rows - 1, Math.ceil(r1) + 1); if (c1 < c0 || r1 < r0) return null;
+  const sub = fast || (c1 - c0 + 1) * (r1 - r0 + 1) > 60000 ? 2 : 4, W = (c1 - c0 + 1) * sub, H = (r1 - r0 + 1) * sub, cv = v.offC || (v.offC = document.createElement('canvas')); cv.width = W; cv.height = H;
+  const oc = cv.getContext('2d'), im = oc.createImageData(W, H), px = new Uint32Array(im.data.buffer); let any = false;
+  for (let y = 0; y < H; y++) { const r = r0 + (y + 0.5) / sub - 0.5, bx = F.P0[0] + r * F.dv[0], by = F.P0[1] + r * F.dv[1], bz = F.P0[2] + r * F.dv[2];
+    for (let x = 0; x < W; x++) { const c = c0 + (x + 0.5) / sub - 0.5, kind = cs.has(bx + c * F.du[0], by + c * F.du[1], bz + c * F.du[2]); if (!kind || (kind === 2 && !showP)) continue; any = true; px[y * W + x] = kind === 2 ? 0x9A3CD6FF : 0xA62832FF; } }   // (ABGR: yellow at 60 %, red at 65 %)
+  oc.putImageData(im, 0, 0); return any ? { cv, c0, r0, cols: c1 - c0 + 1, rows: r1 - r0 + 1 } : null;
 }
 const canalShown = () => stepId() === 'canal' && S.canal.seg && !S.canal.seg.error;
 /** the tooth found, tinted into a slice image (the tooth may have been found on a coarser copy of the scan: seg.vol) */
 function tint(v, px, g) {
   const sg = S.tooth.seg; if (!sg || sg.error || !['ax', 'co', 'sa'].includes(v.kind)) return;
-  if (stepId() === 'canal') { if (canalShown()) tintCanal(v, px, g); return; }
+  if (stepId() === 'canal') return;   // (the canals are laid over the slice by drawView: canalLayer)
   if (g.ob) return tintOblique(v, px, g);
   const V = S.vol, W = sg.vol || V, { lab, box } = sg, { i0, j0, k0, nx, ny, nz } = box, NZ = V.dims[2];
   const c = (q) => tintPx(px, q);
@@ -399,14 +427,16 @@ function drawView(v) {
   const g = geom(v);
   if (!g) { ctx.fillStyle = '#9fb6cf'; ctx.font = '13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(v.kind === 'pan' || v.kind === 'xs' ? 'Tap along the arch on the axial slice, or “Propose the arch”' : '', W / 2, H / 2); v.lab.innerHTML = `<i style="background:${COL[v.kind]}"></i>${TITLE[v.kind]}`; return; }
   if (!v.fitted || (sizeChanged && v.autoFit !== false)) fitView(v);
-  const key = `${g.key}|${S.win.l}|${S.win.w}|${segVer}|${g.cols}x${g.rows}${g.ob && S.rotating ? '|fast' : ''}${stepId() === 'canal' ? '|canal' + S.canal.ver : ''}`;
+  const key = `${g.key}|${S.win.l}|${S.win.w}|${S.sharp}|${segVer}|${g.cols}x${g.rows}${g.ob && S.rotating ? '|fast' : ''}${stepId() === 'canal' ? '|canal' + S.canal.ver : ''}`;
   if (v.offKey !== key) {
-    v.off.width = g.cols; v.off.height = g.rows; const oc = v.off.getContext('2d'), im = oc.createImageData(g.cols, g.rows), px = new Uint32Array(im.data.buffer), dat = imageData(v, g), lo = S.vol.min;
+    v.off.width = g.cols; v.off.height = g.rows; const oc = v.off.getContext('2d'), im = oc.createImageData(g.cols, g.rows), px = new Uint32Array(im.data.buffer), raw = imageData(v, g), dat = S.sharp ? sharpen(raw, g.cols, g.rows, v.kind + (v.m ?? '')) : raw, lo = S.vol.min;
     for (let q = 0; q < px.length; q++) px[q] = LUT[dat[q] - lo];
     tint(v, px, g); oc.putImageData(im, 0, 0); v.offKey = key;
+    v.canal = SLICE.has(v.kind) && canalShown() ? canalLayer(v, g, !!(g.ob && S.rotating)) : null;
   }
   const [X0, Y0] = toScreen(v, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'medium';
   ctx.drawImage(v.off, X0, Y0, g.cols * g.su * v.z, g.rows * g.sv * v.z);
+  if (v.canal) { const L = v.canal; ctx.drawImage(L.cv, X0 + L.c0 * g.su * v.z, Y0 + L.r0 * g.sv * v.z, L.cols * g.su * v.z, L.rows * g.sv * v.z); }
   overlays(v, g);
 }
 function line(ctx, pts, colour, w = 1, dash = null) { ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = w; if (dash) ctx.setLineDash(dash); ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke(); ctx.restore(); }
@@ -540,8 +570,16 @@ function crossChanged() {
   $('cbRead').textContent = `x ${p[0].toFixed(1)}  y ${p[1].toFixed(1)}  z ${p[2].toFixed(1)} mm · value ${val}`;
   invalidate(); planes3D();
 }
+/** the window as two plain sliders: brightness −100 … 100 (the level, from the top of the scan's values to the bottom) and
+ *  contrast 0 … 100 (the width, from every value in the scan down to a fiftieth of them: width = span · (1 − (c/100)²),
+ *  which puts the bone window near the middle and leaves the fine steps for narrow windows) */
+const winSpan = () => Math.max(200, S.vol.max - S.vol.min), winMid = () => (S.vol.max + S.vol.min) / 2;
+const brightOf = (l) => N.clamp(Math.round((winMid() - l) / (winSpan() / 2) * 100), -100, 100), levelOf = (b) => winMid() - b / 100 * winSpan() / 2;
+const contrastOf = (w) => N.clamp(Math.round(100 * Math.sqrt(Math.max(0, 1 - w / winSpan()))), 0, 100), widthOf = (c) => Math.max(winSpan() / 50, winSpan() * (1 - (c / 100) ** 2));
+let winFrom = null;
+function setSharp(v, from = null) { S.sharp = N.clamp(Math.round(v), -100, 100); if (from !== 'i') RB.iS.set(S.sharp); if (from !== 'v') RB.vSharp.set(S.sharp); try { localStorage.setItem('notile.cbct.sharp', String(S.sharp)); } catch (_) { /* no storage here */ } invalidate(); }
 function setWindow(l, w, preset = null) {
-  S.win = { l: Math.round(l), w: Math.max(1, Math.round(w)) }; S.preset = preset; buildLUT(); RB.level.set(S.win.l); RB.width.set(S.win.w); SEG.preset(preset || ''); mipUniforms(); invalidate(); viewer.invalidate();
+  S.win = { l: Math.round(l), w: Math.max(1, Math.round(w)) }; S.preset = preset; buildLUT(); RB.level.set(S.win.l); RB.width.set(S.win.w); if (winFrom !== 'b') RB.iB.set(brightOf(S.win.l)); if (winFrom !== 'c') RB.iC.set(contrastOf(S.win.w)); SEG.preset(preset || ''); mipUniforms(); invalidate(); viewer.invalidate();
 }
 /** move the cross-hair along a slice view's normal (mm): through a turned slice */
 function moveAlong(v, dt) { const n = S.fr[v.kind].n, P = v2w(S.cur); S.cur = w2v([P[0] + dt * n[0], P[1] + dt * n[1], P[2] + dt * n[2]]); crossChanged(); }
@@ -669,6 +707,8 @@ function setTools() {
   $('cbTool').innerHTML = list.map((t) => `<button type="button" data-v="${t}" title="${TOOLS[t][1]}"${t === S.tool ? ' class="on"' : ''}>${TOOLS[t][0]}</button>`).join('');
   for (const v of Object.values(views)) v.cv.style.cursor = S.tool === 'pan' ? 'grab' : S.tool === 'window' ? 'ns-resize' : 'crosshair';
 }
+$('cbImage').addEventListener('click', () => { const el = $('cbImg'), on = el.hidden; el.hidden = !on; $('cbImage').classList.toggle('on', on); $('cbImage').setAttribute('aria-expanded', String(on)); invalidate(); });
+$('iReset').addEventListener('click', () => { if (S.vol) setWindow(S.P.bone.l, S.P.bone.w, 'bone'); setSharp(0); });
 $('cbTool').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.tool = b.dataset.v; S.draft = null; setTools(); shell.hint(TOOLS[S.tool][1]); invalidate(); });
 $('cbClear').addEventListener('click', () => { S.measures = []; S.draft = null; invalidate(); syncUI(); });
 $('cbStraight').addEventListener('click', straighten);
@@ -820,7 +860,7 @@ function show3D() {
   box3.visible = showVol;
   if (r3objs.surf) r3objs.surf.visible = id === 'd3' && S.r3.showSurf;
   if (r3objs.tooth) { const o = r3objs.tooth; o.visible = id === 'tooth' || (id === 'replica' && !r3objs.rep) || (id === 'canal' && S.canal.show === 'glass'); o.userData.solid = o.userData.solid || o.material; o.material = id === 'canal' ? glass() : o.userData.solid; o.renderOrder = id === 'canal' ? 2 : 0; }
-  if (r3objs.canal) r3objs.canal.visible = id === 'canal'; r3cell.classList.toggle('pulp', id === 'canal' && !!S.canal.mesh);
+  if (r3objs.canal) r3objs.canal.visible = id === 'canal'; if (r3objs.canalP) r3objs.canalP.visible = id === 'canal' && S.canal.pres !== 'hide'; r3cell.classList.toggle('pulp', id === 'canal' && !!S.canal.mesh);
   if (r3objs.rep) r3objs.rep.visible = id === 'replica';
   if (r3objs.roi) r3objs.roi.visible = id === 'tooth';
   planes3D(); viewer.invalidate();
@@ -1052,22 +1092,24 @@ function syncRoiSliders() { const R = T().roi, s = T().seeds[0]; if (!R || !s) r
 function roiFromSliders() { const t = T(), s = t.seeds[0]; if (!t.roi || !s) return; pushHist(); t.roi = { ...t.roi, shape: SEGV.shape, r: RB.dR.get(), z0: s[2] - RB.dDown.get(), z1: s[2] + RB.dUp.get() }; t.fitted = true; segment(); }
 
 // ───────────── the root canals ─────────────
-function dropCanal(keepT) { const C = S.canal; C.seg = null; C.mesh = null; if (!keepT) C.T = null; C.ver++; if (r3objs.canal) { viewer.remove(r3objs.canal); r3objs.canal = null; } }
+function dropCanal(keepT) { const C = S.canal; C.seg = null; C.mesh = null; C.meshP = null; if (!keepT) C.T = null; C.ver++; for (const k of ['canal', 'canalP']) if (r3objs[k]) { viewer.remove(r3objs[k]); r3objs[k] = null; } }
 /** find the pulp chamber and canals inside the picked tooth (auto: at the threshold worked out from the tooth itself) */
 async function findCanal(o = {}) {
   const t = T(), C = S.canal; if (!S.vol || !t.seg || t.seg.error) { dropCanal(); syncUI(); return; }
   const t0 = performance.now();
   await shell.busy('Finding the canals…', async () => {
-    await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T }); let m = null;
-    if (!cs.error) { const f = D.canalField(cs); m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.004 }); if (m.indices.length) { D.taubin(m, 3); D.canalToPatient(m, cs); } else m = null; }
-    C.seg = cs; C.T = cs.T; C.mesh = m; C.ver++;
+    await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T }); let m = null, mP = null;
+    if (!cs.error) { const f = D.canalField(cs), mk = (F) => { const g = N.isoMesh(F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.004 }); if (!g.indices.length) return null; D.taubin(g, 3); return D.canalToPatient(g, cs); };
+      m = mk(f.any.presumed ? f.part('seen') : f.F); mP = f.any.presumed ? mk(f.part('presumed')) : null; }
+    C.seg = cs; C.T = cs.T; C.mesh = m; C.meshP = mP; C.ver++;
   });
   const cs = C.seg; cs.seconds = (performance.now() - t0) / 1000;
   if (cs.pulp != null) { const sp = cs.dentine - cs.pulp, inp = $('cT'); inp.min = Math.min(Math.round(cs.pulp + 0.1 * sp), cs.T); inp.max = Math.max(Math.round(cs.pulp + 0.95 * sp), cs.T); RB.cT.set(cs.T); }
-  if (r3objs.canal) { viewer.remove(r3objs.canal); r3objs.canal = null; }
+  for (const k of ['canal', 'canalP']) if (r3objs[k]) { viewer.remove(r3objs[k]); r3objs[k] = null; }
+  if (C.meshP) { r3objs.canalP = new THREE.Mesh(N.toGeometry(C.meshP), new THREE.MeshStandardMaterial({ color: 0xffe27a, emissive: 0xc9a200, emissiveIntensity: 0.45, roughness: 0.5, metalness: 0, side: THREE.DoubleSide })); r3objs.canalP.renderOrder = 1; r3objs.canalP.userData.noFit = true; viewer.add(r3objs.canalP); }
   if (C.mesh) { const g = N.toGeometry(C.mesh); r3objs.canal = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xff6a1f, emissive: 0xe0450a, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0, side: THREE.DoubleSide })); r3objs.canal.renderOrder = 1; r3objs.canal.userData.noFit = true; viewer.add(r3objs.canal); }
   show3D(); invalidate(); syncUI();
-  shell.status(cs.error ? cs.error : `Canals found: ${cs.volume.toFixed(1)} mm³, ${mm(cs.length)} long`, !!cs.error);
+  shell.status(cs.error ? cs.error : `Canals found: ${cs.volume.toFixed(1)} mm³, ${mm(cs.length)} long${cs.presumed > 0.5 ? `, and ${mm(cs.presumed)} presumed (yellow)` : ''}`, !!cs.error);
 }
 /** turn the slices to the picked tooth: the axial slice square to its long axis, the other two along it, zoomed on the tooth */
 function alignToTooth() {
@@ -1099,6 +1141,10 @@ async function download(name, mesh, header) { const r = await N.saveFile(name, N
 const RB = {
   level: N.rangeBind('vLevel', (v, done) => { if (S.vol) setWindow(v, S.win.w, null); }, { fmt: (v) => String(Math.round(v)) }),
   width: N.rangeBind('vWidth', (v) => { if (S.vol) setWindow(S.win.l, v, null); }, { fmt: (v) => String(Math.round(v)) }),
+  vSharp: N.rangeBind('vSharp', (v) => setSharp(v, 'v'), { fmt: (v) => (v > 0 ? '+' : '') + Math.round(v) }),
+  iB: N.rangeBind('iB', (v) => { if (!S.vol) return; winFrom = 'b'; setWindow(levelOf(v), S.win.w, null); winFrom = null; }, { fmt: (v) => (v > 0 ? '+' : '') + Math.round(v) }),
+  iC: N.rangeBind('iC', (v) => { if (!S.vol) return; winFrom = 'c'; setWindow(S.win.l, widthOf(v), null); winFrom = null; }, { fmt: (v) => String(Math.round(v)) }),
+  iS: N.rangeBind('iS', (v) => setSharp(v, 'i'), { fmt: (v) => (v > 0 ? '+' : '') + Math.round(v) }),
   iso: N.rangeBind('tIso', (v) => { S.r3.iso = v; mipUniforms(); }, { fmt: (v) => String(Math.round(v)) }),
   slab: N.rangeBind('pSlab', (v, done) => { S.arch.slab = v; if (done) schedulePano(); }, { fmt: (v) => mm(v) }),
   step: N.rangeBind('pStep', (v, done) => { S.arch.step = v; if (done) makeXs(); }, { fmt: (v) => mm(v) }),
@@ -1122,6 +1168,8 @@ const SEG = {
   pcount: N.segBind($('pCount'), (v) => { S.arch.count = +v; makeXs(); }, '3'),
 };
 SEG.cshow = N.segBind($('cShow'), (v) => { S.canal.show = v; show3D(); }, 'glass');
+SEG.cpres = N.segBind($('cPres'), (v) => { S.canal.pres = v; S.canal.ver++; show3D(); invalidate(); viewer.invalidate(); syncUI(); }, 'show');
+try { const v = parseFloat(localStorage.getItem('notile.cbct.sharp')); if (Number.isFinite(v) && v) setSharp(v); } catch (_) { /* no storage here */ }
 const SEGV = { shape: 'cyl', setShape: null };
 SEGV.setShape = N.segBind($('dShape'), (v) => { SEGV.shape = v; if (T().roi) roiFromSliders(); }, 'cyl');
 SEG.by = N.segBind($('dBy'), (v) => { MODEL.by = v; modelPref(v); if (v === 'model') { if (MODEL.state === 'off' || MODEL.state === 'error') { MODEL.state = 'off'; modelLoad(false); } } else modelStop(); if (T().seeds.length && T().roi) segment({ frame: false, fit: false, keepCanalT: true }); else syncUI(); }, 'model');
@@ -1145,7 +1193,9 @@ $('dUndo').addEventListener('click', () => { const t = T(); const h = t.hist.pop
 $('dClear').addEventListener('click', () => { const t = T(); modelStop(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; dropCanal(); if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
 $('cFind').addEventListener('click', () => findCanal({ auto: true }).catch(() => {}));
 $('cAlign').addEventListener('click', alignToTooth); $('dAlign').addEventListener('click', alignToTooth);
-$('cStl').addEventListener('click', () => { if (!S.canal.mesh) return shell.status('Find the canals first', true); download(`root-canals${S.rep.fdi ? '-' + S.rep.fdi : ''}.stl`, S.canal.mesh, `Notile CBCT root canals${S.rep.fdi ? ' ' + S.rep.fdi : ''}, LPS mm`); });
+/** the canals as one mesh for a file: what the scan shows and, while they are shown, the presumed stretches */
+function canalFileMesh() { const A = S.canal.mesh, B = S.canal.pres !== 'hide' ? S.canal.meshP : null; if (!A || !B) return A || B; const P = new Float32Array(A.positions.length + B.positions.length), I = new Uint32Array(A.indices.length + B.indices.length), off = A.positions.length / 3; P.set(A.positions); P.set(B.positions, A.positions.length); I.set(A.indices); for (let q = 0; q < B.indices.length; q++) I[A.indices.length + q] = B.indices[q] + off; return { positions: P, indices: I }; }
+$('cStl').addEventListener('click', () => { if (!S.canal.mesh) return shell.status('Find the canals first', true); const pres = S.canal.pres !== 'hide' && !!S.canal.meshP; download(`root-canals${S.rep.fdi ? '-' + S.rep.fdi : ''}.stl`, canalFileMesh(), `Notile CBCT root canals${S.rep.fdi ? ' ' + S.rep.fdi : ''}${pres ? ' with presumed stretches' : ''}, LPS mm`); });
 $('rHandle').addEventListener('change', (e) => { S.rep.handle = e.target.checked; syncUI(); if (S.rep.mesh) makeReplica(); });
 $('rFdi').addEventListener('change', (e) => { S.rep.fdi = /^[1-4][1-8]$/.test(e.target.value) ? e.target.value : ''; });
 $('rMake').addEventListener('click', () => makeReplica().catch(() => {}));
@@ -1184,11 +1234,11 @@ function syncUI() {
   // the root canals
   const cs = S.canal.seg, toothOk = !!(sg && !sg.error), vx = has ? Math.min(...S.vol.spacing) : 0;
   $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null;
-  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : (standIn() ? 'The tooth’s outline is still the rules’ stand-in: the model’s is on its way, and the canals will be found again inside it. ' : MODEL.by === 'model' && MODEL.state === 'ask' && !sg.model ? 'This tooth is outlined by the rules: download the model on the “Pick a tooth” step for a fuller, smoother outline, inside which more of the canals are found. ' : '') + 'The pulp chamber and canals inside the picked tooth: red in the slices, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Check the red against the grey of the slices.';
+  $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : (standIn() ? 'The tooth’s outline is still the rules’ stand-in: the model’s is on its way, and the canals will be found again inside it. ' : MODEL.by === 'model' && MODEL.state === 'ask' && !sg.model ? 'This tooth is outlined by the rules: download the model on the “Pick a tooth” step for a fuller, smoother outline, inside which more of the canals are found. ' : '') + 'The pulp chamber and canals inside the picked tooth: red in the slices where the scan shows them, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Where it is lost before the end of its root, its likely course on to the end is drawn in yellow: presumed, not seen. Check the colours against the grey of the slices (“Image” above the slices sharpens them).';
   let co = '';
   if (cs && !cs.error) {
-    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Stops short of the tooth’s root end by</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
-    co += `<p class="note${vx > 0.21 ? ' warn' : ''}">A scan with ${mm(vx, 2)} voxels blurs a canal over about ${mm(3 * vx, 1)}: canals narrower than ${mm(vx, 2)} or so, the last millimetres towards an apex, side canals and the fine webs between canals do not show on it, and are not drawn. Where a canal stops short of the root’s end, that is where its dip was lost in the noise — not where the canal ends.</p>`;
+    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Seen to within this of the root end</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Presumed, not seen (yellow)</span><b>${mm(cs.presumed || 0)}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
+    co += `<p class="note${vx > 0.21 ? ' warn' : ''}">A scan with ${mm(vx, 2)} voxels blurs a canal over about ${mm(3 * vx, 1)}: canals narrower than ${mm(vx, 2)} or so, the last millimetres towards an apex, side canals and the fine webs between canals do not show on it, and are not drawn. Where a canal’s dip is lost in the noise before the end of its root, the canal itself goes on: its likely course — through what dip there is, otherwise down the middle of the root, joining a neighbouring canal where that is nearer — is drawn in yellow as far as ¾ mm from the root’s tip. That stretch is a presumption, not a finding: “Presumed course: Hidden” leaves only what the scan shows.</p>`;
     if (cs.faint > 0) co += '<p class="note">Raise the threshold to follow fainter canals (more may be drawn than are there); lower it to keep to what is plain.</p>';
     if (cs.pieces > 1) co += '<p class="note">In more than one piece: a wide stretch of canal with nothing to be followed between it and the rest.</p>';
   }
@@ -1215,8 +1265,8 @@ function extendCase(c) {
   c.remove('cbct-replica');
   const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
   const t = T();
-  c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
-    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+  c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, sharp: S.sharp, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto, presumed: S.canal.pres } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
   if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
 }
 function readCase(c) {
@@ -1228,11 +1278,11 @@ function readCase(c) {
 function applyPending() {
   const d = S.pending; if (!d || !S.vol) return; S.pending = null;
   if (d.volume !== fingerprint()) { shell.status('The saved CBCT work belongs to a different scan, so it was not applied', true); return; }
-  if (d.window) setWindow(d.window.l, d.window.w, null);
+  if (d.window) setWindow(d.window.l, d.window.w, null); if (Number.isFinite(d.sharp)) setSharp(d.sharp);
   if (d.frames && SL.every((k) => d.frames[k] && ['u', 'v', 'n'].every((e) => Array.isArray(d.frames[k][e]) && d.frames[k][e].length === 3 && d.frames[k][e].every(Number.isFinite)))) { S.fr = { ax: d.frames.ax, co: d.frames.co, sa: d.frames.sa }; tidyFrames(); S.frVer++; crossChanged(); }
   if (Array.isArray(d.arch) && d.arch.length >= 2) { S.arch.points = d.arch; S.arch.slab = d.slab ?? S.arch.slab; RB.slab.set(S.arch.slab); archChanged(); }
   if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
-  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; segment({ fit: false, keepCanalT: true }); }
+  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; if (d.canal && (d.canal.presumed === 'hide' || d.canal.presumed === 'show')) { S.canal.pres = d.canal.presumed; SEG.cpres(S.canal.pres); } segment({ fit: false, keepCanalT: true }); }
   if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
   invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
 }
@@ -1249,7 +1299,7 @@ if (N.EMBED) setTimeout(() => {
 }, 0);
 
 setTools(); syncUI(); shell.goto(0);
-window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, MODEL, modelLoad, modelRun, modelStop, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
+window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, setSharp, sharpen, crossScreen, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, MODEL, modelLoad, modelRun, modelStop, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
 </script>
 </body>
 </html>

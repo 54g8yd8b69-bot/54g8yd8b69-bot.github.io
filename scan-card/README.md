@@ -83,7 +83,12 @@ to print (not added); clasps are not added yet. Roles `obturator`, `obturator-li
 Lossless, and 12-bit lossy JPEG as i-CAT and other CBCT machines write it; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
 dates of birth and the like are never decoded. A scan whose files give no slice positions (one file, every slice a
 frame, as some CBCT units export) cannot say which way up it is: its first slice is taken as the top, the page says the
-order was assumed, and "Flip top to bottom" turns it over. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
+order was assumed, and "Flip top to bottom" turns it over. Axial, coronal and sagittal slices with windowing, and "Image" in
+the bar above the slices — on every step — for Brightness and Contrast (the window's level and width under plain names,
+in step with the Level and Width sliders, the presets and the Window tool) and Sharpness (each slice's picture moved away
+from the average of its surroundings, about a voxel round each point; below 0 it is smoothed instead). Sharpening is for
+the eye only: nothing is found or measured from the sharpened picture; the setting is kept on the device and in a saved
+case. A 3D view (MIP or
 surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
 angle. The cross-hair can be turned: drag a round handle on its lines (or `[` / `]`) and the other two slices become
 oblique slices at that angle, square to each other; taps, scrolling, measurements and the tooth overlay follow the turned
@@ -134,12 +139,26 @@ as lines from slice to slice across the tooth's own axis: at each voxel the dip 
 least three of four directions, so the tooth's darker rim is not a canal) is measured, and the line along which that dip
 adds up to more than noise does — moving at most one voxel sideways per slice, starting from the chamber or a canal
 already found — is a canal; it ends where the dip ahead is lost in the noise. A dip within ⅓ mm of the tooth's own
-outline scores nothing (the darker rim, or the ligament just outside). Each is drawn as a tube as wide as its dip
-says it is for the scan's blur. Tinted red in the slices and shown as an orange solid inside a pale glass tooth in 3D,
-with volume, length, canals side by side in the root and how much was followed by its faint dip alone, "Slices along the
-tooth" to walk down the root, and an STL. What a scan cannot show is not drawn: canals narrower than about a voxel, the
-last millimetres towards an apex, side canals and the webs between canals; a canal that stops short of the root's end
-marks where its dip was lost, not where it ends. Root fillings (bright) are not canals. Needs voxels of about 0.4 mm or
+outline scores nothing (the darker rim, or the ligament just outside). A line leaves the chamber rootwards (one that
+comes up to it from the crown's side is not a canal), and a short line that leaves a hollow only to return to the same
+hollow is that hollow's flank. Each is drawn as a tube as wide as its dip says it is for the scan's blur.
+
+A canal goes on to the end of its root whether the scan shows it or not, so what is found is carried on. The roots are
+read from the tooth's own outline (its pieces slice by slice: a piece with nothing below it, after 1½ mm of root of its
+own, is a tip). A line that gives out short of its root's tip is taken on to ¾ mm from the tip along the likeliest
+course — through what dip there is, otherwise down the middle of the root — or into the first canal or hollow it meets;
+a root that no canal reached gets one from the chamber the same way. Such a stretch counts as seen only where its own
+dip stands out as a found line's must; the rest is **presumed**, and is kept apart everywhere: yellow in the slices and
+in 3D, its own line in the read-out, in the STL only while it is shown, and "Presumed course: Hidden" leaves what the
+scan shows. It says where a canal should run, not that one was seen there.
+
+In the slices the canals are a layer of their own, worked out four times as fine as the slice (the finder's answer is read
+between the voxels: a hollow's smooth edge, and a narrow canal wherever the slice, one voxel thick, touches its tube) —
+red where seen, yellow where presumed — and in 3D an orange solid inside a pale glass tooth,
+with volume, length, canals side by side in the root, how much was followed by its faint dip alone and how much is
+presumed, "Slices along the tooth" to walk down the root, and an STL. What a scan cannot show is not drawn as seen:
+canals narrower than about a voxel, the last millimetres towards an apex, side canals and the webs between canals. Root
+fillings (bright) are not canals. Needs voxels of about 0.4 mm or
 smaller; 0.2 mm or finer shows far more. The case keeps the CBCT work, the turned planes and
 the replica (`cbct-replica`), never the CBCT itself.
 

@@ -5,7 +5,9 @@
 // solid (counted in the rendered picture), and "Hidden" leaves the canals alone; a higher threshold takes more and "Find the
 // canals" goes back to the worked-out one; the STL is closed and lies on the true pulp surface; "Slices along the tooth"
 // turns the slices to the tooth's axis (and the tint is still right on the turned slices); the threshold is kept in a saved
-// case; changing the tooth drops its canals. Then premolar 45 (one canal).
+// case; changing the tooth drops its canals. Then premolar 45 (one canal). Where a canal tapers out short of its root's end
+// its course on to the tip is presumed: yellow in the slices (a layer four times as fine as the slice) and in 3D, counted
+// apart, in the STL only while shown, and off with “Presumed course: Hidden”.
 const { open, ok, OUT, screenOf } = require('./lib.cjs');
 const fs = require('fs');
 let N, D;
@@ -44,13 +46,14 @@ function readStl(file) { const b = fs.readFileSync(file); return N.cleanMesh(N.p
   const tintCheck = (fdi, label) => page.evaluate(([fdi, label]) => {
     const t = APP.D.phantomTeeth().find((x) => String(x.name) === String(fdi)), f = APP.D.phantomPulpField(t), out = {};
     for (const k of ['ax', 'co', 'sa']) {
-      const v = APP.views[k], g = APP.geom(v), d = v.off.getContext('2d').getImageData(0, 0, g.cols, g.rows).data; let red = 0, redOk = 0, pulp = 0, pulpRed = 0, teal = 0;
+      const v = APP.views[k], g = APP.geom(v), d = v.off.getContext('2d').getImageData(0, 0, g.cols, g.rows).data, L = v.canal, sub = L ? L.cv.width / L.cols : 0, ld = L ? L.cv.getContext('2d').getImageData(0, 0, L.cv.width, L.cv.height).data : null; let red = 0, redOk = 0, pulp = 0, pulpRed = 0, teal = 0, yellow = 0;
       for (let r = 0; r < g.rows; r++) for (let cc = 0; cc < g.cols; cc++) {
-        const i = 4 * (r * g.cols + cc), isRed = d[i] > 150 && d[i] > d[i + 1] + 60 && d[i] > d[i + 2] + 60; if (d[i + 1] > d[i] + 25 && d[i + 1] > 100) teal++;
+        const i = 4 * (r * g.cols + cc); let isRed = false; if (d[i + 1] > d[i] + 25 && d[i + 1] > 100) teal++;
+        if (L && cc >= L.c0 && cc < L.c0 + L.cols && r >= L.r0 && r < L.r0 + L.rows) { const li = 4 * (((r - L.r0) * sub + (sub >> 1)) * L.cv.width + (cc - L.c0) * sub + (sub >> 1)); if (ld[li + 3] > 0) { if (ld[li + 1] < 120) isRed = true; else yellow++; } }
         const P = g.ob ? APP.obPt(g.ob, (cc + 0.5) * g.su, (r + 0.5) * g.sv) : APP.D.worldOf(APP.S.vol, ...APP.toVox(v, (cc + 0.5) * g.su, (r + 0.5) * g.sv).map((x, ax) => (!g.ob && ax === (k === 'ax' ? 2 : k === 'co' ? 1 : 0) ? Math.round(x) : x))), val = f(...P);
         if (isRed) { red++; if (val < 0.3) redOk++; } if (val < -0.15) { pulp++; if (isRed) pulpRed++; }
       }
-      out[k] = { red, redOk, pulp, pulpRed, teal, ob: !!g.ob };
+      out[k] = { red, redOk, pulp, pulpRed, teal, yellow, sub, ob: !!g.ob };
     }
     return out;
   }, [fdi, label]);
@@ -69,6 +72,25 @@ function readStl(file) { const b = fs.readFileSync(file); return N.cleanMesh(N.p
   ok(g2.canal && !g2.tooth && p2.red >= p1.red && p2.glass < 0.3 * p1.glass, `“Hidden”: the canals on their own (${p2.red} px of canal; pale px ${p1.glass} → ${p2.glass}, the buttons and label that are left)`);
   await page.click('#cShow [data-v=glass]'); await page.waitForTimeout(300);
 
+  // ── presumed stretches: the phantom's canals taper out some 2 mm short of each root's end; from there to ¾ mm from the
+  //    tip their course is presumed — yellow in the slices and in 3D, counted apart, and switched off with one press ──
+  const pres = () => page.evaluate(() => { const cs = APP.S.canal.seg, tt = APP.D.phantomTeeth().find((x) => String(x.name) === '36'), tf = APP.D.phantomToothField(tt), pf = APP.D.phantomPulpField(tt); let pt = null, n = 0, inTooth = 0, inPulp = 0; for (const P of cs.paths) P.pts.forEach((p, a) => { if (!P.pres[a]) return; n++; if (tf(...p) < 0) inTooth++; if (pf(...p) < 0) inPulp++; if (!pt && a >= 1 && P.pres[a - 1] && a + 1 < P.pts.length && P.pres[a + 1]) pt = p; });
+    const ch = [0, 1, 2].map((k) => tt.base[k] + tt.w[k] * 3.2), dn = [0, 1, 2].map((k) => tt.base[k] + tt.w[k] * 2 + tt.v[k] * (tt.bl / 2 - 1.2));
+    return { presumed: cs.presumed, roots: cs.roots, apexGap: cs.apexGap, all: cs.apexGapAll, n, inTooth, inPulp, pt, at: pt && cs.has(...pt), chamber: cs.has(...ch), dentine: cs.has(...dn), fine: !!cs.fine, meshP: APP.S.canal.meshP ? APP.S.canal.meshP.indices.length / 3 : 0, objP: !!(APP.r3objs.canalP && APP.r3objs.canalP.visible), colP: APP.r3objs.canalP ? APP.r3objs.canalP.material.color.getHex() : 0, pres: APP.S.canal.pres, on: document.querySelector('#cPres .on').dataset.v, out: document.querySelector('#cOut').innerText, lead: document.querySelector('#cLead').textContent }; });
+  const pr = await pres();
+  ok(pr.roots === 2 && pr.presumed > 1 && pr.all < 1.2 && pr.apexGap - pr.all > 0.5 && pr.n > 4 && pr.inTooth === pr.n && pr.inPulp < 0.35 * pr.n && pr.at === 2 && pr.chamber === 1 && pr.dentine === 0 && pr.fine,
+    `two roots; ${pr.presumed.toFixed(1)} mm of canal is presumed beyond what shows (seen to ${pr.apexGap.toFixed(1)} mm from the root end, drawn to ${pr.all.toFixed(1)} mm): all ${pr.n} of its points inside the true tooth, ${pr.inPulp} in the true pulp; has() answers ${pr.at} on it, ${pr.chamber} in the chamber, ${pr.dentine} in dentine (${pr.roots} roots)`);
+  ok(pr.meshP > 20 && pr.objP && pr.colP === 0xffe27a && pr.on === 'show' && /Presumed, not seen \(yellow\)\s*\d+\.\d mm/.test(pr.out) && /presumed, not seen/.test(pr.lead), `it is a solid of its own in 3D, pale yellow (${pr.meshP} triangles), with its own line in the read-out (“${(pr.out.match(/Presumed[^\n]*\n?[^\n]*/) || [''])[0].replace(/\n/g, ' ')}”)`);
+  await page.evaluate((p) => { APP.S.cur = APP.D.voxelOf(APP.S.vol, ...p).map(Math.round); APP.crossChanged(); }, pr.pt); await page.waitForTimeout(500);
+  const ty = await tintCheck(36);
+  ok(ty.ax.yellow >= 1 && ty.ax.sub === 4 && ty.co.yellow + ty.sa.yellow >= 3, `in the slices through one of its points it is yellow (${ty.ax.yellow} px axial, ${ty.co.yellow} coronal, ${ty.sa.yellow} sagittal; the layer is ${ty.ax.sub}× as fine as the slice)`);
+  await page.screenshot({ path: OUT + 't9-canals-36-presumed.png' });
+  const [dlA] = await Promise.all([page.waitForEvent('download'), page.click('#cStl')]); const fileA = OUT + 't9-with-presumed-' + dlA.suggestedFilename(); await dlA.saveAs(fileA); const meshA = readStl(fileA);
+  await page.click('#cPres [data-v=hide]'); await page.waitForTimeout(500);
+  const pr2 = await pres(), ty2 = await tintCheck(36);
+  ok(pr2.pres === 'hide' && !pr2.objP && ty2.ax.yellow + ty2.co.yellow + ty2.sa.yellow === 0 && pr2.presumed === pr.presumed, `“Presumed course: Hidden”: no yellow in the slices, its solid off in 3D; the figures stay (${pr2.presumed.toFixed(1)} mm presumed)`);
+  await toChamber(t36); await page.waitForTimeout(300);
+
   // ── the threshold ──
   const setT = async (T) => { await page.evaluate((T) => { const el = document.querySelector('#cT'); el.value = String(T); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, T); await page.waitForTimeout(200); await waitCanal(); };
   await setT(c.auto + 350); const hi = await canal();
@@ -80,7 +102,9 @@ function readStl(file) { const b = fs.readFileSync(file); return N.cleanMesh(N.p
   // ── the STL ──
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#cStl')]); const file = OUT + 't9-' + dl.suggestedFilename(); await dl.saveAs(file);
   const mesh = readStl(file), pf = D.phantomPulpField(t36), dist = []; for (let i = 0; i < mesh.positions.length; i += 3) dist.push(Math.abs(pf(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]))); dist.sort((x, y) => x - y);
-  ok(dl.suggestedFilename() === 'root-canals.stl' && N.isWatertight(mesh) && Math.abs(N.meshVolume(mesh) / tv.pulp - 1) < 0.15 && q(dist, 0.95) < 0.2, `${dl.suggestedFilename()}: closed, ${N.meshVolume(mesh).toFixed(1)} mm³ (true ${tv.pulp.toFixed(1)}), its surface ${q(dist, 0.5).toFixed(3)} mm (median) and ${q(dist, 0.95).toFixed(3)} mm (95th percentile) from the true pulp surface, in the scan’s coordinates`);
+  ok(dl.suggestedFilename() === 'root-canals.stl' && N.isWatertight(mesh) && Math.abs(N.meshVolume(mesh) / tv.pulp - 1) < 0.15 && q(dist, 0.95) < 0.2, `${dl.suggestedFilename()} (presumed course hidden): closed, ${N.meshVolume(mesh).toFixed(1)} mm³ (true ${tv.pulp.toFixed(1)}), its surface ${q(dist, 0.5).toFixed(3)} mm (median) and ${q(dist, 0.95).toFixed(3)} mm (95th percentile) from the true pulp surface, in the scan’s coordinates`);
+  ok(N.isWatertight(meshA) && meshA.indices.length > mesh.indices.length && N.meshVolume(meshA) > N.meshVolume(mesh) && N.meshVolume(meshA) < N.meshVolume(mesh) + 0.6, `with the presumed course shown the file holds it too: ${meshA.indices.length / 3} triangles against ${mesh.indices.length / 3}, ${(N.meshVolume(meshA) - N.meshVolume(mesh)).toFixed(2)} mm³ more, closed`);
+  await page.click('#cPres [data-v=show]'); await page.waitForTimeout(400);
 
   // ── slices along the tooth ──
   await page.click('#cAlign'); await page.waitForTimeout(700);

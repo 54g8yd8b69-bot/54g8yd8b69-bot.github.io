@@ -1,4 +1,5 @@
 // u3-canal.mjs — the root canals of a tooth (shared/dicom.js segmentCanal, canalField) against the phantom's exact pulp (node):
+// (… and, where a canal is lost before its root's end, the course it is carried on along: presumed, apart from what is seen)
 //   for a premolar, a lower incisor, a two-rooted molar and a canine, the canals found lie where the true pulp is, have its
 //   volume and length, and the surface made from them is closed and close to the true pulp's surface; the molar's two canals
 //   are counted; nothing outside the tooth, between its cusps or round its roots is taken. Then harder cases built from the
@@ -23,7 +24,8 @@ function toothOf(v, tt, o = {}) {
   const seed = o.seed || centreOf(tt, tt.crown * 0.35), roi = o.roi || { shape: 'cyl', c: [seed[0], seed[1]], r: o.r || 7, z0: seed[2] - 20, z1: seed[2] + 14 };
   return D.segmentTooth(v, { seeds: [seed], roi, T: o.T ?? 1000, maxVoxels: o.maxVoxels });
 }
-function meshOf(cs) { const f = D.canalField(cs), m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.05 }); D.taubin(m, 2); return D.canalToPatient(m, cs); }
+// (what the scan shows: a stretch carried on to the root's tip as presumed is no finding, and is not measured against the true pulp)
+function meshOf(cs) { const f = D.canalField(cs), m = N.isoMesh(f.any.presumed ? f.part('seen') : f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.05 }); D.taubin(m, 2); return D.canalToPatient(m, cs); }
 /** how the canals found compare with a true pulp field */
 function compare(cs, f, tooth) {
   const { mask, grid } = cs, [n0, n1, n2] = grid.n, d = [];
@@ -48,6 +50,18 @@ for (const fdi of ONLY.length ? ONLY : [45, 31, 36, 43]) {
   // a point in the chamber and one in the dentine
   const inCh = centreOf(tt, 3.2), inDent = [0, 1, 2].map((a) => tt.base[a] + tt.w[a] * 2 + tt.v[a] * (tt.bl / 2 - 1.2));
   ok(cs.has(...inCh) && !cs.has(...inDent), `${fdi}: has() — the middle of the chamber is canal, the dentine beside it is not`);
+  // carried on to the root's end: the phantom's canals taper out about 2 mm short of it; from there to ¾ mm from the tip the
+  // course is presumed — inside the tooth, beyond the true pulp, counted and drawn apart; with reach: false, the finder as it was
+  { const off = D.segmentCanal(vol, seg, { reach: false }), tf = D.phantomToothField(tt), pf2 = D.phantomPulpField(tt); let pn = 0, pin = 0, pp = null, pv = null, pulp = 0; const G = cs.grid, gs = G.n[0] * G.n[1]; for (const L of cs.paths) L.pts.forEach((x, a) => { if (!L.pres[a]) return; pn++; if (tf(...x) < 0) pin++; if (pf2(...x) < 0) pulp++; if (!pp && a > 0 && L.pres[a - 1] && a + 1 < L.pts.length && L.pres[a + 1]) { pp = x; const q = L.q[a], i = q % G.n[0], j = ((q / G.n[0]) | 0) % G.n[1], k = (q / gs) | 0; pv = [0, 1, 2].map((d) => G.O[d] + G.h * (i * G.u[d] + j * G.v[d] + k * G.w[d])); } });
+    const fine = cs.fine, hf = pp ? cs.has(...pp) : -1; cs.fine = null; const hv = pv ? cs.has(...pv) : -1, chV = cs.has(...inCh), dnV = cs.has(...inDent); cs.fine = fine;
+    // (a canal seen to within 2 mm of its root's end is left as it is: there is nothing to carry on)
+    const due = cs.apexGap > 0.75 + (Math.round(0.75 / G.h) + 1) * G.h;
+    ok(cs.roots === (tt.two ? 2 : 1) && chV === 1 && dnV === 0 && !!fine && (due ? cs.presumed > 0.8 && cs.apexGapAll < 1.2 && cs.apexGapAll < cs.apexGap - 0.4 && pn > 2 && pin === pn && pulp < 0.35 * pn && hf === 2 && hv === 2 : cs.presumed === 0 && cs.apexGapAll === cs.apexGap),
+      `${fdi}: ${cs.roots} root${cs.roots === 1 ? '' : 's'}; ${due ? `carried on to ${cs.apexGapAll.toFixed(1)} mm from the root end, ${cs.presumed.toFixed(1)} mm of it presumed (${pn} points, ${pin} inside the true tooth, ${pulp} in the true pulp); has() says 2 there — read between the voxels and by voxel —` : `seen to ${cs.apexGap.toFixed(1)} mm from the root end, so nothing is carried on; has() says`} 1 in the chamber, 0 in dentine`);
+    const fl = D.canalField(cs, { keep: false }), A = fl.part('seen'), B = fl.part('presumed'); let same = true, both = 0; for (let g = 0; g < fl.F.length && same; g++) { if (Math.abs(fl.F[g] - Math.min(A[g], B[g])) > 1e-6) same = false; if (A[g] < 0 && B[g] < 0) both++; }
+    const mp = N.isoMesh(B, fl.n[0], fl.n[1], fl.n[2], [0, 0, 0], fl.h, { minVolume: 0.002 }); D.canalToPatient(mp, cs); let outT = 0; for (let q = 0; q < mp.positions.length; q += 3) if (tf(mp.positions[q], mp.positions[q + 1], mp.positions[q + 2]) > 0.05) outT++;
+    ok(same && (due ? fl.any.presumed && both < 60 && mp.indices.length > 30 && N.isWatertight(mp) && outT === 0 && N.meshVolume(mp) < 0.2 : !fl.any.presumed && mp.indices.length === 0), `${fdi}: the field comes in two parts that make up the whole${due ? ` (they share ${both} grid points where the presumed tube leaves the hollow); the presumed part is a closed thin tube (${mp.indices.length / 3} triangles, ${N.meshVolume(mp).toFixed(3)} mm³) inside the tooth` : '; there is no presumed part'}`);
+    ok(off.presumed === 0 && off.paths.every((L) => L.forcedFrom == null && !L.pres.includes(1)) && Math.abs(off.volume - cs.volume) < 0.05 && off.apexGapAll === off.apexGap && Math.abs(off.apexGap - cs.apexGap) < 1e-9, `${fdi}: with reach: false nothing is carried on (what is seen is the same: ${off.volume.toFixed(1)} mm³, ${off.apexGap.toFixed(1)} mm from the root end)`); }
   // a higher threshold takes more, a lower one less; the pulp's own level takes nothing much
   const hiT = D.segmentCanal(vol, seg, { T: cs.auto + 400 }), loT = D.segmentCanal(vol, seg, { T: cs.auto - 400 });
   ok(!hiT.error && !loT.error && hiT.volume > cs.volume && loT.volume < cs.volume && hiT.T === cs.auto + 400, `${fdi}: threshold ${cs.auto - 400} → ${loT.volume.toFixed(1)} mm³, ${cs.auto} → ${cs.volume.toFixed(1)}, ${cs.auto + 400} → ${hiT.volume.toFixed(1)}`);
@@ -97,6 +111,9 @@ const paint = (v, lo, hi, fn) => { const [nx, ny] = v.dims, s = v.spacing[0], o 
         const ci = Math.round(comp.reduce((a, r) => a + r % n0, 0) / comp.length), cj = Math.round(comp.reduce((a, r) => a + ((r / n0) | 0), 0) / comp.length); let found = false; for (let b = -R; b <= R && !found; b++) for (let a = -R; a <= R && !found; a++) { const ii = ci + a, jj = cj + b; if (ii >= 0 && jj >= 0 && ii < n0 && jj < n1 && a * a + b * b <= R * R && cs.mask[ii + n0 * jj + sl * k]) found = true; } pieces++; if (found) hit++; } }
     ok(cs.paths.length === wantCanals && cs.canals === wantCanals && onTrue.every((x) => x > 0.9) && hit / pieces > 0.6 && cs.pieces === 1 && cs.faint > 6,
       `clinical scan, ${fdi}: ${cs.paths.length} canal${cs.paths.length === 1 ? '' : 's'} followed as lines (true ${wantCanals}), ${cs.faint.toFixed(1)} mm of them by their faint dip alone; ${onTrue.map((x) => (100 * x).toFixed(0) + ' %').join(', ')} of each line on the true canal; ${(100 * hit / pieces).toFixed(0)} % of the true canals’ cross-sections found (their last millimetres taper below what the scan can show); noise floor ${cs.noise.floor.toFixed(3)}`);
+    { let pn = 0, pOn = 0, far = 0; const tf = D.phantomToothField(tt); for (const L of cs.paths) L.pts.forEach((x, a) => { if (!L.pres[a]) return; pn++; const dv = pf(x[0], x[1], x[2]); if (dv < 0.3) pOn++; if (tf(x[0], x[1], x[2]) > 0) far++; });
+      // (here the true canals do go on, tapering below what the scan shows: the presumed course can be held against them)
+      ok(pn > 3 && pOn / pn > 0.8 && far === 0 && cs.apexGapAll < 1.2 && cs.apexGapAll < cs.apexGap - 1, `clinical scan, ${fdi}: seen to ${cs.apexGap.toFixed(1)} mm from the root end and carried on to ${cs.apexGapAll.toFixed(1)} mm; of the ${pn} presumed points (${cs.presumed.toFixed(1)} mm) ${pOn} lie within 0.3 mm of the true canal, which the scan no longer shows there, and none outside the tooth (${cs.roots} root tips)`); }
     const f = D.canalField(cs), m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.004 }); D.canalToPatient(m, cs); const bb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }; for (let q = 0; q < m.positions.length; q += 3) for (let a = 0; a < 3; a++) { bb.min[a] = Math.min(bb.min[a], m.positions[q + a]); bb.max[a] = Math.max(bb.max[a], m.positions[q + a]); }
     ok(m.indices.length > 1000 && N.isWatertight(m) && bb.min[2] < cs.lo[2] + 0.5 && bb.max[2] > cs.hi[2] - 1, `clinical scan, ${fdi}: the canals as a closed surface (${m.indices.length / 3} triangles on a ${f.h.toFixed(3)} mm grid) spanning z ${bb.min[2].toFixed(1)} … ${bb.max[2].toFixed(1)} (canals ${cs.lo[2].toFixed(1)} … ${cs.hi[2].toFixed(1)})`);
   }
