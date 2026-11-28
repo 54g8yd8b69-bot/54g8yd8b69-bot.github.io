@@ -118,6 +118,16 @@ function readStl(file) { const b = fs.readFileSync(file); return N.cleanMesh(N.p
   await page.click('[data-max=r3]'); await page.waitForTimeout(700); await page.screenshot({ path: OUT + 't9-canals-36-3d.png' }); await page.click('[data-max=r3]'); await page.waitForTimeout(300);
   await page.click('#cbStraight'); await page.waitForTimeout(300);
 
+  // ── “Faint canals”: how faint a line may be and still be drawn — five steps, “standard” to begin with; a change finds the
+  //    canals again with that bar, and the setting is kept in a saved case ──
+  const faint = () => page.evaluate(() => ({ f: APP.S.canal.faint, v: +document.getElementById('cFaint').value, word: document.getElementById('cFaint').parentElement.querySelector('.val').textContent, ver: APP.S.canal.ver, lines: APP.S.canal.seg.paths.length, vol: APP.S.canal.seg.volume, off: document.getElementById('cFaint').disabled, note: document.querySelector('#cOut').innerText, rows: document.querySelector('#cOut').innerText }));
+  const setF = async (v) => { await page.evaluate((v) => { const el = document.getElementById('cFaint'); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, v); await page.waitForTimeout(200); await waitCanal(); };
+  const f0 = await faint(); await setF(5); const f5 = await faint(); await setF(1); const f1 = await faint();
+  ok(f0.f === 3 && f0.v === 3 && f0.word === 'standard' && !f0.off && /Faint canals/.test(f0.note) && /Roots · canal lines\s*2 · \d/.test(f0.rows) && f5.f === 5 && f5.word === 'most' && f5.ver > f0.ver && f5.lines >= f0.lines && f1.f === 1 && f1.word === 'fewest' && f1.ver > f5.ver && f1.lines <= f0.lines && Math.abs(f1.vol / f0.vol - 1) < 0.1,
+    `“Faint canals” stands at “${f0.word}” (${f0.lines} lines); “${f5.word}” finds them again (${f5.lines}), and so does “${f1.word}” (${f1.lines}; the plain canals of this tooth stay: ${f1.vol.toFixed(1)} mm³ against ${f0.vol.toFixed(1)})`);
+  const savedF = await page.evaluate(() => { const cc = new APP.N.DentalCase(); APP.extendCase(cc); return cc.data.cbct.canal.faint; }); await setF(3);
+  ok(savedF === 1 && (await faint()).f === 3, `a saved case keeps the setting (${savedF}); back to “standard”`);
+
   // ── the threshold comes back with a saved case; a changed tooth drops its canals ──
   await page.click('.step[data-id=tooth] h3'); await a.idle(); await page.click('#dClear'); await page.waitForTimeout(300);
   const dropped = await page.evaluate(() => ({ seg: APP.S.canal.seg, mesh: APP.S.canal.mesh, obj: APP.r3objs.canal, T: APP.S.canal.T }));

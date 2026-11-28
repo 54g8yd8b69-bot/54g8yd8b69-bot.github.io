@@ -150,9 +150,19 @@ as lines from slice to slice across the tooth's own axis: at each voxel the dip 
 least three of four directions, so the tooth's darker rim is not a canal) is measured, and the line along which that dip
 adds up to more than noise does — moving at most one voxel sideways per slice, starting from the chamber or a canal
 already found — is a canal; it ends where the dip ahead is lost in the noise. A dip within ⅓ mm of the tooth's own
-outline scores nothing (the darker rim, or the ligament just outside). A line leaves the chamber rootwards (one that
-comes up to it from the crown's side is not a canal), and a short line that leaves a hollow only to return to the same
-hollow is that hollow's flank. Each is drawn as a tube as wide as its dip says it is for the scan's blur.
+outline scores nothing (the darker rim, or the ligament just outside). The noise floor is read from plain dentine, not
+from within 1 mm of a wide hollow: a hollow's flank dips too, and counted as noise it raised the floor by a third in a
+tooth with wide canals — enough to lose a faint second canal. A line leaves the chamber rootwards: it has no part at or
+above the chamber's roof (horns do not count as the roof), a short line that leaves a hollow only to return to the same
+hollow is that hollow's flank, and so is a line that keeps within 1.4 mm of a hollow or canal already found for most of
+its way — a second canal (an MB2) runs apart and at most closes in at its end. Each is drawn as a tube as wide as its
+dip says it is for the scan's blur. "Faint canals" (fewest … most, standard to begin with) sets how much dip a line
+must add up to before it is drawn: towards "most" a faint second canal or the web between two canals is followed, and
+now and then the grain of the dentine; "Canal threshold" only places the edge of the chamber and wide canals.
+
+The grey levels the finder works from are the tooth's own (its voxels fall into dentine and enamel; soft tissue is read
+just outside it). They used to be the rules' levels for the tap, read in the one slice the rules start from: those
+differ from tap to tap, and the same molar gave three canals or four according to where it was tapped.
 
 A canal goes on to the end of its root whether the scan shows it or not, so what is found is carried on. The roots are
 read from the tooth's own outline (its pieces slice by slice: a piece with nothing below it, after 1½ mm of root of its

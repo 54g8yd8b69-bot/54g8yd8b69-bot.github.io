@@ -105,7 +105,7 @@ const S = {
   surf: { mesh: null, info: null, detail: 0.5, largest: false, T: null },
   tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false },
   rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
-  canal: { T: null, seg: null, mesh: null, meshP: null, show: 'glass', pres: 'show', ver: 0 },
+  canal: { T: null, faint: 3, seg: null, mesh: null, meshP: null, show: 'glass', pres: 'show', ver: 0 },
   pending: null, demo: null, busy: false, loads: 0,
 };
 
@@ -182,6 +182,7 @@ const shell = N.createShell({
     { id: 'canal', title: 'Root canals', optional: true, html: `
       <p class="lead" id="cLead"></p>
       <div class="row"><label>Canal threshold</label><input type="range" id="cT" step="1"><span class="val"></span></div>
+      <div class="row"><label>Faint canals</label><input type="range" id="cFaint" min="1" max="5" step="1" value="3" title="How faint a line of dip may be and still be drawn as a canal"><span class="val"></span></div>
       <div class="row"><label>Presumed course</label><div class="seg" id="cPres"><button data-v="show" type="button" title="Where a canal is not seen as far as the end of its root, its likely course on to the end is drawn in yellow">Shown</button><button data-v="hide" type="button" title="Only what the scan itself shows">Hidden</button></div></div>
       <div class="row"><label>Tooth shown as</label><div class="seg" id="cShow"><button data-v="glass" type="button" title="The tooth as clear glass round the canals">Glass</button><button data-v="hide" type="button" title="The canals on their own">Hidden</button></div></div>
       <div class="btns"><button class="btn pri" id="cFind" type="button" title="Find the pulp chamber and canals again, at the threshold worked out from this tooth">Find the canals</button><button class="btn" id="cAlign" type="button" title="Turn the slices to run along and across this tooth’s long axis">Slices along the tooth</button><button class="btn" id="cStl" type="button" title="Download the canals as an STL file, in the scan’s coordinates">Download STL</button></div>
@@ -1098,7 +1099,7 @@ async function findCanal(o = {}) {
   const t = T(), C = S.canal; if (!S.vol || !t.seg || t.seg.error) { dropCanal(); syncUI(); return; }
   const t0 = performance.now();
   await shell.busy('Finding the canals…', async () => {
-    await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T }); let m = null, mP = null;
+    await N.sleep(20); const cs = D.segmentCanal(S.vol, t.seg, { T: o.auto || C.T == null ? undefined : C.T, faint: C.faint }); let m = null, mP = null;
     if (!cs.error) { const f = D.canalField(cs), mk = (F) => { const g = N.isoMesh(F, f.n[0], f.n[1], f.n[2], [0, 0, 0], f.h, { minVolume: 0.004 }); if (!g.indices.length) return null; D.taubin(g, 3); return D.canalToPatient(g, cs); };
       m = mk(f.any.presumed ? f.part('seen') : f.F); mP = f.any.presumed ? mk(f.part('presumed')) : null; }
     C.seg = cs; C.T = cs.T; C.mesh = m; C.meshP = mP; C.ver++;
@@ -1157,6 +1158,7 @@ const RB = {
   dBrush: N.rangeBind('dBrush', (v) => { T().brush = v; }, { fmt: (v) => mm(v) }),
   rPdl: N.rangeBind('rPdl', (v, done) => { S.rep.pdl = v; if (done && S.rep.mesh) makeReplica(); }, { fmt: (v) => mm(v, 2) }),
   rHd: N.rangeBind('rHd', (v, done) => { S.rep.hd = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v) }),
+  cFaint: N.rangeBind('cFaint', (v, done) => { const f = N.clamp(Math.round(v), 1, 5); if (done && f !== S.canal.faint) { S.canal.faint = f; if (S.canal.seg) findCanal().catch(() => {}); } }, { fmt: (v) => ['fewest', 'fewer', 'standard', 'more', 'most'][N.clamp(Math.round(v), 1, 5) - 1] }),
   cT: N.rangeBind('cT', (v, done) => { if (done && S.canal.seg && Math.round(v) !== S.canal.T) { S.canal.T = Math.round(v); findCanal().catch(() => {}); } }, { fmt: (v) => String(Math.round(v)) }),
   rHl: N.rangeBind('rHl', (v, done) => { S.rep.hl = v; if (done && S.rep.mesh && S.rep.handle) makeReplica(); }, { fmt: (v) => mm(v, 0) }),
 };
@@ -1233,13 +1235,13 @@ function syncUI() {
   shell.markDone('replica', !!S.rep.mesh); shell.markDone('view', has);
   // the root canals
   const cs = S.canal.seg, toothOk = !!(sg && !sg.error), vx = has ? Math.min(...S.vol.spacing) : 0;
-  $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null;
+  $('cFind').disabled = $('cAlign').disabled = $('dAlign').disabled = !toothOk; $('cStl').disabled = !S.canal.mesh; $('cT').disabled = !cs || cs.pulp == null; $('cFaint').disabled = !toothOk;
   $('cLead').textContent = !toothOk ? 'Pick the tooth first, on the “Pick a tooth” step: tap it in a slice.' : cs && cs.error ? cs.error : (standIn() ? 'The tooth’s outline is still the rules’ stand-in: the model’s is on its way, and the canals will be found again inside it. ' : MODEL.by === 'model' && MODEL.state === 'ask' && !sg.model ? 'This tooth is outlined by the rules: download the model on the “Pick a tooth” step for a fuller, smoother outline, inside which more of the canals are found. ' : '') + 'The pulp chamber and canals inside the picked tooth: red in the slices where the scan shows them, a bright solid inside the glass tooth in 3D. A narrow canal is only a faint dip in the dentine’s grey: it is followed from slice to slice while that dip stands above the noise, and drawn as wide as the dip says it is. Where it is lost before the end of its root, its likely course on to the end is drawn in yellow: presumed, not seen. Check the colours against the grey of the slices (“Image” above the slices sharpens them).';
   let co = '';
   if (cs && !cs.error) {
-    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Seen to within this of the root end</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Presumed, not seen (yellow)</span><b>${mm(cs.presumed || 0)}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
+    co = `<div class="sum"><h5>Canals found<span class="okb${cs.pieces > 1 ? ' warn' : ''}">${cs.pieces === 1 ? 'one piece' : cs.pieces + ' pieces'}</span></h5><div><span>Volume</span><b>${cs.volume.toFixed(1)} mm³</b></div><div><span>Length along the tooth</span><b>${mm(cs.length)}</b></div><div><span>Seen to within this of the root end</span><b>${mm(Math.max(0, cs.apexGap))}</b></div><div><span>Canals side by side in the root</span><b>${cs.canals}</b></div><div><span>Followed by their faint dip alone</span><b>${mm(cs.faint)}</b></div><div><span>Presumed, not seen (yellow)</span><b>${mm(cs.presumed || 0)}</b></div><div><span>Roots · canal lines</span><b>${cs.roots} · ${cs.paths.length}</b></div><div><span>Threshold</span><b>${cs.T}${cs.T === cs.auto ? ' (worked out)' : ''}</b></div><div><span>This tooth’s pulp · dentine</span><b>${cs.pulp} · ${cs.dentine}</b></div><div><span>Scan’s voxels</span><b>${mm(vx, 2)}</b></div></div>`;
     co += `<p class="note${vx > 0.21 ? ' warn' : ''}">A scan with ${mm(vx, 2)} voxels blurs a canal over about ${mm(3 * vx, 1)}: canals narrower than ${mm(vx, 2)} or so, the last millimetres towards an apex, side canals and the fine webs between canals do not show on it, and are not drawn. Where a canal’s dip is lost in the noise before the end of its root, the canal itself goes on: its likely course — through what dip there is, otherwise down the middle of the root, joining a neighbouring canal where that is nearer — is drawn in yellow as far as ¾ mm from the root’s tip. That stretch is a presumption, not a finding: “Presumed course: Hidden” leaves only what the scan shows.</p>`;
-    if (cs.faint > 0) co += '<p class="note">Raise the threshold to follow fainter canals (more may be drawn than are there); lower it to keep to what is plain.</p>';
+    co += '<p class="note">“Faint canals” sets how faint a line may be and still be drawn. Towards “most”, more is followed: a second canal in a broad root (an MB2), the web between two canals — and now and then the grain of the dentine. Towards “fewest”, only what is plain. The canal threshold sets where the edge of the chamber and wide canals lies.</p>';
     if (cs.pieces > 1) co += '<p class="note">In more than one piece: a wide stretch of canal with nothing to be followed between it and the rest.</p>';
   }
   $('cOut').innerHTML = co; shell.markDone('canal', !!S.canal.mesh);
@@ -1266,7 +1268,7 @@ function extendCase(c) {
   const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
   const t = T();
   c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, sharp: S.sharp, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
-    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto, presumed: S.canal.pres } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto, presumed: S.canal.pres, faint: S.canal.faint } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
   if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
 }
 function readCase(c) {
@@ -1282,7 +1284,7 @@ function applyPending() {
   if (d.frames && SL.every((k) => d.frames[k] && ['u', 'v', 'n'].every((e) => Array.isArray(d.frames[k][e]) && d.frames[k][e].length === 3 && d.frames[k][e].every(Number.isFinite)))) { S.fr = { ax: d.frames.ax, co: d.frames.co, sa: d.frames.sa }; tidyFrames(); S.frVer++; crossChanged(); }
   if (Array.isArray(d.arch) && d.arch.length >= 2) { S.arch.points = d.arch; S.arch.slab = d.slab ?? S.arch.slab; RB.slab.set(S.arch.slab); archChanged(); }
   if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
-  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; if (d.canal && (d.canal.presumed === 'hide' || d.canal.presumed === 'show')) { S.canal.pres = d.canal.presumed; SEG.cpres(S.canal.pres); } segment({ fit: false, keepCanalT: true }); }
+  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; if (d.canal && (d.canal.presumed === 'hide' || d.canal.presumed === 'show')) { S.canal.pres = d.canal.presumed; SEG.cpres(S.canal.pres); } if (d.canal && d.canal.faint >= 1 && d.canal.faint <= 5) { S.canal.faint = Math.round(d.canal.faint); RB.cFaint.set(S.canal.faint); } segment({ fit: false, keepCanalT: true }); }
   if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
   invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
 }
