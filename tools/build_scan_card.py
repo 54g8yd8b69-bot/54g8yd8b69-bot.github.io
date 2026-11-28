@@ -4,7 +4,7 @@
     python3 tools/build_scan_card.py --deps <folder with node_modules> [--artifact <folder> --tray <folder> --wax <folder>]
 
 Make the deps folder once with:
-    npm i three@0.160.0 three-mesh-bvh@0.7.8 manifold-3d@3.5.5 esbuild@0.24.0
+    npm i three@0.160.0 three-mesh-bvh@0.7.8 manifold-3d@3.5.5 esbuild@0.24.0 onnxruntime-web@1.31.1
 
 Scan Card is one app made of four pages that share scan-card/src/core.js (and solid.js for the two that build solids):
 
@@ -31,9 +31,13 @@ What this script does for the site:
 * Site head: CSP ('wasm-unsafe-eval' only where the engine runs, frames only on the hub), the site's own fonts,
   manifest and icons; the hub's logo returns to the launcher and each tool's logo returns to the hub.
 * Public-site rule: no box that takes patient details. The only text boxes are the model labels (4 characters).
+* The CBCT tab's tooth-model worker (scan-card/src/toothseg-worker.js) is bundled with ONNX Runtime Web into
+  scan-card/cbct/toothseg/worker.js, beside the pack that tools/pack_toothseg.py wrote there (the engine's .wasm, the
+  network's weights in parts, manifest.json, NOTICE.txt). The page asks before it fetches the pack; nothing is inlined.
 
 --artifact <folder> also writes the files for the Claude artifact copy: the source pages as they are, plus
-manifold-wasm.js (the artifact loads the libraries from jsdelivr, so nothing is bundled). --tray and --wax name folders
+manifold-wasm.js (the artifact loads the libraries from jsdelivr, so nothing is bundled) and the tooth-model pack in
+toothseg/ (an artifact may only fetch its own files, so the pack is published with it). --tray and --wax name folders
 holding the Tray Card and Wax Card artifact files (index.html, and for Tray Card library.js and manifold-wasm.js); they
 are copied to <folder>/tray/ and <folder>/wax/ so that the two tabs work inside the artifact too. One line is added
 to the head of each copy: inside an artifact only the top page can save files, and that line points the page at the hub
@@ -96,6 +100,17 @@ work.mkdir()
 for f in ['core.js', 'solid.js', 'dicom.js']:
     shutil.copy(src / f, work / f)
 
+# ---- the tooth-model worker: one module file, ONNX Runtime Web (its wasm-only build) bundled in ----
+pack = out / 'cbct' / 'toothseg'
+assert (pack / 'manifest.json').exists(), 'scan-card/cbct/toothseg/ has no pack: run tools/pack_toothseg.py first'
+shutil.copy(src / 'toothseg-worker.js', work / 'toothseg-worker.js')
+subprocess.run([str(deps / 'node_modules/.bin/esbuild'), str(work / 'toothseg-worker.js'), '--bundle', '--format=esm', '--platform=browser', '--target=es2020',
+                '--minify', '--legal-comments=none', '--outfile=' + str(pack / 'worker.js'), '--log-level=warning'], check=True, cwd=deps)
+wk = (pack / 'worker.js').read_text(encoding='utf-8')
+assert 'cdn.jsdelivr' not in wk and 'InferenceSession' in wk, 'the worker bundle does not hold ONNX Runtime'
+print('wrote', (pack / 'worker.js').relative_to(site), len(wk.encode()), 'bytes')
+WASM_PAGES = {'cbct.html'}        # pages that run WebAssembly other than the solid engine (the tooth model's engine, in its worker)
+
 for name, target, solid, settings, desc in PAGES:
     doc = (src / name).read_text(encoding='utf-8')
     hub = name == 'index.html'
@@ -123,7 +138,7 @@ for name, target, solid, settings, desc in PAGES:
     title = re.search(r'<title>([^<]*)</title>', doc).group(1)
     app = title.split(' — ')[0]
     up = '' if hub else '../'
-    head_add = f'''<meta http-equiv="Content-Security-Policy" content="{CSP.format(wasm=" 'wasm-unsafe-eval'" if solid else '', frames=" frame-src 'self';" if hub else '')}">
+    head_add = f'''<meta http-equiv="Content-Security-Policy" content="{CSP.format(wasm=" 'wasm-unsafe-eval'" if solid or name in WASM_PAGES else '', frames=" frame-src 'self';" if hub else '')}">
 <meta name="referrer" content="no-referrer">
 <meta name="description" content="{desc}">
 <link rel="stylesheet" href="/fonts/fonts.css">
@@ -159,6 +174,9 @@ if a.artifact:
     for f in ['model.html', 'analysis.html', 'splint.html', 'compare.html', 'prep.html', 'survey.html', 'shell.html', 'articulator.html', 'obturator.html', 'cbct.html', 'core.js', 'solid.js', 'dicom.js']:
         shutil.copy(src / f, art / f)
     (art / 'manifold-wasm.js').write_text(wasm_js)
+    (art / 'toothseg').mkdir(exist_ok=True)
+    for f in sorted(pack.iterdir()):                              # the tooth-model pack, beside cbct.html as on the site
+        shutil.copy(f, art / 'toothseg' / f.name)
     doc = (src / 'index.html').read_text(encoding='utf-8')
     # frames: 'both' = load each tool's page as a frame address and, if that does not start, fetch it and hand it over
     conf = '<script>window.SCAN_CARD=' + json.dumps({'urls': {'tray': 'tray/index.html', 'wax': 'wax/index.html'}, 'frames': 'both'}, separators=(',', ':')) + '</script>\n'

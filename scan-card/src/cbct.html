@@ -97,7 +97,7 @@ const S = {
   pano: null, xs: [],
   r3: { mode: 'mip', iso: 0, showSurf: true },
   surf: { mesh: null, info: null, detail: 0.5, largest: false, T: null },
-  tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, preview: null, hist: [], fitted: false },
+  tooth: { seeds: [], not: [], erase: [], roi: null, T: null, smooth: 0.15, brush: 1, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false },
   rep: { pdl: 0, handle: false, hd: 3, hl: 8, fdi: '', mesh: null, info: null },
   canal: { T: null, seg: null, mesh: null, show: 'glass', ver: 0 },
   pending: null, demo: null, busy: false, loads: 0,
@@ -114,6 +114,7 @@ const shell = N.createShell({
       <input type="file" id="lFolderIn" webkitdirectory multiple hidden><input type="file" id="lFilesIn" multiple hidden>
       <div class="prog" id="lProg" hidden><i></i></div>
       <div id="lSeries"></div><div id="lInfo"></div>
+      <div class="btns"><button class="btn" id="lFlip" type="button" title="Turn the scan over, top to bottom: for a scan whose files do not say which way up it is and that shows upside-down" hidden>Flip top to bottom</button></div>
       <p class="tip">Everything is read on this device; nothing is uploaded. Only technical details are read from the files (size, voxel size, position, scan date): names, dates of birth, numbers and the like are stepped over and never shown or saved. If the scan is compressed with JPEG 2000 or JPEG-LS, export it again from the CBCT software as uncompressed DICOM.</p>` },
     { id: 'view', title: 'Slices', html: `
       <p class="lead">Scroll over a slice to move through it; tap to move the cross-hair. Drag a round handle on a cross-hair line to turn the lines: the other two slices follow at that angle. Pinch or Ctrl + scroll to zoom; two fingers or the right mouse button to pan.</p>
@@ -148,6 +149,8 @@ const shell = N.createShell({
       <p class="tip">Tap the panoramic to put the cross-sections there; scroll over a cross-section to step along the arch. In each cross-section the cheek or lip side (B) is on the left and the tongue side (L) on the right; ticks every millimetre, numbers every 5 mm from the arch curve and the scan’s height.</p>` },
     { id: 'tooth', title: 'Pick a tooth', optional: true, html: `
       <p class="lead" id="dLead">Tap the donor tooth in a slice, near the middle of its crown.</p>
+      <div class="row"><label>Outline by</label><div class="seg" id="dBy"><button data-v="rules" type="button" title="The outline is followed from the scan’s grey values by rules">Rules</button><button data-v="model" type="button" title="The outline is drawn by a trained network (ToothSeg) that runs on this device: a download of about 76 MB the first time">Model</button></div></div>
+      <div id="dModel"></div>
       <div class="row"><label>Region</label><div class="seg" id="dShape"><button data-v="cyl" type="button" title="A cylinder round the tooth">Cylinder</button><button data-v="box" type="button" title="A box round the tooth">Box</button></div></div>
       <div class="row"><label>Width</label><input type="range" id="dR" min="3" max="14" step="0.25" value="7"><span class="val"></span></div>
       <div class="row"><label>Above the tap</label><input type="range" id="dUp" min="2" max="30" step="0.5" value="20"><span class="val"></span></div>
@@ -157,7 +160,8 @@ const shell = N.createShell({
       <div class="row"><label>Eraser size</label><input type="range" id="dBrush" min="0.3" max="3" step="0.1" value="1"><span class="val"></span></div>
       <div class="btns"><button class="btn" id="dFit" type="button" title="Fit the region round the tooth found">Fit the region</button><button class="btn" id="dUndo" type="button" title="Undo the last change">Undo</button><button class="btn" id="dClear" type="button" title="Pick the tooth again">Start again</button><button class="btn" id="dAlign" type="button" title="Turn the slices to run along and across this tooth’s long axis">Slices along the tooth</button></div>
       <div id="dOut"></div>
-      <p class="tip">The tooth is everything at or above the threshold inside the region that is reached from your tap before it is reached from the region’s edge, taking the thickest and brightest parts first: the two meet in the dark ligament space round the root and at the narrow neck of a contact. If it leaks into the bone or the next tooth, tap there with “Not tooth”, cut the bridge with the eraser, raise the threshold, or narrow the region. Pulp spaces are filled. This works best on a scan with small voxels (0.3 mm or less, as from a small field of view): with larger voxels the ligament space may not show, and the tooth runs into the bone.</p>` },
+      <p class="tip">The tooth is everything at or above the threshold inside the region that is reached from your tap before it is reached from the region’s edge, taking the thickest and brightest parts first: the two meet in the dark ligament space round the root and at the narrow neck of a contact. If it leaks into the bone or the next tooth, tap there with “Not tooth”, cut the bridge with the eraser, raise the threshold, or narrow the region. Pulp spaces are filled. This works best on a scan with small voxels (0.3 mm or less, as from a small field of view): with larger voxels the ligament space may not show, and the tooth runs into the bone.</p>
+      <p class="tip">“Model” gives the part of the scan round your tap (about 26 × 26 × 32 mm, as 0.2 mm voxels) to a trained network, ToothSeg, which marks the teeth in it; the one you tapped becomes the outline, and a tooth it joined to the one it bites on is parted at the bridge between them. It runs on this device — the scan is not sent anywhere — and takes about a minute, during which the rules’ outline shows. The region, width and threshold above do not apply to it; the eraser does, and “Not tooth” cuts a 1 mm ball. It was trained on CBCTs from other scanners and is not certified medical-device software: check its outline against the grey of the slices as you would any other. ${D.TOOTH_MODEL.credit}; run with ONNX Runtime Web (MIT).</p>` },
     { id: 'replica', title: 'Replica', optional: true, html: `
       <p class="lead">A printable replica of the donor tooth, to shape the socket and try it in before the tooth is moved, so it is out of the mouth for less time.</p>
       <div class="row"><label>Enlarge by</label><input type="range" id="rPdl" min="0" max="0.5" step="0.05" value="0"><span class="val"></span></div>
@@ -490,7 +494,8 @@ function xsRulers(v, g) {
 function toothOverlay(v) {
   const ctx = v.ctx, T = S.tooth, V = S.vol, cur = S.cur, sc = (p) => { const q = w2v(p), [a, b] = fromVox(v, q[0], q[1], q[2]); return toScreen(v, a, b); };
   const onPlane = (p, tol) => planeDist(v, p) <= tol, o = obl(v);
-  if (T.roi && o) {                                                 // a turned slice: where its plane cuts the region (a convex outline)
+  const noRoi = !!(T.seg && T.seg.model);                            // (the model's outline does not go by the region)
+  if (noRoi) { /* nothing to draw of the region */ } else if (T.roi && o) {                                                 // a turned slice: where its plane cuts the region (a convex outline)
     const R = T.roi, z0 = Math.min(R.z0, R.z1), z1 = Math.max(R.z0, R.z1), f = o.f, P0 = obPt(o, 0, 0);   // P(a, b) = P0 + a·u + b·v
     const ring = R.shape === 'box' ? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => [R.c[0] + x * R.r, R.c[1] + y * R.r]) : Array.from({ length: 64 }, (_, i) => [R.c[0] + R.r * Math.cos(i * Math.PI / 32), R.c[1] + R.r * Math.sin(i * Math.PI / 32)]);
     let poly = [[0, 0], [o.Wu, 0], [o.Wu, o.Wv], [0, o.Wv]];
@@ -723,7 +728,7 @@ function setVolume(v) {
   S.vol = v; S.loads++; S.H = D.histogram(v); S.P = D.windowPresets(v, S.H);
   S.cur = v.dims.map((n) => (n - 1) / 2); S.measures = []; S.draft = null; S.fr = frames0(); S.frVer++; S.rotating = null; S.rotTag = null;
   S.arch = { ...S.arch, points: [], curve: null, ver: S.arch.ver + 1, s: 0 }; S.pano = null; S.xs = [];
-  S.surf.mesh = null; S.surf.info = null; S.tooth = { ...S.tooth, seeds: [], not: [], erase: [], roi: null, T: null, seg: null, hist: [], fitted: false }; S.rep.mesh = null; S.rep.info = null;
+  S.surf.mesh = null; S.surf.info = null; modelStop(); S.tooth = { ...S.tooth, seeds: [], not: [], erase: [], roi: null, T: null, seg: null, rules: null, model: null, hist: [], fitted: false }; S.rep.mesh = null; S.rep.info = null;
   for (const id of Object.keys(bufs)) delete bufs[id];
   const span = v.max - v.min;
   for (const [k, rb] of [['level', RB.level], ['width', RB.width]]) { const inp = $(k === 'level' ? 'vLevel' : 'vWidth'); inp.min = k === 'level' ? v.min : 1; inp.max = k === 'level' ? v.max : Math.max(2, span * 1.5); }
@@ -736,13 +741,14 @@ function setVolume(v) {
   if (S.pending) applyPending();
 }
 function syncInfo() {
-  const v = S.vol; if (!v) { $('lInfo').innerHTML = ''; return; }
+  const v = S.vol; if (!v) { $('lInfo').innerHTML = ''; $('lFlip').hidden = true; return; }
   const ext = v.dims.map((n, a) => (n - 1) * v.spacing[a]), sp = v.spacing.map((s) => +s.toFixed(3));
   $('lInfo').innerHTML = `<div class="sum"><h5>${S.demo ? 'Demo CBCT (made up)' : 'The scan'}<span class="okb${v.warnings.length ? ' warn' : ''}">${v.warnings.length ? 'check' : 'open'}</span></h5>
     <div><span>Kind</span><b>${N.esc(v.modality || '—')}</b></div><div><span>Size</span><b>${v.dims.join(' × ')} voxels</b></div>
     <div><span>Voxel size</span><b>${sp[0] === sp[1] && sp[1] === sp[2] ? sp[0] + ' mm' : sp.join(' × ') + ' mm'}</b></div><div><span>Covers</span><b>${ext.map((e) => e.toFixed(0)).join(' × ')} mm</b></div>
-    ${v.date ? `<div><span>Scan date</span><b>${fmtDate(v.date)}</b></div>` : ''}<div><span>Stored</span><b>${N.esc(v.compression || '')}</b></div><div><span>Memory</span><b>${(v.data.byteLength / 1048576).toFixed(0)} MB</b></div></div>
+    ${v.date ? `<div><span>Scan date</span><b>${fmtDate(v.date)}</b></div>` : ''}<div><span>Stored</span><b>${N.esc(v.compression || '')}</b></div><div><span>Memory</span><b>${(v.data.byteLength / 1048576).toFixed(0)} MB</b></div>${v.guessed ? `<div><span>Slice order</span><b>${v.flipped ? 'turned over by you' : 'first slice at the top (assumed)'}</b></div>` : ''}</div>
     ${v.warnings.map((w) => `<p class="note warn">${N.esc(w)}</p>`).join('')}`;
+  $('lFlip').hidden = !v.guessed;
   shell.markDone('load', true);
 }
 
@@ -912,10 +918,12 @@ function eraseDone() { segment(); }
 let segBusy = false, segAgain = false;
 async function segment(o = {}) {
   const t = T(); if (!t.seeds.length || !t.roi) return;
-  if (segBusy) { segAgain = true; return; } segBusy = true;
+  if (segBusy) { segAgain = true; return; } segBusy = true; let wantModel = false;
   try {
     const run = () => D.segmentTooth(S.vol, { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T });
-    let sg = run();
+    // (with the model's outline already there for this tap, the rules are not run again: only their grey levels are used)
+    const byModel = MODEL.by === 'model', mk = byModel ? modelKey(t) : '', have = byModel && t.model && t.model.key === mk && !t.model.error;
+    let sg = have && t.rules ? t.rules : run();
     if (!sg.error && !t.fitted && o.fit !== false) {
       // first time: the region is moved onto the middle of the crown (a tap may lie off to one side of a broad tooth) and widened
       // while the tooth reaches its side, the tooth found again each time. Then the region is drawn round what was found, 3 mm
@@ -925,6 +933,9 @@ async function segment(o = {}) {
       t.fitted = true; const c = [(sg.lo[0] + sg.hi[0]) / 2, (sg.lo[1] + sg.hi[1]) / 2], r = Math.max(sg.hi[0] - c[0], c[0] - sg.lo[0], sg.hi[1] - c[1], c[1] - sg.lo[1]) + 3;
       t.roi = { ...t.roi, c, r: N.clamp(Math.round(r * 4) / 4, 3, 14), z0: Math.min(t.seeds[0][2] - 1, sg.lo[2] - 3), z1: Math.max(t.seeds[0][2] + 1, sg.hi[2] + 3) }; syncRoiSliders();
     }
+    t.rules = sg;
+    if (have) { const mask = modelMask(t), m = mask ? D.toothFromMask(S.vol, t.model.cube, mask, { seeds: t.seeds, erase: t.erase, not: t.not, rules: sg.error ? null : sg, soft: S.P.soft.l }) : { error: 'The model found no tooth where you tapped: tap the middle of the crown.' }; if (!m.error || sg.error) sg = m; }
+    else if (byModel && !(t.model && t.model.key === mk)) { t.model = null; wantModel = true; }
     t.seg = sg; segVer++; t.preview = null; S.rep.mesh = null; S.rep.info = null; dropCanal(o.keepCanalT);
     if (!sg.error) { const f = D.replicaField(S.vol, sg, { smooth: t.smooth }); const m = N.isoMesh(f.F, f.n[0], f.n[1], f.n[2], f.origin, f.h, { minVolume: 2 }); D.taubin(m, 2); t.preview = m; }
     if (r3objs.tooth) viewer.remove(r3objs.tooth); r3objs.tooth = null; if (r3objs.rep) { viewer.remove(r3objs.rep); r3objs.rep = null; }
@@ -934,9 +945,91 @@ async function segment(o = {}) {
   if (segAgain) { segAgain = false; return segment(o); }
   if (S.tool === 'tooth' && T().seg && !T().seg.error) S.tool = 'browse';
   setTools(); show3D(); invalidate(); syncUI();
+  if (wantModel) modelRun();
+}
+
+// ───────────── the tooth model (ToothSeg): the outline drawn by a trained network in place of the rules ─────────────
+// The network runs in a worker of its own (toothseg/worker.js: ONNX Runtime) on a cube of the scan round the tap. The cube,
+// and what is made of the network's answer, are dicom.js's (modelFrame … toothFromMask), so the page only passes them along.
+// The pack — the network and the engine, about 76 MB — is fetched only when asked for, and kept on the device afterwards.
+const MODEL = { by: 'rules', state: 'off', worker: null, done: 0, total: 0, info: null, err: '', run: null, seq: 0, tick: null,
+  base: new URL((window.TOOTHSEG && window.TOOTHSEG.base) || 'toothseg/', document.baseURI).href };
+const modelPref = (v) => { try { if (v === undefined) return localStorage.getItem('notile.cbct.outline'); localStorage.setItem('notile.cbct.outline', v); } catch (_) { /* no storage here */ } return null; };
+const modelKey = (t) => (t.seeds.length ? `${S.loads}|${t.seeds[0].map((x) => x.toFixed(3)).join(',')}` : '');
+/** give up a run that is under way (a worker cannot be interrupted, only ended: it is started afresh when next needed) */
+function modelStop() {
+  clearInterval(MODEL.tick); MODEL.tick = null; if (!MODEL.run) return;
+  MODEL.run = null; if (MODEL.worker) { MODEL.worker.terminate(); MODEL.worker = null; MODEL.state = 'off'; }
+}
+/** start the worker and have it load the pack: from this device if it is there; fetched only if allow is true (else it asks) */
+function modelLoad(allow) {
+  if (MODEL.worker) return; let w;
+  if (!/^https?:/.test(MODEL.base)) { MODEL.state = 'none'; syncModel(); return; }   // (a single-file copy opened from disk: there is no pack beside it to load)
+  try { w = new Worker(new URL('worker.js', MODEL.base), { type: 'module' }); } catch (_) { MODEL.state = 'none'; syncModel(); return; }
+  MODEL.worker = w; MODEL.state = 'loading'; MODEL.done = 0; MODEL.total = 0; MODEL.err = '';
+  w.onmessage = (e) => modelMsg(w, e.data || {});
+  w.onerror = (e) => { if (e && e.preventDefault) e.preventDefault(); if (MODEL.worker !== w) return; w.terminate(); MODEL.worker = null; const ran = MODEL.run; MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null;
+    if (ran) { MODEL.state = 'error'; MODEL.err = 'The model stopped before it finished (this device may not have the memory for it).'; } else MODEL.state = 'none'; syncModel(); syncUI(); };
+  w.postMessage({ type: 'load', base: MODEL.base, allow: !!allow }); syncModel();
+}
+function modelMsg(w, m) {
+  if (MODEL.worker !== w) return;
+  if (m.type === 'progress') { MODEL.done = m.done; MODEL.total = m.total; syncModel(); }
+  else if (m.type === 'need') { w.terminate(); MODEL.worker = null; MODEL.state = 'ask'; MODEL.total = m.total; syncModel(); }
+  else if (m.type === 'ready') { MODEL.state = 'ready'; MODEL.info = m; syncModel(); modelRun(); }
+  else if (m.type === 'done') modelDone(m);
+  else if (m.type === 'error') {
+    if (MODEL.run && m.id === MODEL.run.id) { const t = T(); t.model = { key: MODEL.run.key, error: /memory|alloc|OOM/i.test(m.message) ? 'The model ran out of memory on this device.' : 'The model could not outline this tooth (' + m.message + ').' }; MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null; w.terminate(); MODEL.worker = null; MODEL.state = 'off'; syncUI(); }
+    else { w.terminate(); MODEL.worker = null; MODEL.state = /not available/.test(m.message) ? 'none' : 'error'; MODEL.err = m.message; syncModel(); }
+  }
+}
+/** hand the tooth at the first tap to the network (once per tap: its answer is kept with the tooth) */
+function modelRun(pass = 1, frame = null) {
+  const t = T(); if (MODEL.by !== 'model' || !S.vol || !t.seeds.length) return;
+  const key = modelKey(t); if (t.model && t.model.key === key) return;
+  if (MODEL.run && MODEL.run.key === key && !frame) return;
+  if (MODEL.run) modelStop();
+  if (MODEL.state !== 'ready' || !MODEL.worker) { if (MODEL.state === 'off') modelLoad(false); return; }
+  const rules = t.rules && !t.rules.error ? t.rules : null, fr = frame || D.modelFrame(S.vol, t.seeds[0], rules), map = D.modelMap(S.vol, rules && rules.levels, S.P), cube = D.modelCube(S.vol, fr.centre, fr.n, map);
+  const id = ++MODEL.seq; MODEL.run = { id, key, pass, fr, cube: { n: cube.n, o: cube.o, h: cube.h }, t0: performance.now(), mapped: !!map };
+  MODEL.worker.postMessage({ type: 'run', id, x: cube.x, n: cube.n }, [cube.x.buffer]);
+  clearInterval(MODEL.tick); MODEL.tick = setInterval(syncModel, 1000); syncModel();
+}
+function modelDone(m) {
+  const R = MODEL.run; if (!R || m.id !== R.id) return; const t = T();
+  if (modelKey(t) !== R.key || MODEL.by !== 'model') { MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null; syncModel(); return modelRun(); }
+  const teeth = D.modelTeeth(m.lab, R.cube.n), one = D.modelTooth(teeth.ids, R.cube.n, R.cube.o, t.seeds[0]);
+  // a tooth that reaches one side of the cube was not all inside it: once more, with the cube moved 6 mm that way (the tap kept 2 mm inside)
+  if (!one.error && R.pass === 1 && one.touches.some((p) => p[0] !== p[1])) {
+    const c = R.fr.centre.slice(), s = t.seeds[0]; one.touches.forEach((p, a) => { if (p[0] !== p[1]) { const half = (R.fr.n[a] - 1) / 2 * R.cube.h - 2; c[a] = N.clamp(c[a] + (p[1] ? 6 : -6), s[a] - half, s[a] + half); } });
+    MODEL.run = null; return modelRun(2, { centre: c, n: R.fr.n });
+  }
+  MODEL.run = null; clearInterval(MODEL.tick); MODEL.tick = null;
+  t.model = one.error ? { key: R.key, error: one.error } : { key: R.key, cube: R.cube, ids: teeth.ids, teeth: teeth.count, secs: (performance.now() - R.t0) / 1000, net: m.secs, pass: R.pass, mapped: R.mapped, clipped: one.touches.some((p) => p[0] || p[1]), parted: one.parted, maskKey: '', mask: null };
+  segment({ frame: false, keepCanalT: true });
+}
+/** the model's tooth for the taps as they stand: the tooth at each "Tooth" tap, together (kept until the taps change) */
+function modelMask(t) {
+  const M = t.model, key = JSON.stringify(t.seeds); if (M.maskKey === key) return M.mask;
+  let mask = null; for (const s of t.seeds) { const r = D.modelTooth(M.ids, M.cube.n, M.cube.o, s); if (r.error) continue; if (!mask) { mask = r.mask; M.parted = r.parted; } else for (let i = 0; i < mask.length; i++) if (r.mask[i]) mask[i] = 1; }
+  M.maskKey = key; M.mask = mask; return mask;
+}
+function syncModel() {
+  const el = $('dModel'), t = T(), on = MODEL.by === 'model', mb = (b) => (b / 1e6).toFixed(0); let h = '';
+  if (on) {
+    if (MODEL.state === 'ask') h = `<p class="note">The model is a one-off download of about ${MODEL.total ? mb(MODEL.total) : 76} MB — the network and the engine that runs it — kept on this device afterwards. The scan is not sent anywhere: the model runs here.</p><div class="btns"><button class="btn pri" id="dGet" type="button" title="Fetch the tooth model and keep it on this device">Download the model</button></div>`;
+    else if (MODEL.state === 'loading') h = `<div class="prog"><i style="width:${MODEL.total ? Math.round(100 * MODEL.done / MODEL.total) : 0}%"></i></div><p class="note">${MODEL.total && MODEL.done < MODEL.total ? `Getting the model… ${mb(MODEL.done)} of ${mb(MODEL.total)} MB` : 'Starting the model…'}</p>`;
+    else if (MODEL.state === 'none') h = '<p class="note warn">The model cannot be loaded in this copy of the tool (it needs its files beside the page, as on notile.co.uk): the rules’ outline is used.</p>';
+    else if (MODEL.state === 'error') h = `<p class="note warn">${N.esc(MODEL.err || 'The model could not be started.')} The rules’ outline is used.</p><div class="btns"><button class="btn" id="dGet" type="button" title="Try to load the tooth model again">Try again</button></div>`;
+    else if (MODEL.run) h = `<p class="note">The model is outlining the tooth… ${Math.round((performance.now() - MODEL.run.t0) / 1000)} s${MODEL.run.pass > 1 ? ' (a second pass: the tooth reached the edge of the first)' : ''}. It usually takes about a minute; the rules’ outline shows meanwhile.</p>`;
+    else if (t.model && t.model.error) h = `<p class="note warn">${N.esc(t.model.error)} The rules’ outline is shown.</p>`;
+    else if (MODEL.state === 'ready' && !t.seeds.length) h = '<p class="note">The model is ready: tap a tooth.</p>';
+  }
+  if (el.innerHTML !== h) el.innerHTML = h;
+  const mdl = !!(on && t.seg && t.seg.model); for (const id of ['dShape', 'dR', 'dUp', 'dDown', 'dT']) $(id).closest('.row').hidden = mdl; $('dFit').hidden = mdl;
 }
 function roi3D() {
-  if (r3objs.roi) { viewer.remove(r3objs.roi); r3objs.roi = null; } const R = T().roi; if (!R) return;
+  if (r3objs.roi) { viewer.remove(r3objs.roi); r3objs.roi = null; } const R = T().roi; if (!R || (T().seg && T().seg.model)) return;
   const h = Math.abs(R.z1 - R.z0), g = R.shape === 'box' ? new THREE.BoxGeometry(2 * R.r, 2 * R.r, h) : new THREE.CylinderGeometry(R.r, R.r, h, 40, 1, true).rotateX(Math.PI / 2);
   r3objs.roi = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20), new THREE.LineBasicMaterial({ color: COL.roi, transparent: true, opacity: 0.6 })); r3objs.roi.position.set(R.c[0], R.c[1], (R.z0 + R.z1) / 2); r3objs.roi.userData.noFit = true; viewer.add(r3objs.roi);
 }
@@ -1016,6 +1109,10 @@ const SEG = {
 SEG.cshow = N.segBind($('cShow'), (v) => { S.canal.show = v; show3D(); }, 'glass');
 const SEGV = { shape: 'cyl', setShape: null };
 SEGV.setShape = N.segBind($('dShape'), (v) => { SEGV.shape = v; if (T().roi) roiFromSliders(); }, 'cyl');
+SEG.by = N.segBind($('dBy'), (v) => { MODEL.by = v; modelPref(v); if (v === 'model') { if (MODEL.state === 'off' || MODEL.state === 'error') { MODEL.state = 'off'; modelLoad(false); } } else modelStop(); if (T().seeds.length && T().roi) segment({ frame: false, fit: false, keepCanalT: true }); else syncUI(); }, 'rules');
+$('dModel').addEventListener('click', (e) => { if (e.target.id === 'dGet') { MODEL.state = 'off'; modelLoad(true); } });
+$('lFlip').addEventListener('click', () => { if (!S.vol || !S.vol.guessed || S.busy) return; setVolume(D.flipStack(S.vol)); shell.status('The scan was turned over, top to bottom: anything picked or measured on it was cleared'); });
+if (modelPref() === 'model') { MODEL.by = 'model'; SEG.by('model'); }
 $('vFit').addEventListener('click', () => { for (const v of Object.values(views)) { v.fitted = false; v.autoFit = true; } invalidate(); });
 $('vStraight').addEventListener('click', straighten);
 $('vCentre').addEventListener('click', () => { if (S.vol) { S.cur = S.vol.dims.map((n) => (n - 1) / 2); crossChanged(); } });
@@ -1030,7 +1127,7 @@ $('pUndo').addEventListener('click', () => { S.arch.points.pop(); archChanged();
 $('pClear').addEventListener('click', () => { S.arch.points = []; archChanged(); });
 $('dFit').addEventListener('click', () => { const t = T(); if (!t.seg || t.seg.error) return; pushHist(); t.fitted = false; segment(); });
 $('dUndo').addEventListener('click', () => { const t = T(); const h = t.hist.pop(); if (!h) return; Object.assign(t, JSON.parse(h)); t.fitted = true; syncRoiSliders(); RB.dT.set(t.T); segment(); });
-$('dClear').addEventListener('click', () => { const t = T(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; dropCanal(); if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
+$('dClear').addEventListener('click', () => { const t = T(); modelStop(); Object.assign(t, { seeds: [], not: [], erase: [], roi: null, seg: null, rules: null, model: null, preview: null, hist: [], fitted: false, framed: false }); segVer++; dropCanal(); if (r3objs.tooth) { viewer.remove(r3objs.tooth); r3objs.tooth = null; } roi3D(); S.tool = 'tooth'; setTools(); invalidate(); syncUI(); });
 $('cFind').addEventListener('click', () => findCanal({ auto: true }).catch(() => {}));
 $('cAlign').addEventListener('click', alignToTooth); $('dAlign').addEventListener('click', alignToTooth);
 $('cStl').addEventListener('click', () => { if (!S.canal.mesh) return shell.status('Find the canals first', true); download(`root-canals${S.rep.fdi ? '-' + S.rep.fdi : ''}.stl`, S.canal.mesh, `Notile CBCT root canals${S.rep.fdi ? ' ' + S.rep.fdi : ''}, LPS mm`); });
@@ -1056,10 +1153,14 @@ function syncUI() {
   $('dLead').textContent = !t.seeds.length ? 'Tap the tooth in a slice, near the middle of its crown: a donor tooth for a replica, or a tooth whose root canals you want to see.' : sg && sg.error ? sg.error : 'Check the tooth (teal) in all three slices. Fix any leak with the tools in the bar above the slices.';
   let out = '';
   if (sg && !sg.error) {
-    out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 ? ' warn' : ''}">${sg.touch > 20 ? 'reaches the edge' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div><div><span>Threshold</span><b>${t.T}</b></div><div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
+    const M = sg.model ? t.model : null;
+    out = `<div class="sum"><h5>Tooth found<span class="okb${sg.touch > 20 || (M && M.clipped) ? ' warn' : ''}">${M ? (M.clipped ? 'model · reaches the edge' : 'model') : sg.touch > 20 ? 'reaches the edge' : 'separate'}</span></h5><div><span>Volume</span><b>${sg.volume.toFixed(0)} mm³</b></div><div><span>Length along its axis</span><b>${mm(sg.length)}</b></div><div><span>Crown points</span><b>${sg.axis[2] * sg.crown > 0 ? 'up (lower tooth)' : 'down (upper tooth)'}</b></div>${M ? `<div><span>Outline</span><b>model, in ${M.secs.toFixed(0)} s</b></div>` : `<div><span>Threshold</span><b>${t.T}</b></div>`}<div><span>Taps · eraser marks</span><b>${t.seeds.length + t.not.length} · ${t.erase.length}</b></div></div>`;
     if (sg.touch > 20) out += '<p class="note warn">The tooth touches the edge of the region: widen it or move it, or the crown or a root may be cut off.</p>';
+    if (M && M.parted) out += '<p class="note warn">The model had joined this tooth to another it touches (the one it bites on, most likely): they were parted at the narrow bridge between them. Check the outline there.</p>';
+    if (M && M.clipped) out += '<p class="note warn">The tooth reaches the edge of the part of the scan the model was given: a root tip or the crown may be cut off. Tap nearer the middle of the tooth and pick it again.</p>';
+    if (M && M.mapped) out += '<p class="note">This scan’s grey values are not on a CT-like scale, so they were stretched to one for the model: look at its outline with extra care.</p>';
   }
-  $('dOut').innerHTML = out; shell.markDone('tooth', !!(sg && !sg.error));
+  $('dOut').innerHTML = out; shell.markDone('tooth', !!(sg && !sg.error)); syncModel(); for (const x of $('dBy').querySelectorAll('button')) x.disabled = !has;
   // the replica
   const ri = S.rep.info; $('rHdRow').hidden = $('rHlRow').hidden = !S.rep.handle;
   $('rOut').innerHTML = ri ? `<div class="sum"><h5>Replica<span class="okb${ri.closed && ri.parts === 1 ? '' : ' bad'}">${ri.closed ? (ri.parts === 1 ? 'closed, one piece' : ri.parts + ' pieces') : 'not closed'}</span></h5><div><span>Volume</span><b>${ri.volume.toFixed(0)} mm³</b></div><div><span>Tooth length</span><b>${mm(ri.toothLength)}</b></div><div><span>Enlarged by</span><b>${mm(ri.pdl, 2)}</b></div><div><span>Handle</span><b>${ri.handle ? 'yes' : 'no'}</b></div><div><span>Triangles</span><b>${ri.tris.toLocaleString('en-GB')}</b></div></div>` : '';
@@ -1098,7 +1199,7 @@ function extendCase(c) {
   const has = S.vol || S.rep.mesh; if (!has) { delete c.data.cbct; return; }
   const t = T();
   c.data.cbct = { version: 1, volume: fingerprint(), window: S.win, frames: allStraight() ? undefined : S.fr, arch: S.arch.points, slab: S.arch.slab, measures: S.measures.map((m) => ({ kind: m.kind, key: m.key, view: m.view, pts: m.pts, value: m.value })),
-    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
+    tooth: t.seeds.length ? { seeds: t.seeds, not: t.not, erase: t.erase, roi: t.roi, T: t.T, smooth: t.smooth, outline: MODEL.by } : null, canal: S.canal.seg && !S.canal.seg.error ? { T: S.canal.T, auto: S.canal.seg.auto } : null, replica: S.rep.mesh ? { pdl: S.rep.pdl, handle: S.rep.handle, hd: S.rep.hd, hl: S.rep.hl, fdi: S.rep.fdi, volume: S.rep.info.volume } : null };
   if (S.rep.mesh) c.add({ role: 'cbct-replica', name: `tooth-replica${S.rep.fdi ? '-' + S.rep.fdi : ''}`, mesh: S.rep.mesh, matrix: new THREE.Matrix4(), meta: { frame: 'cbct', volume: fingerprint() } });
 }
 function readCase(c) {
@@ -1114,7 +1215,7 @@ function applyPending() {
   if (d.frames && SL.every((k) => d.frames[k] && ['u', 'v', 'n'].every((e) => Array.isArray(d.frames[k][e]) && d.frames[k][e].length === 3 && d.frames[k][e].every(Number.isFinite)))) { S.fr = { ax: d.frames.ax, co: d.frames.co, sa: d.frames.sa }; tidyFrames(); S.frVer++; crossChanged(); }
   if (Array.isArray(d.arch) && d.arch.length >= 2) { S.arch.points = d.arch; S.arch.slab = d.slab ?? S.arch.slab; RB.slab.set(S.arch.slab); archChanged(); }
   if (Array.isArray(d.measures)) S.measures = d.measures.filter((m) => m && (m.kind === 'dist' || m.kind === 'angle') && Array.isArray(m.pts));
-  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; segment({ fit: false, keepCanalT: true }); }
+  if (d.tooth && d.tooth.seeds && d.tooth.seeds.length) { Object.assign(S.tooth, { seeds: d.tooth.seeds, not: d.tooth.not || [], erase: d.tooth.erase || [], roi: d.tooth.roi, T: d.tooth.T, smooth: d.tooth.smooth ?? 0.15, fitted: true }); RB.dT.set(S.tooth.T); RB.dSmooth.set(S.tooth.smooth); syncRoiSliders(); if (d.tooth.outline === 'model' && MODEL.by !== 'model') { MODEL.by = 'model'; SEG.by('model'); } if (d.canal && Number.isFinite(d.canal.T) && d.canal.T !== d.canal.auto) S.canal.T = d.canal.T; segment({ fit: false, keepCanalT: true }); }
   if (d.replica) { Object.assign(S.rep, { pdl: d.replica.pdl, handle: d.replica.handle, hd: d.replica.hd, hl: d.replica.hl, fdi: d.replica.fdi || '' }); RB.rPdl.set(S.rep.pdl); $('rHandle').checked = S.rep.handle; RB.rHd.set(S.rep.hd); RB.rHl.set(S.rep.hl); $('rFdi').value = S.rep.fdi; }
   invalidate(); syncUI(); shell.status('The saved CBCT work was put back');
 }
@@ -1131,7 +1232,7 @@ if (N.EMBED) setTimeout(() => {
 }, 0);
 
 setTools(); syncUI(); shell.goto(0);
-window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
+window.APP = { N, D, THREE, shell, viewer, S, views, findCanal, alignToTooth, obl, obPt, turnIn, straighten, handles, lineAngle, crossLines, planeDist, RB, SEG, SEGV, openFiles, loadSeries, loadDemo, setVolume, setWindow, crossChanged, toScreen, fromScreen, toVox, fromVox, geom, measureValue, archChanged, makePano, makeXs, proposeArch, segment, MODEL, modelLoad, modelRun, modelStop, makeReplica, makeSurface, extendCase, readCase, fingerprint, invalidate, get box3() { return box3; }, r3objs, LUT: () => LUT };
 </script>
 </body>
 </html>

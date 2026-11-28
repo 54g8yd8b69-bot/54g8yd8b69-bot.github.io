@@ -77,6 +77,11 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); 
     await hub.click(`#tabs [data-tab=${id}]`); await settle(); let fr = null; for (let i = 0; i < 40 && !fr; i++) { fr = await child(test); if (!fr) await p.waitForTimeout(500); }
     ok(!!fr, `scan-card: ${id} opened inside it and has the scans`);
   }
+  { // the CBCT tab's "Outline by: Model" inside the single file: there is no pack beside it, so it says so and nothing is fetched or started
+    const cb = await child(() => window.__SUITE_APP === 'scan-cbct' && !!window.APP && !!APP.MODEL);
+    const r = cb ? await cb.evaluate(async () => { await APP.loadDemo(); APP.shell.goto('tooth'); document.querySelector('#dBy [data-v=model]').click(); await new Promise((ok) => setTimeout(ok, 400)); const out = { state: APP.MODEL.state, worker: !!APP.MODEL.worker, note: document.getElementById('dModel').textContent }; document.querySelector('#dBy [data-v=rules]').click(); return out; }) : null;
+    ok(!!r && r.state === 'none' && !r.worker && /cannot be loaded in this copy/.test(r.note), 'scan-card: CBCT’s tooth model says it cannot be loaded in the single file (' + (r ? r.state : 'no CBCT page') + ') and the rules stay in use');
+  }
   await hub.click('#tabs [data-tab=scans]'); await settle();
   ok(await hub.evaluate(() => APP.users().join()) === 'Models,Analysis,Splint,Compare,Prep check,Survey,Shells,Articulator,Obturator,Trays,Wax-up', 'scan-card: all eleven tools that use the scans are working on the one pair of scans (CBCT opens its own files)');
   const [dc] = await Promise.all([p.waitForEvent('download'), hub.click('#topBtns button:nth-child(2)')]);

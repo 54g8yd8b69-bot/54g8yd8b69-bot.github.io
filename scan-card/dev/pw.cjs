@@ -81,6 +81,7 @@ async function openApp(app, opts = {}) {
     errors.push('blocked external request: ' + url);
     return route.abort();
   });
+  if (opts.init) await ctx.addInitScript(opts.init.fn || opts.init, opts.init.arg);   // a script run in the page before its own (opts.init: a function, or { fn, arg })
   const url = `http://127.0.0.1:${port}/${app}/${opts.file || 'index.html'}${opts.hash || ''}`;
   await page.goto(url, { waitUntil: 'load' });
   const shot = (file, o = {}) => page.screenshot({ path: file, ...o });

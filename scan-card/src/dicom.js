@@ -446,6 +446,7 @@ export async function scanSeries(files, onProgress) {
  *   origin   patient position (LPS, mm) of voxel (0, 0, 0); voxel (i, j, k) is at origin + (i·sx, j·sy, k·sz):
  *            the volume is turned on loading so that +i is the patient's left, +j posterior and +k up
  *   min, max (of data), modality, date, compression, warnings[]
+ *   guessed  true when the files gave no slice positions and the first slice was taken as the top (see flipStack)
  */
 export async function loadVolume(series, onProgress) {
   if (series.reason) throw new Error('This series cannot be opened: ' + series.reason + '. Export it from the CBCT software as uncompressed DICOM and try again.');
@@ -454,7 +455,7 @@ export async function loadVolume(series, onProgress) {
   const R = iop ? iop.slice(0, 3) : [1, 0, 0], C = iop ? iop.slice(3, 6) : [0, 1, 0], Nn = cross(R, C);
   if (!iop) warnings.push('The files do not say which way the scan faces: left/right and front/back are assumed.');
   // every slice: which file and frame, and where it lies along the stack
-  const slices = []; let havePos = true;
+  const slices = []; let havePos = true, guessed = false;
   for (const it of series.items) {
     const h = it.h, sh = (h.shared && h.shared[0]) || {}, pm = (sh.pixelMeasures && sh.pixelMeasures[0]) || {};
     const step = pm.spacingBetween || h.spacingBetween || pm.sliceThickness || h.sliceThickness || 0;
@@ -480,8 +481,13 @@ export async function loadVolume(series, onProgress) {
     const sorted = gaps.slice().sort((a, b) => a - b); sz = sorted.length ? Math.round(sorted[sorted.length >> 1] * 1e5) / 1e5 : (h0.sliceThickness || sx);
     if (gaps.some((g) => Math.abs(g - sz) > 0.05 * sz + 1e-3)) warnings.push('The slices are not evenly spaced (some may be missing): distances up and down may be wrong.');
   } else {
-    slices.sort((a, b) => a.order - b.order); sz = pm0.spacingBetween || h0.spacingBetween || pm0.sliceThickness || h0.sliceThickness || sx;
-    warnings.push('The files do not give slice positions: they are stacked in their numbered order.');
+    // No positions in the files: the numbered order is all there is to go by. The CBCT units that write such files (one file,
+    // every slice a frame, no positions) number the slices from the top of the head down, so the first is taken as the top:
+    // where the slices' own normal points up, the stack runs against the numbers. That is a guess (guessed: true below), and
+    // flipStack turns the scan over if it is wrong.
+    slices.sort((a, b) => a.order - b.order); if (Math.abs(Nn[2]) > 0.7 && Nn[2] > 0) slices.reverse(); guessed = true;
+    sz = pm0.spacingBetween || h0.spacingBetween || pm0.sliceThickness || h0.sliceThickness || sx;
+    warnings.push('The files do not say where each slice lies: the first slice is taken as the top. If the scan is upside-down, turn it over with “Flip top to bottom”.');
   }
   const nz = slices.length; if (nz < 2) throw new Error('Only one slice was found: a CBCT volume needs the whole series.');
   if (nx * ny * nz > MAX_VOXELS) throw new Error(`This scan is too large to open here (${Math.round(nx * ny * nz / 1e6)} million voxels; the limit is ${MAX_VOXELS / 1e6} million).`);
@@ -526,6 +532,7 @@ export async function loadVolume(series, onProgress) {
   }
   if (clipped) warnings.push('Some values were outside the range that can be shown and were clipped.');
   let vol = { data, dims: [nx, ny, nz], spacing: [sx, sy, sz], origin: slices[0].ipp ? slices[0].ipp.slice() : [0, 0, 0], min, max, shift, modality: series.modality, date: series.date, compression: series.compression, warnings };
+  if (guessed) vol.guessed = true;
   vol = reorient(vol, [R, C, Nn]);
   return vol;
 }
@@ -1916,3 +1923,229 @@ export function taubin(mesh, iters = 6, lambda = 0.5, mu = -0.53) {
 }
 /** move every vertex out along its normal by dist mm (a uniform enlargement for small dist on a smooth closed mesh) */
 export function offsetMesh(mesh, dist) { if (!dist) return mesh; const N = vertexNormalsOf(mesh), P = mesh.positions; for (let v = 0; v < P.length; v++) P[v] += N[v] * dist; return mesh; }
+
+// ───────────────────────────── the trained tooth model ─────────────────────────────
+// The CBCT tab can outline the tapped tooth with a neural network in place of the rules of trackTooth: the "instance" network
+// of ToothSeg (Isensee, van Nistelrooij, Krämer, Vinayahalingam and others, 2025; weights CC BY 4.0), trained on the ToothFairy2
+// scans to mark every voxel of a 0.2 mm grid as background, the middle of a tooth ("centre") or its 0.6 mm rim ("border").
+// The network itself runs elsewhere (a worker with ONNX Runtime: see toothseg/ beside the CBCT page). What is here is
+// everything round it, as plain code the tests can check: the cube of scan handed to it (modelFrame, modelCube), the teeth made
+// from its answer (modelTeeth), the tapped one of them parted from a tooth it is joined to (modelTooth), and the tooth result,
+// as from segmentTooth, made from that (toothFromMask) — so the replica and the canal finder work from it unchanged.
+export const TOOTH_MODEL = { h: 0.2, lo: -58.305023384094184, hi: 4021, mean: 1907.0513121865397, std: 670.6687916924831, soft: 40, dentine: 1750,
+  credit: 'ToothSeg (Isensee, van Nistelrooij, Krämer, Vinayahalingam and others; weights CC BY 4.0), trained on the ToothFairy2 scans (CC BY-SA)' };
+
+/**
+ * flipStack(vol) → the same scan with its slices in the opposite order, turned over in place (no copy of the voxels). For a
+ * scan whose files did not say which way up it is (vol.guessed) and was stacked the wrong way.
+ */
+export function flipStack(vol) {
+  const [nx, ny, nz] = vol.dims, sl = nx * ny, d = vol.data, tmp = new Int16Array(sl);
+  for (let k = 0; k < nz >> 1; k++) { const a = k * sl, b = (nz - 1 - k) * sl; tmp.set(d.subarray(a, a + sl)); d.copyWithin(a, b, b + sl); d.set(tmp, b); }
+  return { ...vol, flipped: !vol.flipped };
+}
+
+/**
+ * modelMap(vol, levels, P) → [gain, offset] | null: how the scan's values (data + shift) are put on the CT-like scale the
+ * network was trained on, v·gain + offset. null (as they are) when the tooth's own levels — levels: { dentine, soft } in
+ * data units, from segmentTooth — are where a CT has them; otherwise soft tissue is sent to 40 and dentine to 1750. With no
+ * levels, a scan that is not CT-like at all (P = windowPresets(vol)) is stretched as its window presets are.
+ */
+export function modelMap(vol, levels = null, P = null) {
+  const M = TOOTH_MODEL, sh = vol.shift || 0;
+  if (levels && levels.dentine > levels.soft + 100) {
+    const dn = levels.dentine + sh, so = levels.soft + sh; if (dn >= 900 && dn <= 2600 && so >= -300 && so <= 400) return null;
+    const g = (M.dentine - M.soft) / (dn - so); return [g, M.soft - g * so];
+  }
+  P = P || windowPresets(vol); if (P.hu) return null;
+  // (windowPresets: value = a + (HU-like + 1000)·k, soft at 40 and the bone window's level at 700)
+  const k = (P.bone.l - P.soft.l) / 660; if (!(k > 0)) return null; return [1 / k, 40 - (P.soft.l + sh) / k];
+}
+
+/**
+ * modelFrame(vol, seed, rules) → { centre, n }: the cube of scan handed to the network for the tooth tapped at seed (patient
+ * mm). With the tooth the rules found (rules: segmentTooth's result) it is centred on that and reaches 4½ mm past it all
+ * round, so that a root the rules cut short is still inside; without, it is 25.6 × 25.6 × 32 mm round the tap. n = [n0, n1, n2]
+ * voxels of 0.2 mm, in sizes the network takes (multiples of 32 across the slices, of 16 along them), about 2.9 million voxels
+ * at most; the tap is kept at least 3 mm inside.
+ */
+export function modelFrame(vol, seed, rules = null, o = {}) {
+  const h = TOOTH_MODEL.h, ok = !!(rules && !rules.error && rules.lo && rules.hi), pad = o.pad ?? 4.5;
+  const ext = ok ? [0, 1, 2].map((a) => rules.hi[a] - rules.lo[a]) : [25.6 - 2 * pad, 25.6 - 2 * pad, 32 - 2 * pad];
+  const centre = ok ? [0, 1, 2].map((a) => (rules.lo[a] + rules.hi[a]) / 2) : seed.slice(0, 3);
+  const n = [0, 1, 2].map((a) => { const m = a === 2 ? 16 : 32; return Math.max(96, Math.min(a === 2 ? 176 : 160, Math.ceil((ext[a] + 2 * pad) / h / m - 1e-6) * m)); });
+  while (n[0] * n[1] * n[2] > 2.9e6) { const a = n[2] > 128 ? 2 : n[0] >= n[1] ? 0 : 1; n[a] -= a === 2 ? 16 : 32; }
+  for (let a = 0; a < 3; a++) { const half = Math.max(0, (n[a] - 1) / 2 * h - 3); centre[a] = Math.max(seed[a] - half, Math.min(seed[a] + half, centre[a])); }
+  return { centre, n };
+}
+
+/**
+ * modelCube(vol, centre, n, map) → { x: Float32Array (n0·n1·n2, x fastest), n, o, h }: the scan round centre on the network's
+ * own 0.2 mm grid, o the patient position of its first voxel. The cube is first moved onto a voxel of the scan, so a 0.2 mm
+ * scan is copied as it is rather than blurred; any other is read between its voxels (trilinear; past the scan's edge the edge
+ * is repeated). The values (data + shift, then map = [gain, offset] if given) are put on the network's scale: clipped to its
+ * range, less its mean, over its spread.
+ */
+export function modelCube(vol, centre, n, map = null) {
+  const M = TOOTH_MODEL, h = M.h, dims = vol.dims, sp = vol.spacing, org = vol.origin, d = vol.data, sh = vol.shift || 0, NX = dims[0], NY = dims[1];
+  const o = [0, 1, 2].map((a) => org[a] + Math.round((centre[a] - (n[a] - 1) / 2 * h - org[a]) / sp[a]) * sp[a]);
+  const axis = (a) => { const N = dims[a], i0 = new Int32Array(n[a]), i1 = new Int32Array(n[a]), w = new Float32Array(n[a]);
+    for (let q = 0; q < n[a]; q++) { const f = Math.max(0, Math.min(N - 1, (o[a] + q * h - org[a]) / sp[a])), i = Math.min(N - 1, Math.floor(f + 1e-9)); i0[q] = i; i1[q] = Math.min(N - 1, i + 1); const t = f - i; w[q] = t < 1e-6 ? 0 : t; } return [i0, i1, w]; };
+  const [xa, xb, xw] = axis(0), [ya, yb, yw] = axis(1), [za, zb, zw] = axis(2), x = new Float32Array(n[0] * n[1] * n[2]), g = map ? map[0] : 1, b = (map ? map[1] : 0) + g * sh; let q = 0;
+  for (let k = 0; k < n[2]; k++) { const k0 = za[k] * NX * NY, k1 = zb[k] * NX * NY, tz = zw[k];
+    for (let j = 0; j < n[1]; j++) { const r00 = k0 + ya[j] * NX, r01 = k0 + yb[j] * NX, r10 = k1 + ya[j] * NX, r11 = k1 + yb[j] * NX, ty = yw[j];
+      for (let i = 0; i < n[0]; i++, q++) { const a0 = xa[i], a1 = xb[i], tx = xw[i];
+        let v = tx || ty || tz ? ((d[r00 + a0] * (1 - tx) + d[r00 + a1] * tx) * (1 - ty) + (d[r01 + a0] * (1 - tx) + d[r01 + a1] * tx) * ty) * (1 - tz) + ((d[r10 + a0] * (1 - tx) + d[r10 + a1] * tx) * (1 - ty) + (d[r11 + a0] * (1 - tx) + d[r11 + a1] * tx) * ty) * tz : d[r00 + a0];
+        v = v * g + b; x[q] = ((v < M.lo ? M.lo : v > M.hi ? M.hi : v) - M.mean) / M.std; } } }
+  return { x, n: n.slice(), o, h };
+}
+
+/** the six neighbours of voxel q of an n0 × n1 × n2 grid (x fastest) that lie inside it, written into out → how many */
+function six(q, n0, n1, n2, out) {
+  const sl = n0 * n1, i = q % n0, j = ((q / n0) | 0) % n1, k = (q / sl) | 0; let c = 0;
+  if (i > 0) out[c++] = q - 1; if (i < n0 - 1) out[c++] = q + 1; if (j > 0) out[c++] = q - n0; if (j < n1 - 1) out[c++] = q + n0; if (k > 0) out[c++] = q - sl; if (k < n2 - 1) out[c++] = q + sl;
+  return c;
+}
+/** joined-up blocks (faces touching) of the voxels where is(q), numbered from 1 in the order they are met → { ids, sizes } */
+function blocks6(n, is) {
+  const [n0, n1, n2] = n, N = n0 * n1 * n2, ids = new Uint16Array(N), st = new Int32Array(N), nb = new Int32Array(6), sizes = [0];
+  for (let q0 = 0; q0 < N; q0++) { if (ids[q0] || !is(q0) || sizes.length > 65000) continue; const L = sizes.length; let c = 0, top = 0; st[top++] = q0; ids[q0] = L;
+    while (top) { const q = st[--top]; c++; const m = six(q, n0, n1, n2, nb); for (let t = 0; t < m; t++) { const u = nb[t]; if (!ids[u] && is(u)) { ids[u] = L; st[top++] = u; } } }
+    sizes.push(c); }
+  return { ids, sizes };
+}
+/** numbered voxels spread, a layer of one voxel at a time (at most `layers`), into the voxels where may(q) that have no number
+ *  yet; a voxel reached by two numbers in the same layer takes the higher */
+function spread6(ids, n, may, layers = Infinity) {
+  const [n0, n1, n2] = n, N = n0 * n1 * n2, nb = new Int32Array(6), mark = new Uint8Array(N); let cur = []; for (let q = 0; q < N; q++) if (ids[q]) cur.push(q);
+  for (let layer = 0; layer < layers && cur.length; layer++) {
+    const cand = []; for (const q of cur) { const m = six(q, n0, n1, n2, nb); for (let t = 0; t < m; t++) { const u = nb[t]; if (!ids[u] && !mark[u] && may(u)) { mark[u] = 1; cand.push(u); } } }
+    const val = new Uint16Array(cand.length); for (let c = 0; c < cand.length; c++) { const m = six(cand[c], n0, n1, n2, nb); let best = 0; for (let t = 0; t < m; t++) if (ids[nb[t]] > best) best = ids[nb[t]]; val[c] = best; }
+    for (let c = 0; c < cand.length; c++) ids[cand[c]] = val[c];
+    cur = cand;
+  }
+  return ids;
+}
+
+/**
+ * modelTeeth(lab, n) → { ids: Uint16Array (0 none, 1… a tooth), count }: the network's answer (per voxel 0 background,
+ * 1 centre, 2 border) as teeth. Every joined-up block of centre voxels of 4 mm³ or more is a tooth; each is grown outwards a
+ * voxel at a time (ten at most) into the border voxels, which go to the tooth that reaches them first.
+ */
+export function modelTeeth(lab, n, o = {}) {
+  const h = TOOTH_MODEL.h, { ids, sizes } = blocks6(n, (q) => lab[q] === 1), min = (o.minCore ?? 4) / (h * h * h), re = new Uint16Array(sizes.length); let count = 0;
+  for (let L = 1; L < sizes.length; L++) if (sizes[L] >= min) re[L] = ++count;
+  for (let q = 0; q < ids.length; q++) if (ids[q]) ids[q] = re[ids[q]];
+  spread6(ids, n, (q) => lab[q] === 2, o.layers ?? 10);
+  return { ids, count };
+}
+
+/**
+ * modelTooth(ids, n, o, seed) → { mask: Uint8Array, id, parted, touches } | { error }: the tooth of modelTeeth at the tap (seed,
+ * patient mm; o the cube's first voxel) — the one the tap is in, else the nearest within 1½ mm.
+ * Where two teeth touch (an upper and a lower tooth biting together) the network may give them one number. Such a tooth is
+ * parted at the narrow bridge: it is shrunk by 0.6, 1.0, 1.4 and then 1.8 mm (city-block) until it falls into two or more
+ * sizeable pieces (each 15% of what is left and 30 mm³), every voxel then goes to the piece that reaches it first, and the
+ * piece at the tap is kept. parted: the sizes of the shrunken pieces (mm³), or null.
+ * touches: for each axis, whether the tooth reaches the cube's first and last layer of voxels (the cube was too small or off-centre).
+ */
+export function modelTooth(ids, n, o, seed) {
+  const [n0, n1, n2] = n, sl = n0 * n1, N = sl * n2, h = TOOTH_MODEL.h, q = [0, 1, 2].map((a) => Math.round((seed[a] - o[a]) / h));
+  if (q.some((v, a) => !(v >= 0 && v < n[a]))) return { error: 'The tap lies outside the part of the scan the model was given.' };
+  const sq = q[0] + n0 * (q[1] + n1 * q[2]); let id = ids[sq];
+  if (!id) { const R = Math.round(1.5 / h); let bd = R * R + 1;
+    for (let k = Math.max(0, q[2] - R); k <= Math.min(n2 - 1, q[2] + R); k++) for (let j = Math.max(0, q[1] - R); j <= Math.min(n1 - 1, q[1] + R); j++) for (let i = Math.max(0, q[0] - R); i <= Math.min(n0 - 1, q[0] + R); i++) {
+      const u = i + n0 * (j + n1 * k); if (!ids[u]) continue; const dd = (i - q[0]) ** 2 + (j - q[1]) ** 2 + (k - q[2]) ** 2; if (dd < bd) { bd = dd; id = ids[u]; } } }
+  if (!id) return { error: 'The model found no tooth where you tapped: tap the middle of the crown.' };
+  let mask = new Uint8Array(N); for (let u = 0; u < N; u++) if (ids[u] === id) mask[u] = 1;
+  // how deep each voxel lies inside the tooth (city-block, in voxels, counted to 10; 255 = deeper still)
+  const depth = new Uint8Array(N), nb = new Int32Array(6); let cur = [];
+  for (let u = 0; u < N; u++) { if (!mask[u]) continue; const m = six(u, n0, n1, n2, nb); let edge = m < 6; for (let t = 0; t < m && !edge; t++) if (!mask[nb[t]]) edge = true; if (edge) { depth[u] = 1; cur.push(u); } }
+  for (let dp = 2; dp <= 10 && cur.length; dp++) { const next = []; for (const u of cur) { const m = six(u, n0, n1, n2, nb); for (let t = 0; t < m; t++) { const w = nb[t]; if (mask[w] && !depth[w]) { depth[w] = dp; next.push(w); } } } cur = next; }
+  for (let u = 0; u < N; u++) if (mask[u] && !depth[u]) depth[u] = 255;
+  let parted = null; const vv = h * h * h;
+  for (const K of [3, 5, 7, 9]) {
+    const { ids: cl, sizes } = blocks6(n, (u) => depth[u] > K); if (sizes.length < 3) continue;
+    let tot = 0; for (let L = 1; L < sizes.length; L++) tot += sizes[L];
+    const big = []; for (let L = 1; L < sizes.length; L++) if (sizes[L] >= 0.15 * tot && sizes[L] * vv >= 30) big.push(L);
+    if (big.length < 2) continue;
+    const keep = new Uint8Array(sizes.length); for (const L of big) keep[L] = 1; for (let u = 0; u < N; u++) if (cl[u] && !keep[cl[u]]) cl[u] = 0;
+    spread6(cl, n, (u) => mask[u] === 1);
+    let piece = mask[sq] ? cl[sq] : 0;
+    if (!piece) { let bd = Infinity; for (let u = 0; u < N; u++) { if (!cl[u]) continue; const i = u % n0, j = ((u / n0) | 0) % n1, k = (u / sl) | 0, dd = (i - q[0]) ** 2 + (j - q[1]) ** 2 + (k - q[2]) ** 2; if (dd < bd) { bd = dd; piece = cl[u]; } } }
+    const m2 = new Uint8Array(N); for (let u = 0; u < N; u++) if (cl[u] === piece) m2[u] = 1; mask = m2;
+    parted = { at: K * h, sizes: big.map((L) => Math.round(sizes[L] * vv)) }; break;
+  }
+  const touches = [[false, false], [false, false], [false, false]];
+  for (let u = 0; u < N; u++) { if (!mask[u]) continue; const i = u % n0, j = ((u / n0) | 0) % n1, k = (u / sl) | 0;
+    if (i === 0) touches[0][0] = true; if (i === n0 - 1) touches[0][1] = true; if (j === 0) touches[1][0] = true; if (j === n1 - 1) touches[1][1] = true; if (k === 0) touches[2][0] = true; if (k === n2 - 1) touches[2][1] = true; }
+  return { mask, id, parted, touches };
+}
+
+/**
+ * toothFromMask(vol, cube, mask, o) → the tooth result, as segmentTooth gives it (with model: true), for a tooth outlined on
+ * another grid: cube { n, o, h } and mask (Uint8Array on it, x fastest), as from modelTooth.
+ * Each voxel of the scan takes the cube voxel nearest to it. o.seeds: the taps (the piece the first is on is kept, or the
+ * largest); o.erase: balls { p, r } cut away, as for segmentTooth; o.not: "not tooth" points, cut away as balls of o.notR
+ * (1 mm); o.rules: segmentTooth's own result for the same tap, whose grey levels are kept (otherwise dentine is the tooth's
+ * median grey and soft tissue o.soft or the scan's soft-tissue window). Pulp spaces are filled.
+ * The threshold T — which sets where the replica's surface sits between a tooth voxel and a darker one beside it — is the grey
+ * half way across the outline that was given (the median over its faces), kept between 30% and 80% of the way from soft tissue
+ * to dentine: the network chooses which edge is the tooth's, the scan's own grey places it.
+ */
+export function toothFromMask(vol, cube, mask, o = {}) {
+  const [n0, n1, n2] = cube.n, h = cube.h || TOOTH_MODEL.h, co = cube.o, [NX, NY, NZ] = vol.dims, [sx, sy, sz] = vol.spacing, org = vol.origin, d = vol.data;
+  let a0 = n0, a1 = -1, b0 = n1, b1 = -1, c0 = n2, c1 = -1;
+  for (let k = 0, u = 0; k < n2; k++) for (let j = 0; j < n1; j++) for (let i = 0; i < n0; i++, u++) if (mask[u]) { if (i < a0) a0 = i; if (i > a1) a1 = i; if (j < b0) b0 = j; if (j > b1) b1 = j; if (k < c0) c0 = k; if (k > c1) c1 = k; }
+  if (a1 < 0) return { error: 'The model found no tooth where you tapped: tap the middle of the crown.' };
+  const lim = (v, N) => Math.max(0, Math.min(N - 1, v));
+  const i0 = lim(Math.floor((co[0] + a0 * h - org[0]) / sx) - 2, NX), i1 = lim(Math.ceil((co[0] + a1 * h - org[0]) / sx) + 2, NX), j0 = lim(Math.floor((co[1] + b0 * h - org[1]) / sy) - 2, NY), j1 = lim(Math.ceil((co[1] + b1 * h - org[1]) / sy) + 2, NY);
+  const k0 = lim(Math.floor((co[2] + c0 * h - org[2]) / sz) - 2, NZ), k1 = lim(Math.ceil((co[2] + c1 * h - org[2]) / sz) + 2, NZ), nx = i1 - i0 + 1, ny = j1 - j0 + 1, nz = k1 - k0 + 1, n = nx * ny * nz;
+  if (nx < 3 || ny < 3 || nz < 3) return { error: 'The model found no tooth where you tapped: tap the middle of the crown.' };
+  const box = { i0, j0, k0, nx, ny, nz }, I = new Int16Array(n), lab = new Uint8Array(n);
+  const near = (m, a, from, sp, lenC) => { const out = new Int32Array(m); for (let t = 0; t < m; t++) { const c = Math.floor((org[a] + (from + t) * sp - co[a]) / h + 0.5); out[t] = c >= 0 && c < lenC ? c : -1; } return out; };
+  const cx = near(nx, 0, i0, sx, n0), cy = near(ny, 1, j0, sy, n1), cz = near(nz, 2, k0, sz, n2);
+  for (let k = 0, q = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++, q++) { I[q] = d[(i0 + i) + NX * ((j0 + j) + NY * (k0 + k))]; if (cx[i] >= 0 && cy[j] >= 0 && cz[k] >= 0 && mask[cx[i] + n0 * (cy[j] + n1 * cz[k])]) lab[q] = 1; }
+  // what was cut away by hand
+  const balls = (o.erase || []).concat((o.not || []).map((p) => ({ p, r: o.notR ?? 1 }))), bi = (x, a) => Math.floor((x - org[a]) / vol.spacing[a]);
+  for (const e of balls) { const r = e.r, p0 = Math.max(0, bi(e.p[0] - r, 0) - i0), p1 = Math.min(nx - 1, bi(e.p[0] + r, 0) + 1 - i0), q0 = Math.max(0, bi(e.p[1] - r, 1) - j0), q1 = Math.min(ny - 1, bi(e.p[1] + r, 1) + 1 - j0), r0 = Math.max(0, bi(e.p[2] - r, 2) - k0), r1 = Math.min(nz - 1, bi(e.p[2] + r, 2) + 1 - k0);
+    for (let k = r0; k <= r1; k++) for (let j = q0; j <= q1; j++) for (let i = p0; i <= p1; i++) { const x = org[0] + (i0 + i) * sx - e.p[0], y = org[1] + (j0 + j) * sy - e.p[1], z = org[2] + (k0 + k) * sz - e.p[2]; if (x * x + y * y + z * z <= r * r) lab[i + nx * (j + ny * k)] = 0; } }
+  // the piece the first tap is on (or the largest), then the pulp filled
+  { const id = new Int32Array(n), st = new Int32Array(n), sizes = [0]; let want = 0;
+    for (let q0 = 0; q0 < n; q0++) { if (!lab[q0] || id[q0]) continue; const L = sizes.length; let c = 0, top = 0; id[q0] = L; st[top++] = q0;
+      while (top) { const q = st[--top], i = q % nx, j = ((q / nx) | 0) % ny, k = (q / (nx * ny)) | 0; c++;
+        for (let cc = -1; cc <= 1; cc++) { const kk = k + cc; if (kk < 0 || kk >= nz) continue; for (let b = -1; b <= 1; b++) { const jj = j + b; if (jj < 0 || jj >= ny) continue; for (let a = -1; a <= 1; a++) { const ii = i + a; if (ii < 0 || ii >= nx) continue; const u = ii + nx * (jj + ny * kk); if (lab[u] && !id[u]) { id[u] = L; st[top++] = u; } } } } }
+      sizes.push(c); }
+    const s = o.seeds && o.seeds[0]; if (s) { const si = Math.round((s[0] - org[0]) / sx) - i0, sj = Math.round((s[1] - org[1]) / sy) - j0, sk = Math.round((s[2] - org[2]) / sz) - k0; if (si >= 0 && sj >= 0 && sk >= 0 && si < nx && sj < ny && sk < nz) want = id[si + nx * (sj + ny * sk)]; }
+    if (!want) for (let L = 1; L < sizes.length; L++) if (!want || sizes[L] > sizes[want]) want = L;
+    for (let q = 0; q < n; q++) if (lab[q] && id[q] !== want) lab[q] = 0; }
+  { const cav = cavities(lab, null, nx, ny, nz); for (let q = 0; q < n; q++) if (cav[q]) lab[q] = 1; }
+  // size, extent and long axis, as in segmentTooth
+  let count = 0; const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], m1 = [0, 0, 0], m2 = [0, 0, 0, 0, 0, 0];
+  for (let k = 0, q = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++, q++) { if (!lab[q]) continue; count++;
+    const x = org[0] + (i0 + i) * sx, y = org[1] + (j0 + j) * sy, z = org[2] + (k0 + k) * sz; if (x < lo[0]) lo[0] = x; if (y < lo[1]) lo[1] = y; if (z < lo[2]) lo[2] = z; if (x > hi[0]) hi[0] = x; if (y > hi[1]) hi[1] = y; if (z > hi[2]) hi[2] = z;
+    m1[0] += x; m1[1] += y; m1[2] += z; m2[0] += x * x; m2[1] += y * y; m2[2] += z * z; m2[3] += x * y; m2[4] += x * z; m2[5] += y * z; }
+  if (!count) return { error: 'Nothing is left of the tooth: undo the last cut.' };
+  const c = m1.map((v) => v / count), Cv = [[m2[0] / count - c[0] * c[0], m2[3] / count - c[0] * c[1], m2[4] / count - c[0] * c[2]], [0, m2[1] / count - c[1] * c[1], m2[5] / count - c[1] * c[2]], [0, 0, m2[2] / count - c[2] * c[2]]]; Cv[1][0] = Cv[0][1]; Cv[2][0] = Cv[0][2]; Cv[2][1] = Cv[1][2];
+  let ax = [0, 0, 1]; for (let it = 0; it < 60; it++) { const v = [0, 1, 2].map((r) => Cv[r][0] * ax[0] + Cv[r][1] * ax[1] + Cv[r][2] * ax[2]), l = Math.hypot(...v) || 1; ax = v.map((x) => x / l); }
+  if (ax[2] < 0) ax = ax.map((x) => -x);
+  let tmin = Infinity, tmax = -Infinity; const tq = new Float32Array(2 * count), vals = new Int16Array(count); let w = 0;
+  for (let k = 0, q = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++, q++) { if (!lab[q]) continue; const t = (org[0] + (i0 + i) * sx - c[0]) * ax[0] + (org[1] + (j0 + j) * sy - c[1]) * ax[1] + (org[2] + (k0 + k) * sz - c[2]) * ax[2]; tq[2 * w] = t; tq[2 * w + 1] = I[q]; vals[w++] = I[q]; if (t < tmin) tmin = t; if (t > tmax) tmax = t; }
+  // the crown is the end with the brighter material (enamel)
+  let up = 0, nu = 0, dn = 0, nd = 0; const qt = (tmax - tmin) / 4; for (let a = 0; a < tq.length; a += 2) { if (tq[a] > tmax - qt) { up += tq[a + 1]; nu++; } else if (tq[a] < tmin + qt) { dn += tq[a + 1]; nd++; } }
+  const crown = (nu ? up / nu : 0) >= (nd ? dn / nd : 0) ? 1 : -1;
+  // grey levels: the rules' own for this tooth, or the tooth's median grey as dentine
+  const R = o.rules && !o.rules.error && o.rules.levels ? o.rules : null; vals.sort();
+  const soft = R ? R.levels.soft : (o.soft ?? windowPresets(vol).soft.l), dentine = R ? R.levels.dentine : vals[count >> 1];
+  const levels = R ? { ...R.levels } : { dentine, enamel: null, contrast: dentine - soft, soft }, ref = R && R.ref != null ? R.ref : dentine;
+  // the grey half way across the outline: over the faces between a tooth voxel and a darker voxel beside it that is not
+  const mids = [], steps = [1, -1, nx, -nx, nx * ny, -nx * ny];
+  for (let k = 1, sl = nx * ny; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) { const q = i + nx * (j + ny * k); if (!lab[q]) continue; for (let t = 0; t < 6; t++) { const u = q + steps[t]; if (!lab[u] && I[u] < I[q]) mids.push((I[q] + I[u]) / 2); } }
+  mids.sort((a, b) => a - b); const C = Math.max(1, dentine - soft);
+  const T = Math.round(mids.length ? Math.max(soft + 0.3 * C, Math.min(soft + 0.8 * C, mids[mids.length >> 1])) : (R ? R.T : soft + 0.55 * C)), dI = Math.max(50, ref - T);
+  // the middle of the crown: of the fifth of the tooth nearest its crown end
+  const top = [0, 0, 0]; { let nT = 0; const cut = crown > 0 ? tmax - (tmax - tmin) / 5 : tmin + (tmax - tmin) / 5;
+    for (let k = 0, q = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++, q++) { if (!lab[q]) continue; const x = org[0] + (i0 + i) * sx, y = org[1] + (j0 + j) * sy, z = org[2] + (k0 + k) * sz, t = (x - c[0]) * ax[0] + (y - c[1]) * ax[1] + (z - c[2]) * ax[2]; if (crown > 0 ? t >= cut : t <= cut) { top[0] += x; top[1] += y; top[2] += z; nT++; } }
+    for (let a = 0; a < 3; a++) top[a] = nT ? top[a] / nT : c[a]; }
+  return { lab, box, count, volume: count * sx * sy * sz, lo, hi, touch: 0, near: 0, T, dI, ref, seedOk: true, axis: ax, centre: c, crown, length: tmax - tmin, ends: [tmin, tmax], top, vol, levels, model: true };
+}

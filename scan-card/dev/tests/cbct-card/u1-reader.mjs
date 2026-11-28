@@ -30,6 +30,15 @@ async function load(name, files) {
     if (n === 'a-explicit' || n === 'c-rle' || n === 'd-jpegll') console.log(`     (${(r.ms / 1000).toFixed(1)} s)`);
   }
   for (const n of ['e-enhanced', 'k-legacymf']) await load(n, [await blobOf(path.join(DATA, n + '.dcm'))]);
+  { // no slice positions in the file: the first frame is taken as the top (so this scan, stored top-down, comes out the right way up), the reader says it guessed, and flipStack turns it over
+    const r = await load('p-mfnopos', [await blobOf(path.join(DATA, 'p-mfnopos.dcm'))]), v = r.vol, t = truth.variants['p-mfnopos'], at = (V, i, j, k) => V.data[i + V.dims[0] * (j + V.dims[1] * k)] + V.shift;
+    ok(v.guessed === true && !v.flipped && v.warnings.some((w) => /first slice is taken as the top/.test(w)), `p-mfnopos: the reader says the slice order was assumed (guessed ${v.guessed}): ${v.warnings.join(' | ')}`);
+    const f = D.flipStack(v), nz = f.dims[2]; let bad = 0; for (const [i, j, k, val] of t.samples) if (at(f, i, j, nz - 1 - k) !== val) bad++;
+    ok(f.flipped === true && f.guessed === true && bad === 0 && f.data === v.data, `flipStack turns it over in place: ${bad} of ${t.samples.length} voxels wrong after the flip (flipped ${f.flipped})`);
+    const g = D.flipStack(f); bad = 0; for (const [i, j, k, val] of t.samples) if (at(g, i, j, k) !== val) bad++;
+    ok(g.flipped === false && bad === 0, `… and back again: ${bad} wrong (flipped ${g.flipped})`);
+    ok(!(await load('k-legacymf', [await blobOf(path.join(DATA, 'k-legacymf.dcm'))])).vol.guessed, 'a file that does give a position is not marked as guessed');
+  }
   { const z = await D.zipEntries(await blobOf(path.join(DATA, 'f-zip.zip'))); ok(z.length === 112, `zip: ${z.length} entries`); await load('f-zip', z); }
   // several series in one go: the largest readable comes first, the JPEG 2000 one is named
   const mix = [...await filesIn('b-implicit-flip'), ...await filesIn('l-j2k'), ...await filesIn('c-rle')];

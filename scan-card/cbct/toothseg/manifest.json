@@ -1,0 +1,42 @@
+{
+ "name": "ToothSeg instance network (ToothFairy2, fold 5, final checkpoint), ONNX, weights stored as 16-bit floats",
+ "version": "2025-02-19-f16-1",
+ "input": "x",
+ "output": "y",
+ "spacing": 0.2,
+ "classes": [
+  "background",
+  "centre",
+  "border"
+ ],
+ "wasm": {
+  "file": "ort-wasm-simd-threaded.wasm",
+  "bytes": 14848852,
+  "sha256": "4b884c203b0fa48d057be3332c65513ff85aa3c5bddd6946acc0fab7ecda001d",
+  "package": "onnxruntime-web 1.31.1"
+ },
+ "model": {
+  "bytes": 61629499,
+  "sha256": "143c6dca284b8b923bc2244781a4f248fae59714420217614e29734cd1ab9f15",
+  "parts": [
+   {
+    "file": "toothseg-inst-f16.part0.bin",
+    "bytes": 16777216
+   },
+   {
+    "file": "toothseg-inst-f16.part1.bin",
+    "bytes": 16777216
+   },
+   {
+    "file": "toothseg-inst-f16.part2.bin",
+    "bytes": 16777216
+   },
+   {
+    "file": "toothseg-inst-f16.part3.bin",
+    "bytes": 11297851
+   }
+  ]
+ },
+ "licence": "weights CC BY 4.0; runtime MIT \u2014 see NOTICE.txt",
+ "source": "https://zenodo.org/records/14893540"
+}

@@ -13,6 +13,7 @@
 //   i-jpegll57/      half · JPEG Lossless (.57) predictor 6 · each frame in 3 fragments · offset table
 //   j-coronal/       half · coronal slices (IOP 1,0,0,0,0,-1) · 0.6 (x) × 0.55 (y) × 0.65 (z) mm
 //   k-legacymf.dcm   half · plain multi-frame (one position + spacing between slices)
+//   p-mfnopos.dcm    half · multi-frame with no slice positions at all, frames stored top-down (the reader has to assume which way up)
 //   n-jpeg8/         half · JPEG baseline, 8 bits (value = stored × 16 − 1200), stored as MONOCHROME1 (dark is high) · lossy: within 3 steps
 //   m-u16/           half · unsigned 16 bits stored, intercept −1200 (fits 16 signed bits as values: no shift wanted)
 //   l-j2k/           3 tiny slices said to be JPEG 2000 (cannot be read: must be named as such)
@@ -92,7 +93,8 @@ function writeMultiframe(file, V, sp, o) {
     // an icon image (with a name in its own items, and pixel data of its own) inside a sequence: it must be stepped over
     els.push([0x00880200, 'SQ', { items: [[[0x00280002, 'US', 1], [0x00280004, 'CS', 'MONOCHROME2'], [0x00280010, 'US', 4], [0x00280011, 'US', 4], [0x00280100, 'US', 8], [0x00280101, 'US', 8], [0x00280102, 'US', 7], [0x00280103, 'US', 0], [0x00100010, 'PN', FAKE.name], [0x7FE00010, 'OB', Buffer.alloc(16, 200)]]] }]);
   } else {
-    els.push([0x00200032, 'DS', s0.ipp.map(ds)], [0x00200037, 'DS', s0.iop.map(ds)], [0x00180050, 'DS', ds(sp[2])], [0x00180088, 'DS', ds(sp[2])], [0x00281052, 'DS', ds(enc.signed ? 0 : enc.intercept)], [0x00281053, 'DS', '1']);
+    if (!o.noPos) els.push([0x00200032, 'DS', s0.ipp.map(ds)]);
+    els.push([0x00200037, 'DS', s0.iop.map(ds)], [0x00180050, 'DS', ds(sp[2])], [0x00180088, 'DS', ds(sp[2])], [0x00281052, 'DS', ds(enc.signed ? 0 : enc.intercept)], [0x00281053, 'DS', '1']);
   }
   fs.writeFileSync(path.join(OUT, file), writeDicom({ ts: o.ts || TS.explicit, sopClass: o.sop, sopInstance: uid(), rows: s0.rows, cols: s0.cols, bits: 16, elements: els, frames: frames.map((s) => stored(s.f, enc)) }));
 }
@@ -122,6 +124,9 @@ writeSeries('h-deflated', half, sp6, { ts: TS.deflated, enc: U12 }); note('h-def
 writeSeries('i-jpegll57', half, sp6, { ts: TS.jpegll57, enc: SIGNED, jpeg: { predictor: 6 }, split: 3, table: true }); note('i-jpegll57', half, sp6);
 writeSeries('j-coronal', half, [0.6, 0.55, 0.65], { ts: TS.explicit, enc: SIGNED, orient: 'coronal' }); note('j-coronal', half, [0.6, 0.55, 0.65]);
 writeMultiframe('k-legacymf.dcm', half, sp6, { enc: U12, sop: '1.2.840.10008.5.1.4.1.1.2' }); note('k-legacymf', half, sp6);
+// one file, every slice a frame, no positions at all, frames from the top of the head down (as some CBCT units write it): which
+// way up it is can only be assumed — the reader takes the first frame as the top and says so (guessed)
+writeMultiframe('p-mfnopos.dcm', half, sp6, { enc: SIGNED, order: 'down', noPos: true, sop: '1.2.840.10008.5.1.4.1.1.2.1' }); note('p-mfnopos', half, sp6, { origin: [0, 0, 0], guessed: true });
 writeSeries('m-u16', half, sp6, { ts: TS.explicit, enc: { signed: false, bits16: true, intercept: -1200 } }); note('m-u16', half, sp6);
 { const tiny = { data: half.data.subarray(0, 32 * 32 * 3), dims: [32, 32, 3], origin: [0, 0, 0] }; writeSeries('l-j2k', tiny, sp6, { ts: TS.j2k, enc: SIGNED }); }
 { // JPEG baseline, 8-bit, MONOCHROME1: stored = 255 − round((v + 1200) / 16)

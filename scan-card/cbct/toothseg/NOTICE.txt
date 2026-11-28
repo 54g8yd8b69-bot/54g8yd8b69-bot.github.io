@@ -1,0 +1,26 @@
+Tooth model pack for the CBCT tab of Scan Card (notile.co.uk)
+
+1. The network (toothseg-inst-f16.part*.bin)
+
+   "Model Checkpoints for ToothSeg: A Self-Correcting Deep Learning Approach for Robust Tooth Instance Segmentation and
+   Numbering in CBCT" — Fabian Isensee, Niels van Nistelrooij, Lars Krämer, Shankeeth Vinayahalingam. Zenodo, 19 February 2025.
+   https://zenodo.org/records/14893540        Code: https://github.com/MIC-DKFZ/ToothSeg (Apache-2.0)
+   Licence of the checkpoints: Creative Commons Attribution 4.0 International (CC BY 4.0),
+   https://creativecommons.org/licenses/by/4.0/
+
+   What is used here: the instance branch only (Dataset123_ToothFairy2fixed_teeth_spacing02_brd3px,
+   nnUNetTrainer__nnUNetPlans__3d_fullres_resample_torch_192_bs8_ctnorm, fold_5/checkpoint_final.pth).
+   Changes made: converted from PyTorch to ONNX (opset 17) with the network unchanged; the large weight tables are stored as
+   16-bit floats and turned back into 32-bit floats when the model loads; the file is cut into parts of 16 MiB.
+   The network is run on a cube of 0.2 mm voxels round one tooth, not over the whole scan, and its answer is turned into
+   teeth by Scan Card's own code (scan-card/src/dicom.js), not by ToothSeg's scripts.
+
+   The checkpoints were trained on the ToothFairy2 dataset (University of Modena and Reggio Emilia with Radboud University;
+   MICCAI 2024 ToothFairy2 challenge), which is released under CC BY-SA: https://ditto.ing.unimore.it/toothfairy2
+
+2. The runtime (ort-wasm-simd-threaded.wasm, and the code bundled into worker.js)
+
+   ONNX Runtime Web 1.31.1 — Copyright (c) Microsoft Corporation. MIT License.
+   https://github.com/microsoft/onnxruntime
+
+Neither is certified medical-device software. The outline the network gives is a planning aid: check it against the scan.

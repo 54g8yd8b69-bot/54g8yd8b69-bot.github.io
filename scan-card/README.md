@@ -81,7 +81,9 @@ to print (not added); clasps are not added yet. Roles `obturator`, `obturator-li
 
 **CBCT.** Opens DICOM on the device (a folder, files, multi-frame files or a zip; uncompressed, deflated, RLE and JPEG
 Lossless, and 12-bit lossy JPEG as i-CAT and other CBCT machines write it; JPEG 2000 and JPEG-LS are named as not read yet) with `dicom.js`, which keeps only technical tags: names, IDs,
-dates of birth and the like are never decoded. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
+dates of birth and the like are never decoded. A scan whose files give no slice positions (one file, every slice a
+frame, as some CBCT units export) cannot say which way up it is: its first slice is taken as the top, the page says the
+order was assumed, and "Flip top to bottom" turns it over. Axial, coronal and sagittal slices with windowing, a 3D view (MIP or
 surface) and a surface STL, a panoramic along a tapped or proposed arch with cross-sections and mm rulers, distance and
 angle. The cross-hair can be turned: drag a round handle on its lines (or `[` / `]`) and the other two slices become
 oblique slices at that angle, square to each other; taps, scrolling, measurements and the tooth overlay follow the turned
@@ -106,7 +108,22 @@ standing upright, it is followed once more from the middle of that crown. A root
 along a plate of bone, may still be followed only part of its length, and where root and bone cannot be told apart its end
 is a guess: the eraser and "Not tooth" taps tidy it, and a tap on the neck of the tooth rather than its biting surface
 gives the outline its best start. A tooth lying across
-the slices (impacted, on its side) is outlined by the older flood from the taps instead. Then a closed replica STL, optionally enlarged and
+the slices (impacted, on its side) is outlined by the older flood from the taps instead.
+"Outline by: Model" draws the outline with a trained network in place of those rules: ToothSeg's instance network
+(Isensee, van Nistelrooij, Krämer, Vinayahalingam and others; weights CC BY 4.0, trained on the ToothFairy2 scans),
+run on the device with ONNX Runtime Web in a worker of its own. It is asked for before anything is fetched: the pack
+(`cbct/toothseg/`, about 76 MB: the engine's WebAssembly and the weights) is downloaded once, checked (size and
+SHA-256) and kept in the browser's store; the scan is never sent anywhere. The network is given a cube of 0.2 mm
+voxels round the tap (centred on the rules' outline, 4½ mm to spare; about a minute on one processor thread) and
+marks each voxel as background, the middle of a tooth or its rim. The middles are the teeth, each grown out into the
+rim; the tapped one becomes the outline, and a tooth the network joined to the one it bites on is parted at the narrow
+bridge between them (the page says when). The rules' outline shows until the model's is ready; the answer is kept with
+the tap, so cuts with the eraser, "Not tooth" (a 1 mm ball) and going back to "Rules" do not run it again. The
+replica's surface is set between voxels at the grey half way across the model's outline. On the two real scans it
+was tried on (0.25 mm and 0.2 mm voxels, from two makes of scanner) its outlines followed the roots to their tips without
+the bumps the rules leave, and the canal finder reached further inside them; it has no ground truth there, it was
+trained on other scanners, and it is not certified medical-device software. In the single-file copy of the suite the
+pack cannot be loaded, and the rules are used. Then a closed replica STL, optionally enlarged and
 with a handle, for preparing the socket in autotransplantation. Root canals: the pulp chamber and canals of the picked
 tooth. A canal narrower than the scan's blur is only a faint dip in the dentine's grey, so two things are done. The wide
 hollows (chamber, wide canals) are cut where the grey is midway between pulp and dentine. Narrow canals are followed
@@ -146,7 +163,10 @@ scan-card/
     articulator.html  obturator.html  cbct.html
     core.js          shared engine: shell, 3D viewer, mesh tools, scan loading, orientation, trim, case file, hub hand-off
     solid.js         scan to watertight solid, booleans, hollowing, lettering (Manifold, WebAssembly)
-    dicom.js         CBCT/DICOM reading (technical tags only), volume tools, the synthetic test phantom
+    dicom.js         CBCT/DICOM reading (technical tags only), volume tools, the synthetic test phantom, and everything
+                     round the trained tooth model (the cube given to it, the teeth made from its answer)
+    toothseg-worker.js   the worker that runs the tooth model (bundled with ONNX Runtime Web into cbct/toothseg/worker.js)
+  cbct/toothseg/   the tooth model's pack: engine .wasm, weights in parts, manifest.json, NOTICE.txt (tools/toothseg/README.md)
   index.html  model/  analysis/  splint/  compare/  prep/  manifest.webmanifest     built for the site: do not edit
   dev/             test harness, tests and conventions (see dev/README.md)
 tools/build_scan_card.py     builds the site pages (and the artifact copy) from src/

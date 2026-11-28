@@ -386,6 +386,29 @@ run({name:'Landing page',fn:async()=>{
     await cb.evaluate(()=>APP.shell.goto('canal'));await cb.waitForFunction(()=>APP.S.canal.seg&&APP.S.canal.mesh,null,{timeout:120000});
     const cn=await cb.evaluate(()=>{const c=APP.S.canal.seg;return{err:c.error||null,vol:c.volume,canals:c.canals,by:c.by,glass:APP.r3objs.tooth.material.type,shown:APP.r3objs.canal.visible}});
     expect(!cn.err&&cn.vol>15&&cn.vol<26&&cn.canals===1&&cn.by==='tooth'&&cn.glass==='ShaderMaterial'&&cn.shown,'CBCT root canals of the demo premolar: '+JSON.stringify(cn));await noErrors(pg)});
+  await test('CBCT: the tooth model runs under the site CSP (the page’s own worker and engine, a stand-in network), and its pack is whole',async()=>{
+    // the real pack: every part there, of the size and SHA-256 its manifest gives, none over GitHub's 100 MB
+    const fs=require('fs'),path=require('path'),crypto=require('crypto'),root=path.resolve(__dirname,'..'),real=path.join(root,'scan-card/cbct/toothseg'),dir=path.join(root,'tests/.toothseg-test'),sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+    const man=JSON.parse(fs.readFileSync(path.join(real,'manifest.json'),'utf8')),wasm=fs.readFileSync(path.join(real,man.wasm.file)),parts=Buffer.concat(man.model.parts.map(p=>fs.readFileSync(path.join(real,p.file))));
+    expect(parts.length===man.model.bytes&&sha(parts)===man.model.sha256&&wasm.length===man.wasm.bytes&&sha(wasm)===man.wasm.sha256&&man.model.parts.every(p=>p.bytes<100e6)&&fs.existsSync(path.join(real,'worker.js'))&&fs.existsSync(path.join(real,'NOTICE.txt')),'the tooth model pack does not match its manifest');
+    // a stand-in pack made here: the same worker and engine, with a 548-byte network that is right on a made-up scan (solid teeth in air)
+    const model=fs.readFileSync(path.join(root,'scan-card/dev/tests/cbct-card/toothseg-test/fake.onnx'));fs.mkdirSync(dir,{recursive:true});fs.copyFileSync(path.join(real,'worker.js'),path.join(dir,'worker.js'));fs.writeFileSync(path.join(dir,'fake.onnx'),model);
+    fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({version:'test-1',input:'x',output:'y',wasm:{file:'/scan-card/cbct/toothseg/'+man.wasm.file,bytes:wasm.length,sha256:sha(wasm)},model:{bytes:model.length,sha256:sha(model),parts:[{file:'fake.onnx',bytes:model.length}]}}));
+    const pg=await page('/scan-card/cbct/');await pg.addInitScript(()=>{window.TOOTHSEG={base:'/tests/.toothseg-test/'}});await pg.reload();await pg.waitForFunction(()=>window.APP&&APP.loadDemo&&APP.MODEL,null,{timeout:60000});
+    await pg.evaluate(()=>APP.loadDemo());await pg.waitForFunction(()=>APP.S.vol&&APP.S.demo,null,{timeout:120000});
+    const tv=await pg.evaluate(()=>{const V=APP.S.vol,D=APP.D,[nx,ny]=V.dims,h=V.spacing[0],o=V.origin,d=V.data;let v45=0;d.fill(-1000);
+      for(const t of APP.S.demo.teeth){const f=D.phantomToothField(t),R=Math.max(t.md,t.bl)/2+2,lo=[t.base[0]-R,t.base[1]-R,t.base[2]-t.root-1.5],hi=[t.base[0]+R,t.base[1]+R,t.base[2]+t.crown+1.5],a0=lo.map((v,q)=>Math.max(0,Math.floor((v-o[q])/h))),a1=hi.map((v,q)=>Math.min(V.dims[q]-1,Math.ceil((v-o[q])/h)));let sum=0;
+        for(let k=a0[2];k<=a1[2];k++)for(let j=a0[1];j<=a1[1];j++)for(let i=a0[0];i<=a1[0];i++){const v=Math.round(-1000+2700*Math.max(0,Math.min(1,0.5-f(o[0]+i*h,o[1]+j*h,o[2]+k*h)/h))),q=i+nx*(j+ny*k);sum+=(v+1000)/2700;if(v>d[q])d[q]=v}
+        if(String(t.name)==='45')v45=sum*h*h*h}
+      V.min=-1000;V.max=1700;const demo=APP.S.demo;APP.setVolume(V);APP.S.demo=demo;APP.shell.goto('tooth');return v45});
+    await pg.click('#dBy [data-v=model]');await pg.waitForFunction(()=>APP.MODEL.state==='ask',null,{timeout:60000});
+    expect(/one-off download/.test(await pg.textContent('#dModel'))&&!(await pg.evaluate(()=>APP.MODEL.worker)),'“Model” did not ask before fetching: '+await pg.textContent('#dModel'));
+    await pg.click('#dGet');await pg.waitForFunction(()=>APP.MODEL.state==='ready'||APP.MODEL.state==='error'||APP.MODEL.state==='none',null,{timeout:120000});
+    expect(await pg.evaluate(()=>APP.MODEL.state)==='ready','the model did not start: '+await pg.textContent('#dModel'));
+    await pg.evaluate(()=>{const t=APP.S.demo.teeth.find(x=>String(x.name)==='45'),p=[0,1,2].map(q=>t.base[q]+t.w[q]*t.crown*0.3),T=APP.S.tooth;T.seeds=[p];T.not=[];T.erase=[];T.T=1000;T.fitted=false;T.roi={shape:'cyl',c:[p[0],p[1]],r:7,z0:p[2]-20,z1:p[2]+20};return APP.segment()});
+    await pg.waitForFunction(()=>APP.S.tooth.seg&&APP.S.tooth.seg.model&&!APP.MODEL.run,null,{timeout:180000});
+    const r=await pg.evaluate(()=>({vol:APP.S.tooth.seg.volume,kept:APP.MODEL.info.kept,stored:APP.MODEL.info.stored,out:document.querySelector('#dOut').textContent,rows:document.getElementById('dR').closest('.row').hidden}));
+    expect(Math.abs(r.vol/tv-1)<0.05&&r.stored&&r.kept===false&&/model/.test(r.out)&&r.rows,'CBCT model outline: '+JSON.stringify(r)+' against '+tv);await noErrors(pg)});
   await test('Scan Card’s tools still open on their own, and their logo leads back to Scan Card',async()=>{const pg=await page('/scan-card/model/');
     await pg.waitForFunction(()=>window.APP&&APP.scans,null,{timeout:20000});
     expect(await pg.evaluate(()=>!APP.N.EMBED&&!APP.shell.stepEl('load').hidden&&document.querySelectorAll('#topBtns button').length===2),'Model Card on its own should have its own loading steps');
